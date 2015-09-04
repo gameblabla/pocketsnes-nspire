@@ -421,7 +421,7 @@ s32 FileSelect()
 	
 	if (FileScan() != SAL_OK)
 	{
-		strcpy(mRomDir, sal_DirectoryGetUser());
+		strcpy(mRomDir, "/documents/ndless/.pocketsnes/");
 		if (FileScan() != SAL_OK)
 		{
 			MenuMessageBox("Home directory inaccessible","","",MENU_MESSAGE_BOX_MODE_PAUSE);

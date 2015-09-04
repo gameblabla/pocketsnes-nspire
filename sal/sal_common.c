@@ -649,14 +649,12 @@ const char * sal_DirectoryGetHome(void)
 {
 	static char home [SAL_MAX_PATH];
 
-	if (!home[0]) {
-		char *env_home = getenv("HOME");
-		strcpy(home, env_home);
-		sal_DirectoryCombine(home, ".snes96_snapshots");
+	snprintf(home, sizeof(home), "%s", "/documents/ndless/");
+	sal_DirectoryCombine(home, ".pocketsnes");
 
-		/* Create the directory if it didn't already exist */
-		mkdir(home, 0755);
-	}
+	/* Create the directory if it didn't already exist */
+	mkdir(home, 0755);
+	
 	return home;
 }
 

@@ -20,7 +20,7 @@ endif
 
 INCLUDE = -I pocketsnes -I sal/linux/include -I sal/include -I pocketsnes/include -I menu -I pocketsnes/linux -I pocketsnes/snes9x
 
-CFLAGS = $(INCLUDE) -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -O2 -fomit-frame-pointer -DNO_ROM_BROWSER -I/usr/include/SDL
+CFLAGS = $(INCLUDE) -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -Os -fomit-frame-pointer -marm -march=armv5te -mtune=arm926ej-s -DNO_ROM_BROWSER -I/usr/include/SDL
 
 CXXFLAGS = $(CFLAGS)
 
