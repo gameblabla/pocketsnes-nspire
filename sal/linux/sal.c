@@ -88,13 +88,13 @@ static u32 sal_Input(int held)
 	if (isKeyPressed(KEY_NSPIRE_MINUS) ) 
 		inputHeld|=SAL_INPUT_SELECT;
 		
-	if ( isKeyPressed(KEY_NSPIRE_UP) )
+	if ( isKeyPressed(KEY_NSPIRE_UP) || isKeyPressed(KEY_NSPIRE_8))
 		inputHeld|=SAL_INPUT_UP;
-	if ( isKeyPressed(KEY_NSPIRE_DOWN) )
+	if ( isKeyPressed(KEY_NSPIRE_DOWN) || isKeyPressed(KEY_NSPIRE_5))
 		inputHeld|=SAL_INPUT_DOWN;
-	if ( isKeyPressed(KEY_NSPIRE_LEFT) )
+	if ( isKeyPressed(KEY_NSPIRE_LEFT)  || isKeyPressed(KEY_NSPIRE_4))
 		inputHeld|=SAL_INPUT_LEFT;
-	if ( isKeyPressed(KEY_NSPIRE_RIGHT) )
+	if ( isKeyPressed(KEY_NSPIRE_RIGHT) || isKeyPressed(KEY_NSPIRE_6) )
 		inputHeld|=SAL_INPUT_RIGHT;
 		
 	if ( isKeyPressed(KEY_NSPIRE_ESC) )
