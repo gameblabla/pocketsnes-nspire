@@ -1,0 +1,6 @@
+*.o 
+*.t
+PocketSNES
+pocketsnes/snes9x/*.o
+sal/*.o
+sal/linux/*.o

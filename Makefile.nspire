@@ -20,7 +20,7 @@ endif
 
 INCLUDE = -Dndlib -I pocketsnes -Isal/linux/ -Isal/ -I sal/linux/include -I sal/include -I pocketsnes/include -I menu -I pocketsnes/linux -I pocketsnes/snes9x
 
-CFLAGS = $(INCLUDE) -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -Os -fomit-frame-pointer -marm -march=armv5te -mtune=arm926ej-s -DNO_ROM_BROWSER -I/usr/include/SDL
+CFLAGS = $(INCLUDE) -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -O2 -fomit-frame-pointer -marm -march=armv5te -mtune=arm926ej-s -DNO_ROM_BROWSER -I/usr/include/SDL
 
 CXXFLAGS = $(CFLAGS)
 
@@ -40,11 +40,14 @@ all : $(TARGET)
 .PHONY: opk
 opk: $(TARGET).opk
 
-all: $(TARGET) gen
+all: $(TARGET) gen pack
 
 gen :
 	genzehn --input PocketSNES --output pocket.t --compress
 	make-prg pocket.t pocketsnes.tns
+	
+pack:
+	zip -r  PocketSNES-nspire.zip pocketsnes.tns README.md
 
 $(TARGET) : $(OBJS)
 	$(SUM) "  LD      $@"

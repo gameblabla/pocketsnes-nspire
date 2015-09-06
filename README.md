@@ -21,15 +21,18 @@ No games except test cartridges for now are known to do this.
 CONTROLS
 ==========
 
-TAB = A
-CTRL = B
-MENU = X
+CTRL = A
+
+SHIFT = B
+
+VAR = X
+
 DEL = Y
 
-L = PLUS
-R = MINUS
+TAB = L
+MENU= R
 
-START = ENTER
-SELECT = SPACE BAR (all the way down on your calc, close to z)
+ENTER = START
+MINUS = SELECT
 
 ESC = EXIT
