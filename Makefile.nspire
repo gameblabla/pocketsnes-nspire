@@ -40,7 +40,7 @@ all : $(TARGET)
 .PHONY: opk
 opk: $(TARGET).opk
 
-all: $(TARGET) gen pack
+all: $(TARGET) gen pack removeth
 
 gen :
 	genzehn --input PocketSNES --output pocket.t --compress
@@ -48,6 +48,10 @@ gen :
 	
 pack:
 	zip -r  PocketSNES-nspire.zip pocketsnes.tns README.md
+
+removeth:
+	rm PocketSNES
+	rm pocket.t
 
 $(TARGET) : $(OBJS)
 	$(SUM) "  LD      $@"
