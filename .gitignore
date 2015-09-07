@@ -3,6 +3,7 @@
 *.sfc
 PocketSNES
 pocketsnes/snes9x/*.o
+menu/*.o
 sal/*.o
 sal/linux/*.o
 sal/prizm/*.o
