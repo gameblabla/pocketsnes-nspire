@@ -838,7 +838,8 @@ void S9xEndScreenRefresh ()
 		);
     }
 
-    S9xApplyCheats ();
+	/*gameblabla*/
+   /* S9xApplyCheats ();*/
 #ifdef DEBUGGER
     if (CPU.Flags & FRAME_ADVANCE_FLAG)
     {

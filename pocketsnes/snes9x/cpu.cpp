@@ -188,15 +188,20 @@ void S9xReset (void)
     S9xResetCPU ();
     S9xResetPPU ();
     S9xResetSRTC ();
-    if (Settings.SDD1)
+    
+    
+    /*GAMEBLABLA SDD1*/
+#ifdef SDD1_DECOMP
+	if (Settings.SDD1)
         S9xResetSDD1 ();
+#endif
 
     S9xResetDMA ();
     S9xResetDSP1 ();
     S9xSA1Init ();
     if (Settings.C4)
         S9xInitC4 ();
-    S9xInitCheatData ();
+    /*S9xInitCheatData ();*/
 	if(Settings.OBC1)
 		ResetOBC1();
 
@@ -218,8 +223,11 @@ void S9xSoftReset (void)
     S9xResetCPU ();
     S9xSoftResetPPU ();
     S9xResetSRTC ();
-    if (Settings.SDD1)
+    /*GAMEBLABLA SDD1*/
+#ifdef SDD1_DECOMP
+	if (Settings.SDD1)
         S9xResetSDD1 ();
+#endif
 
     S9xResetDMA ();
     S9xResetDSP1 ();
@@ -228,7 +236,8 @@ void S9xSoftReset (void)
     S9xSA1Init ();
     if (Settings.C4)
         S9xInitC4 ();
-    S9xInitCheatData ();
+    /*GAMEBLABLA*/
+	/*S9xInitCheatData ();*/
 
 //    Settings.Paused = FALSE;
 }

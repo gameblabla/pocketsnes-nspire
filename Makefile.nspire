@@ -7,9 +7,6 @@ CC  := nspire-gcc
 CXX := nspire-g++
 STRIP := 
 
-SYSROOT := 
-SDL_LIBS := 
-
 ifdef V
 	CMD:=
 	SUM:=@\#
@@ -19,12 +16,10 @@ else
 endif
 
 INCLUDE = -Dndlib -I pocketsnes -Isal/linux/ -Isal/ -I sal/linux/include -I sal/include -I pocketsnes/include -I menu -I pocketsnes/linux -I pocketsnes/snes9x
-
-CFLAGS = $(INCLUDE) -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -O2 -fomit-frame-pointer -marm -march=armv5te -mtune=arm926ej-s -DNO_ROM_BROWSER -I/usr/include/SDL
+CFLAGS = -Os -nostdlib -fdata-sections -ffunction-sections -fomit-frame-pointer -marm -march=armv5te -mtune=arm926ej-s -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -DNO_ROM_BROWSER $(INCLUDE)
 
 CXXFLAGS = $(CFLAGS)
-
-LDFLAGS = $(CXXFLAGS) -lz -lpng -lm -lstdc++ $(SDL_LIBS)
+LDFLAGS = $(CXXFLAGS)  -nostdlib -Wl,--gc-sections -Wl,--as-needed -flto -lm
 
 # Find all source files
 SOURCE = pocketsnes/snes9x menu sal/linux sal
@@ -34,13 +29,9 @@ OBJ_CPP = $(patsubst %.cpp, %.o, $(SRC_CPP))
 OBJ_C   = $(patsubst %.c, %.o, $(SRC_C))
 OBJS    = $(OBJ_CPP) $(OBJ_C)
 
-.PHONY : all
-all : $(TARGET)
-
-.PHONY: opk
-opk: $(TARGET).opk
 
 all: $(TARGET) gen pack removeth
+
 
 gen :
 	genzehn --input PocketSNES --output pocket.t --compress
@@ -65,7 +56,6 @@ $(TARGET) : $(OBJS)
 	$(SUM) "  CXX     $@"
 	$(CMD)$(CXX) $(CFLAGS) -c $< -o $@
 
-.PHONY : clean
 clean :
 	$(SUM) "  CLEAN   ."
 	$(CMD)rm -f $(OBJS) $(TARGET)

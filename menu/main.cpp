@@ -12,7 +12,6 @@
 #include "gfx.h"
 #include "soundux.h"
 #include "snapshot.h"
-#include "scaler.h"
 
 #define SNES_SCREEN_WIDTH  256
 #define SNES_SCREEN_HEIGHT 192
@@ -28,8 +27,10 @@ static char mRomName[SAL_MAX_PATH]={""};
 static u32 mLastRate=0;
 
 static s8 mFpsDisplay[16]={""};
+/*
 static s8 mVolumeDisplay[16]={""};
 static s8 mQuickStateDisplay[16]={""};
+*/
 static u32 mFps=0;
 static u32 mLastTimer=0;
 static u32 mEnterMenu=0;
@@ -40,6 +41,8 @@ static u32 mVolumeTimer=0;
 static u32 mVolumeDisplayTimer=0;
 static u32 mFramesCleared=0;
 static u32 mInMenu=0;
+
+static char tempromname[255];
 
 static int S9xCompareSDD1IndexEntries (const void *p1, const void *p2)
 {
@@ -111,22 +114,6 @@ void S9xCloseSnapshotFile (STREAM file)
 	CLOSE_STREAM(file);
 }
 
-void S9xMessage (int /* type */, int /* number */, const char *message)
-{
-	//MenuMessageBox("PocketSnes has encountered an error",(s8*)message,"",MENU_MESSAGE_BOX_MODE_PAUSE);
-}
-
-void erk (void)
-{
-      S9xMessage (0,0, "Erk!");
-}
-
-const char *osd_GetPackDir(void)
-{
-      S9xMessage (0,0,"get pack dir");
-      return ".";
-}
-
 void S9xLoadSDD1Data (void)
 {
 
@@ -145,16 +132,6 @@ bool8_32 S9xInitUpdate ()
 
 bool8_32 S9xDeinitUpdate (int Width, int Height, bool8_32)
 {
-	if(mInMenu) return TRUE;
-
-	// After returning from the menu, clear the background of 3 frames.
-	// This prevents remnants of the menu from appearing.
-	if (mFramesCleared < 3)
-	{
-		sal_VideoClear(0);
-		mFramesCleared++;
-	}
-
 	// If the height changed from 224 to 239, or from 239 to 224,
 	// possibly change the resolution.
 	bool PAL = !!(Memory.FillRAM[0x2133] & 4);
@@ -164,45 +141,23 @@ bool8_32 S9xDeinitUpdate (int Width, int Height, bool8_32)
 		LastPAL = PAL;
 	}
 
-	switch (mMenuOptions.fullScreen)
+	u32 h = PAL ? SNES_HEIGHT_EXTENDED : SNES_HEIGHT;
+	u32 y, pitch = sal_VideoGetPitch();
+	u8 *src = (u8*) IntermediateScreen, *dst = (u8*) sal_VideoGetBuffer()
+		+ ((sal_VideoGetWidth() - SNES_WIDTH) / 2) * sizeof(u16)
+		+ ((sal_VideoGetHeight() - h) / 2) * pitch;
+	for (y = 0; y < h; y++)
 	{
-		case 0: /* No scaling */
-		case 3: /* Hardware scaling */
-		{
-			u32 h = PAL ? SNES_HEIGHT_EXTENDED : SNES_HEIGHT;
-			u32 y, pitch = sal_VideoGetPitch();
-			u8 *src = (u8*) IntermediateScreen, *dst = (u8*) sal_VideoGetBuffer()
-				+ ((sal_VideoGetWidth() - SNES_WIDTH) / 2) * sizeof(u16)
-				+ ((sal_VideoGetHeight() - h) / 2) * pitch;
-			for (y = 0; y < h; y++)
-			{
-				memcpy(dst, src, SNES_WIDTH * sizeof(u16));
-				src += SNES_WIDTH * sizeof(u16);
-				dst += pitch;
-			}
-			break;
-		}
-
-		case 1: /* Fast software scaling */
-			if (PAL) {
-				upscale_256x240_to_320x240((uint32_t*) sal_VideoGetBuffer(), (uint32_t*) IntermediateScreen, SNES_WIDTH);
-			} else {
-				upscale_p((uint32_t*) sal_VideoGetBuffer(), (uint32_t*) IntermediateScreen, SNES_WIDTH);
-			}
-			break;
-
-		case 2: /* Smooth software scaling */
-			if (PAL) {
-				upscale_256x240_to_320x240_bilinearish((uint32_t*) sal_VideoGetBuffer() + 160, (uint32_t*) IntermediateScreen, SNES_WIDTH);
-			} else {
-				upscale_256x224_to_320x240_bilinearish((uint32_t*) sal_VideoGetBuffer() + 160, (uint32_t*) IntermediateScreen, SNES_WIDTH);
-			}
-			break;
+		memcpy(dst, src, SNES_WIDTH * sizeof(u16));
+		src += SNES_WIDTH * sizeof(u16);
+		dst += pitch;
 	}
 
+#ifdef SHOWFPS
 	u32 newTimer;
-	if (mMenuOptions.showFps) 
-	{
+	
+	/*if (mMenuOptions.showFps) 
+	{*/
 		mFps++;
 		newTimer=sal_TimerRead();
 		if(newTimer-mLastTimer>Memory.ROMFramesPerSecond)
@@ -214,19 +169,13 @@ bool8_32 S9xDeinitUpdate (int Width, int Height, bool8_32)
 		
 		sal_VideoDrawRect(0,0,5*8,8,SAL_RGB(0,0,0));
 		sal_VideoPrint(0,0,mFpsDisplay,SAL_RGB(31,31,31));
-	}
-
-	if(mVolumeDisplayTimer>0)
-	{
-		sal_VideoDrawRect(100,0,8*8,8,SAL_RGB(0,0,0));
-		sal_VideoPrint(100,0,mVolumeDisplay,SAL_RGB(31,31,31));
-	}
-
-	if(mQuickStateTimer>0)
+	//}
+#endif
+	/*if(mQuickStateTimer>0)
 	{
 		sal_VideoDrawRect(200,0,8*8,8,SAL_RGB(0,0,0));
 		sal_VideoPrint(200,0,mQuickStateDisplay,SAL_RGB(31,31,31));
-	}
+	}*/
 
 	sal_VideoFlip(0);
 }
@@ -256,6 +205,7 @@ uint32 S9xReadJoypad (int which1)
 	if (joy & SAL_INPUT_MENU)
 	{
 		if(mRomName[0] != 0) Memory.SaveSRAM ((s8*)S9xGetFilename (".srm.tns"));
+		sal_InputIgnore();
 		S9xGraphicsDeinit();
 		Memory.Deinit();
 		free(GFX.SubZBuffer);
@@ -268,6 +218,17 @@ uint32 S9xReadJoypad (int which1)
 		exit(0);
 		return val;
 	}
+	
+	/* If Save button pressed... */
+	/*if (joy & SAL_INPUT_INDEX_VOL_UP)
+	{
+		
+	}
+	/* If Load button pressed... */
+	/*else if (joy & SAL_INPUT_INDEX_VOL_DOWN)
+	{
+		
+	}*/
 	
 	if (joy & SAL_INPUT_Y) val |= SNES_Y_MASK;
 	if (joy & SAL_INPUT_A) val |= SNES_A_MASK;
@@ -289,30 +250,27 @@ uint32 S9xReadJoypad (int which1)
 bool8 S9xReadMousePosition (int /* which1 */, int &/* x */, int & /* y */,
 		    uint32 & /* buttons */)
 {
-	S9xMessage (0,0,"read mouse");
+	/*S9xMessage (0,0,"read mouse");*/
 	return (FALSE);
 }
 
 bool8 S9xReadSuperScopePosition (int & /* x */, int & /* y */,
 				 uint32 & /* buttons */)
 {
-      S9xMessage (0,0,"read scope");
+     /* S9xMessage (0,0,"read scope");*/
       return (FALSE);
 }
 
 const char *S9xGetFilenameInc (const char *e)
 {
-     S9xMessage (0,0,"get filename inc");
+     /*S9xMessage (0,0,"get filename inc");*/
      return e;
 }
 
-#define MAX_AUDIO_FRAMESKIP 5
+#define MAX_AUDIO_FRAMESKIP 6
 
 void S9xSyncSpeed(void)
 {
-	if (IsPreviewingState())
-		return;
-
 	if (Settings.SkipFrames == AUTO_FRAMERATE)
 	{
 		if (++IPPU.SkippedFrames < MAX_AUDIO_FRAMESKIP)
@@ -343,7 +301,7 @@ const char *S9xBasename (const char *f)
 {
       const char *p;
 
-      S9xMessage (0,0,"s9x base name");
+      /*S9xMessage (0,0,"s9x base name");*/
 
       if ((p = strrchr (f, '/')) != NULL || (p = strrchr (f, '\\')) != NULL)
          return (p + 1);
@@ -378,11 +336,6 @@ void S9xSaveSRAM (int showWarning)
 
 }
 
-bool8_32 S9xOpenSoundDevice(int a, unsigned char b, int c)
-{
-
-}
-
 void S9xAutoSaveSRAM (void)
 {
 	if (mMenuOptions.autoSaveSram)
@@ -401,8 +354,7 @@ static u32 LastAudioRate = 0;
 static u32 LastStereo = 0;
 static u32 LastHz = 0;
 
-static
-int Run(int sound)
+static int Run(int sound)
 {
 	bool PAL = !!(Memory.FillRAM[0x2133] & 4);
 
@@ -436,10 +388,9 @@ static inline int RunNoSound(void)
 	return Run(0);
 }
 
-static 
-int SnesRomLoad()
+static int SnesRomLoad()
 {
-    	MenuMessageBox("Loading ROM...",mRomName,"",MENU_MESSAGE_BOX_MODE_MSG);
+    MenuMessageBox("Loading ROM...",mRomName,"",MENU_MESSAGE_BOX_MODE_MSG);
 
 	if (!Memory.LoadROM (mRomName))
 	{
@@ -459,11 +410,11 @@ int SnesInit()
 	ZeroMemory (&Settings, sizeof (Settings));
 
 	Settings.JoystickEnabled = FALSE;
-	Settings.SoundPlaybackRate = 44100;
-	Settings.Stereo = TRUE;
+	Settings.SoundPlaybackRate = 0;
+	Settings.Stereo = FALSE;
 	Settings.SoundBufferSize = 0;
 	Settings.CyclesPercentage = 100;
-	Settings.DisableSoundEcho = FALSE;
+	Settings.DisableSoundEcho = TRUE;
 	Settings.H_Max = SNES_CYCLES_PER_SCANLINE;
 	Settings.SkipFrames = AUTO_FRAMERATE;
 	Settings.Shutdown = Settings.ShutdownMaster = TRUE;
@@ -491,12 +442,12 @@ int SnesInit()
 	Settings.NetPlay = FALSE;
 	Settings.ServerName [0] = 0;
 	Settings.AutoSaveDelay = 1;
-	Settings.ApplyCheats = TRUE;
+	Settings.ApplyCheats = FALSE;
 	Settings.TurboMode = FALSE;
 	Settings.TurboSkipFrames = 15;
 	Settings.ThreadSound = FALSE;
 	Settings.SoundSync = 1;
-	Settings.FixFrequency = TRUE;
+	Settings.FixFrequency = FALSE;
 	//Settings.NoPatch = true;		
 
 	Settings.SuperFX = TRUE;
@@ -528,13 +479,13 @@ int SnesInit()
 
 	if (!Memory.Init ())
 	{
-		S9xMessage (0,0,"Failed to init memory");
+		/*S9xMessage (0,0,"Failed to init memory");*/
 		return SAL_ERROR;
 	}
 
 	if (!S9xGraphicsInit ())
 	{
-         	S9xMessage (0,0,"Failed to init graphics");
+		/*S9xMessage (0,0,"Failed to init graphics");*/
 		return SAL_ERROR;
 	}
 
@@ -607,6 +558,7 @@ int mainEntry(char* romname)
 	sal_Init();
 	sal_VideoInit(16);
 
+	snprintf(tempromname, sizeof(tempromname), "%s", S9xBasename(romname));
 	snprintf(mRomName, sizeof(mRomName), "%s", romname);
 
 	if(SnesInit() == SAL_ERROR)
@@ -637,6 +589,7 @@ int mainEntry(char* romname)
 			}
 			else
 			{
+				sal_VideoClear(0);
 				event=EVENT_RUN_ROM;
 		  	}
 		}

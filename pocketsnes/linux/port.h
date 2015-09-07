@@ -101,7 +101,7 @@ typedef short			int16_32;
 #define VAR_CYCLES
 #define SPC700_SHUTDOWN
 #define USE_SA1
-#define SDD1_DECOMP
+/*#define SDD1_DECOMP*/
 #define LSB_FIRST
 #define STATIC static
 #define FASTCALL
@@ -110,12 +110,12 @@ typedef short			int16_32;
 /*#define FOREVER_16_BIT*/
 // The above is used to disable the 16-bit graphics mode checks sprinkled
 // throughout the code, if the pixel format is always 16-bit.
-#define FOREVER_16_BIT_SOUND
+/*#define FOREVER_16_BIT_SOUND*/
 
 #define CHECK_SOUND()
 #define VOID void
 #define CPU_SHUTDOWN
-#define UNZIP_SUPPORT
+/*#define UNZIP_SUPPORT*/
 #define ZeroMemory(a,b) memset((a),0,(b))
 #define PACKING __attribute__ ((packed))
 #define ALIGN_BY_ONE  __attribute__ ((aligned (1), packed))

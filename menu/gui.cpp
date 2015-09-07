@@ -73,7 +73,6 @@ unsigned short choice;
 unsigned short scroll_choice;
 unsigned short numb_files;
 
-unsigned char delete_file_screen();
 void clear_entirescreen();
 void update_entirescreen();
 
@@ -383,128 +382,6 @@ void set_fileid()
 	fileid_selected = choice + (scroll_choice*12);
 }
 
-/* 
- * Function to remove the file/folder:
- * First, it asks (via function delete_file_screen) if it wants to delete it
- * delete_file_screen() function returns the result
- * If it returns 1 ("YES") then the file/folder is deleted
- * If no, nothing happens
-*/
-void remove_file()
-{
-	char final[MAX_LENGH];
-	int result;
-	int isdeleted;
-	
-	result = -1;
-	isdeleted = -1;
-	
-	last_folder = currentdir;
-	
-#ifdef _TINSPIRE
-	if (file_type[fileid_selected] == F_C) 
-	{
-		snprintf(final, MAX_LENGH, "%s%s/", currentdir, file_name[fileid_selected]);
-	}
-	else
-	{
-		snprintf(final, MAX_LENGH, "%s%s", currentdir, file_name[fileid_selected]);
-	}
-#else
-		snprintf(final, MAX_LENGH, "%s/%s", currentdir, file_name[fileid_selected]);
-#endif
-
-	printf("%d\n",file_type[fileid_selected]);
-	
-	result = delete_file_screen();
-	
-	if (result == 1)
-	{	
-		if (file_type[fileid_selected] == F_C) 
-		{
-			isdeleted = clear_dir(final);
-		}
-		else
-		{
-			isdeleted = unlink(final);
-		}
-	}
-	
-	printf("%s\n",last_folder);
-	
-	list_all_files(last_folder);
-	
-	if (isdeleted == 0)
-	{
-		refresh_cursor(4);
-	}
-	else
-	{
-		refresh_cursor(3);
-	}
-	
-}
-
-unsigned char delete_file_screen()
-{
-	unsigned char choose_request;
-	unsigned char done_request;
-	choose_request = 0;
-	done_request = 1;
-	
-	clear_entirescreen();
-		
-	if (file_type[fileid_selected] == F_C) 
-	{
-		print_string(CONFIRM_DELETE_FOLDER,RED_C,0,0,60);	
-	}
-	else
-	{
-		print_string(CONFIRM_DELETE_FILE,RED_C,0,0,0);
-	}
-	
-	print_string(file_name[fileid_selected],F_C,0,8,26);
-	print_string(NO_CHOOSE,F_C,0,32,80);
-	print_string(YES_CHOOSE,BLUE_C,0,32,100);
-	
-	update_entirescreen();
-	
-	while(done_request==1)
-	{
-		controls();
-		
-		if (button_state[0] > 0)
-		{
-			clear_entirescreen();
-			print_string(file_name[fileid_selected],F_C,0,8,26);
-			print_string(NO_CHOOSE,F_C,0,32,80);
-			print_string(YES_CHOOSE,BLUE_C,0,32,100);
-			update_entirescreen();
-			choose_request = 0;
-		}
-		else if (button_state[1] > 0)
-		{
-			clear_entirescreen();
-			print_string(file_name[fileid_selected],F_C,0,8,26);
-			print_string(NO_CHOOSE,BLUE_C,0,32,80);
-			print_string(YES_CHOOSE,F_C,0,32,100);
-			update_entirescreen();
-			choose_request = 1;
-		}
-		
-		if (button_state[4] || button_state[5])
-		{
-			done_request = 0;
-		}
-		
-		/* Don't waste CPU cycles */
-		#ifndef ndlib
-			SDL_Delay(2);
-		#endif
-	}
-	
-	return choose_request;
-}
 
 void goto_folder()
 {
@@ -580,12 +457,6 @@ void refresh_cursor(unsigned char all)
 	{
 		print_string(currentdir,GREEN_C,0,8,16);
 		print_string(DEFAULT_TEXT,1200,0,8,6 );
-		update_entirescreen();
-	}
-	else if (all == 4 )
-	{
-		print_string(currentdir,GREEN_C,0,8,16);
-		print_string(FILE_DELETED,1200,0,8,6 );
 		update_entirescreen();
 	}
 	else
@@ -766,55 +637,4 @@ unsigned char is_folder(char* str1)
 	}
 	 
 	return temp;
-}
-
-
-unsigned char clear_dir(char* which_dir)
-{
-  DIR  *d;
-  struct dirent *dir;
-  char file[MAX_LENGH];
-  
-  d = opendir(which_dir);
-  
-  if (d)
-  {
-     while ((dir = readdir(d)) != NULL)
-     {
-        // exclude directories
-        if( strcmp( dir->d_name, "." ) == 0 || strcmp( dir->d_name, ".." ) == 0)
-        {
-           continue;
-        }
-
-        snprintf(file, MAX_LENGH, "%s/%s", which_dir, dir->d_name);
-
-        if (opendir(file)!=NULL) //if file actually is a dir
-        {
-           clear_dir(file);
-        }
-        else
-        {
-           if (remove(file) == -1)
-           {
-              printf("\n%s\n", file);
-              perror("Remove failed");
-              return 1;
-           }
-        }
-     }
-
-     closedir(d);
-
-     // Deleting directory
-     if (rmdir(which_dir) == -1)
-     {
-        printf("%s\n", which_dir);
-        perror("Remove failed");
-        return 1;
-     }
-
-   }
-  
-   return(0);
 }

@@ -25,14 +25,14 @@ INCLUDE = -I pocketsnes \
 		-I menu -I pocketsnes/linux -I pocketsnes/snes9x
 
 CFLAGS = $(INCLUDE) -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM \
-		 -O3 -g -pg $(SDL_CFLAGS)
+		 -O3 $(SDL_CFLAGS)
 
 CXXFLAGS = $(CFLAGS)
 
-LDFLAGS = $(CXXFLAGS) -lz -lpng -lm -lstdc++ $(SDL_LIBS)
+LDFLAGS = $(CXXFLAGS) -lm $(SDL_LIBS)
 
 # Find all source files
-SOURCE = pocketsnes/snes9x menu sal/linux sal
+SOURCE = pocketsnes/snes9x menu sdl/linux sdl
 SRC_CPP = $(foreach dir, $(SOURCE), $(wildcard $(dir)/*.cpp))
 SRC_C   = $(foreach dir, $(SOURCE), $(wildcard $(dir)/*.c))
 OBJ_CPP = $(patsubst %.cpp, %.o, $(SRC_CPP))

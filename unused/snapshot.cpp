@@ -561,18 +561,7 @@ bool8 S9xFreezeGame (const char *filename)
 	fseek(fp, 4, SEEK_SET);	//Valid data offset 4 bytes
 	S9xFreezeToStream (fp);
 	fclose(fp);
-#if 0	//Not support moive now
-	if(S9xMovieActive())
-	{
-		sprintf(String_text, "Movie snapshot %s", S9xBasename (filename));
-		S9xMessage (S9X_INFO, S9X_FREEZE_FILE_INFO, String_text);
-	}
-	else
-	{
-		sprintf(String_text, "Saved %s", S9xBasename (filename));
-		S9xMessage (S9X_INFO, S9X_FREEZE_FILE_INFO, String_text);
-	}
-#endif
+
 	return (TRUE);
 }
 
@@ -599,41 +588,10 @@ bool8 S9xUnfreezeGame (const char *filename)
 	int result;
 	if ((result = S9xUnfreezeFromStream (fp)) != SUCCESS)
 	{
-#if 0
-		switch (result)
-		{
-			case WRONG_FORMAT:
-				S9xMessage (S9X_ERROR, S9X_WRONG_FORMAT, 
-					"File not in Snes9x freeze format");
-				break;
-			case WRONG_VERSION:
-				S9xMessage (S9X_ERROR, S9X_WRONG_VERSION,
-					"Incompatable Snes9x freeze file format version");
-				break;
-			case WRONG_MOVIE_SNAPSHOT:
-				S9xMessage (S9X_ERROR, S9X_WRONG_MOVIE_SNAPSHOT, MOVIE_ERR_SNAPSHOT_WRONG_MOVIE);
-				break;
-			case NOT_A_MOVIE_SNAPSHOT:
-				S9xMessage (S9X_ERROR, S9X_NOT_A_MOVIE_SNAPSHOT, MOVIE_ERR_SNAPSHOT_NOT_MOVIE);
-				break;
-			default:
-			case FILE_NOT_FOUND:
-				sprintf (String_text, "ROM image \"%s\" for freeze file not found",
-					ROMFilename);
-				S9xMessage (S9X_ERROR, S9X_ROM_NOT_FOUND, String_text);
-				break;
-		}
-#endif
 		fclose(fp);
 		return (FALSE);
 	}
-#if 0	//Not support movie now
-	if(!S9xMovieActive())
-	{
-		sprintf(String_text, "Loaded %s", S9xBasename (filename));
-		S9xMessage (S9X_INFO, S9X_FREEZE_FILE_INFO, String_text);
-	}
-#endif
+
 	fclose(fp);
 	return (TRUE);
 }
@@ -713,12 +671,12 @@ int S9xUnfreezeFromStream (STREAM stream)
     if ((result = UnfreezeBlock (stream, "NAM", (uint8 *) rom_filename, _MAX_PATH)) != SUCCESS)
 		return (result);
 	
-    if (strcasecmp (rom_filename, Memory.ROMFilename) != 0 &&
+   /*if (strcasecmp (rom_filename, Memory.ROMFilename) != 0 &&
 		strcasecmp (S9xBasename (rom_filename), S9xBasename (Memory.ROMFilename)) != 0)
     {
 		S9xMessage (S9X_WARNING, S9X_FREEZE_ROM_NAME,
 			"Current loaded ROM image doesn't match that required by freeze-game file.");
-    }
+    }*/
 	
 // ## begin load ##
 	uint8* local_cpu = NULL;

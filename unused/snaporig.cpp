@@ -192,12 +192,12 @@ static int ReadOrigSnapshot (STREAM snap)
     if ((result = ReadBlock ("HiR:", buffer, 0x41, snap)) != SUCCESS)
 	return (result);
 
-    if (strcasecmp (rom_filename, Memory.ROMFilename) != 0 &&
+    /*if (strcasecmp (rom_filename, Memory.ROMFilename) != 0 &&
 	strcasecmp (S9xBasename (rom_filename), S9xBasename (Memory.ROMFilename)) != 0)
     {
 	S9xMessage (S9X_WARNING, S9X_FREEZE_ROM_NAME,
 		    "Current loaded ROM image doesn't match that required by freeze-game file.");
-    }
+    }*/
 
     S9xReset ();
     if ((result = ReadBlock ("CPU:", &OrigCPU, sizeof (OrigCPU), snap)) != SUCCESS)

@@ -68,7 +68,6 @@ static u32 sal_Input(int held)
 	u32 inputHeld=0;
 	u32 timer=0;
 
-	
 	if ( isKeyPressed(KEY_NSPIRE_CTRL) )
 		inputHeld|=SAL_INPUT_A;
 	if ( isKeyPressed(KEY_NSPIRE_SHIFT) )
@@ -90,19 +89,41 @@ static u32 sal_Input(int held)
 		
 	if ( isKeyPressed(KEY_NSPIRE_UP) || isKeyPressed(KEY_NSPIRE_8))
 		inputHeld|=SAL_INPUT_UP;
-	if ( isKeyPressed(KEY_NSPIRE_DOWN) || isKeyPressed(KEY_NSPIRE_5))
+	else if ( isKeyPressed(KEY_NSPIRE_DOWN) || isKeyPressed(KEY_NSPIRE_5))
 		inputHeld|=SAL_INPUT_DOWN;
 	if ( isKeyPressed(KEY_NSPIRE_LEFT)  || isKeyPressed(KEY_NSPIRE_4))
 		inputHeld|=SAL_INPUT_LEFT;
-	if ( isKeyPressed(KEY_NSPIRE_RIGHT) || isKeyPressed(KEY_NSPIRE_6) )
+	else if ( isKeyPressed(KEY_NSPIRE_RIGHT) || isKeyPressed(KEY_NSPIRE_6) )
 		inputHeld|=SAL_INPUT_RIGHT;
 		
+	if (isKeyPressed(KEY_NSPIRE_7))
+	{
+		inputHeld|=SAL_INPUT_UP;
+		inputHeld|=SAL_INPUT_LEFT;
+	}	
+	else if (isKeyPressed(KEY_NSPIRE_9) )
+	{
+		inputHeld|=SAL_INPUT_UP;
+		inputHeld|=SAL_INPUT_RIGHT;
+	}	
+	
+	if (isKeyPressed(KEY_NSPIRE_1))
+	{
+		inputHeld|=SAL_INPUT_DOWN;
+		inputHeld|=SAL_INPUT_LEFT;
+	}	
+	else if ( isKeyPressed(KEY_NSPIRE_3) )
+	{
+		inputHeld|=SAL_INPUT_DOWN;
+		inputHeld|=SAL_INPUT_RIGHT;
+	}	
+
 	if ( isKeyPressed(KEY_NSPIRE_ESC) )
 		inputHeld|=SAL_INPUT_MENU;
 
 	// Process key repeats
 	timer=sal_TimerRead();
-	for (i=0;i<32;i++)
+	for (i=0;i<19;i++)
 	{
 		if (inputHeld&(1<<i)) 
 		{
@@ -173,7 +194,7 @@ u32 sal_InputPoll()
 
 const char* sal_DirectoryGetTemp(void)
 {
-	return "/tmp";
+	return "/documents/ndless/.pocketsnes/";
 }
 
 void sal_CpuSpeedSet(u32 mhz)
@@ -227,6 +248,8 @@ s32 sal_Init(void)
 u32 sal_VideoInit(u32 bpp)
 {
 	initBuffering();
+	clearBufferB();
+	updateScreen();
 	mBpp = 16;
 	/*SDL_ShowCursor(0);
 	
