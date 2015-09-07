@@ -5,7 +5,8 @@
 
 #define FORMAT_FILE ".sfc"
 #define EXECUTABLE_NAME "pocketsnes.tns"
-#define DEFAULT_TEXT "Select a Super Nintendo Rom file"
+#define DEFAULT_TEXT "   Select a Super Nintendo Rom file"
+#define CREDITS_TEXT "   PocketSNES ported by gameblabla"
 #define FILE_DELETED "File deleted !"
 
 #define CONFIRM_DELETE_FOLDER "Do you want to delete this folder ?"

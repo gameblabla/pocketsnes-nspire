@@ -455,8 +455,10 @@ void refresh_cursor(unsigned char all)
 	
 	if (all == 1 || all == 2 || all == 3)
 	{
-		print_string(currentdir,GREEN_C,0,8,16);
+		print_string(currentdir,BLUE_C,0,8,16);
 		print_string(DEFAULT_TEXT,1200,0,8,6 );
+		print_string(CREDITS_TEXT,1200,0,8,232 );
+		
 		update_entirescreen();
 	}
 	else
