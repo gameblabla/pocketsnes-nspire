@@ -140,7 +140,11 @@ u32 sal_InputPoll()
 
 const char* sal_DirectoryGetTemp(void)
 {
+#ifdef EXAM_MODE
+	return "/exammode/usr/.pocketsnes/";
+#else
 	return "/documents/ndless/.pocketsnes/";
+#endif
 }
 
 void sal_CpuSpeedSet(u32 mhz)

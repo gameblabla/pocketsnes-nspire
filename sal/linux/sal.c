@@ -194,7 +194,18 @@ u32 sal_InputPoll()
 
 const char* sal_DirectoryGetTemp(void)
 {
-	return "/documents/ndless/.pocketsnes/";
+	char d[] = "/exammode/usr/Press-to-Test/";
+
+	struct stat s = {0};
+
+	if (!stat(d, &s))
+	{
+		return "/exammode/usr/Press-to-Test/";
+	}
+	else
+	{
+		return "/documents/ndless/";
+	}
 }
 
 void sal_CpuSpeedSet(u32 mhz)

@@ -347,7 +347,7 @@ const char * sal_DirectoryGetHome(void)
 {
 	static char home [SAL_MAX_PATH];
 
-	snprintf(home, sizeof(home), "%s", "/documents/ndless/");
+	snprintf(home, sizeof(home), "%s", sal_DirectoryGetTemp());
 	sal_DirectoryCombine(home, ".pocketsnes");
 
 	/* Create the directory if it didn't already exist */
