@@ -1,4 +1,10 @@
-==========================
+EDIT: Source code to the latest version got lost.
+
+I thought i committed it on github but oh well.
+
+You can find it in Releases.
+
+
 PocketSNES for TI Nspire CX
 ==========================
 
@@ -20,7 +26,6 @@ Far East of Eden Zero, Street Fighter Alpha 2 and Star Ocean
 
 These 3 games uses the SDD1 chip and Snes9x 1.43 requires graphics pack for them to be emulated.
 
-==========
 CONTROLS
 ==========
 
