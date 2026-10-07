@@ -5,8 +5,9 @@ Play Super Nintendo games on a TI-Nspire CX or CX II calculator.
 
 This is gameblabla's PocketSNES port of Snes9x 1.43, with a new front end:
 a game list you can sort, a menu like gpSP's, 999 save state slots per game,
-settings per game, smooth tear-free drawing on the CX II, and an overclock
-setting with a test that finds your calculator's highest safe speed.
+settings per game and smooth tear-free drawing on the CX II. There's also an
+experimental overclock setting, but it isn't reliable (see
+[Overclocking](#overclocking)).
 
 There's no sound, because the calculator has no speaker.
 
@@ -151,38 +152,41 @@ To help a slow game:
   doing: 60/60 is perfect.
 * **Unplug the USB cable.** While it's plugged in, the calculator runs at
   288 MHz instead of 396.
-* **Overclock** (CX II only), see below.
+* Overclocking is there, but it isn't reliable; read the section below
+  first.
 
 ### Overclocking
 
+**The overclock isn't reliable, and neither is the overclock test.** Use it
+at your own risk, and don't count on a speed being safe just because it
+worked for a while.
+
 *CPU speed* in *Graphics & speed* runs games faster than the calculator's
-normal 396 MHz, in steps of 12 MHz up to 504 MHz. Menus and saving always
-run at normal speed.
+normal 396 MHz, in steps of 12 MHz up to 504 MHz (menus and saving stay at
+normal speed). The clock really does change: the game shows the speed it
+measured when it starts ("CPU 432 MHz"). The trouble is what happens next.
+The memory speeds up together with the CPU but keeps the timings it was set
+up with for normal speed, and how far each calculator copes with that
+differs and isn't predictable. On the calculator this was developed on:
 
-How far a calculator can go differs from one to the next. Most manage about
-430 to 490 MHz. The limit is usually the memory: it speeds up together with
-the CPU, but keeps the timings it was set up with for normal speed. Go too
-far and you'll see glitches, then the calculator freezes and needs a reset.
-That doesn't harm it (nothing runs at a higher voltage, and every restart
-goes back to normal speed), but a speed that *sometimes* glitches can
-quietly corrupt the game in memory, and that can end up in a save state.
+* 432 MHz ran fine,
+* 456 MHz worked only sometimes,
+* 480 MHz glitched and froze in games.
 
-So **run the overclock test once** to find your calculator's safe speed:
+The *Overclock test* doesn't help much. On that same calculator it passed
+every speed up to 492 MHz and only failed at 504, while games froze at 480.
+Its memory and CPU checks don't load the calculator the way a game does, so
+its "highest tested" speed is not a safe speed. Treat it as an upper limit
+at best.
 
-1. Menu → *Graphics & speed* → *Overclock test*. Unplug USB first.
-2. It tries 408, 420, 432 MHz and so on. At each speed it checks the memory
-   and the CPU for 16 seconds, and stops at the first speed that makes an
-   error. A full run takes 1 to 2 minutes; esc stops it.
-3. If the calculator freezes during the test, that's fine: reset it, open
-   Ndless again and start PocketSNES. It knows the test was running and
-   keeps the highest speed that passed.
-4. Then set *CPU speed* to **highest tested**. The menu shows the result,
-   e.g. *highest tested (444 MHz)*.
+If you try overclocking anyway:
 
-When a game starts at a raised speed it says what it got ("CPU 444 MHz").
-If a speed ever freezes a game, PocketSNES puts *CPU speed* back to normal
-at the next start and tells you. If a game glitches at the tested speed on a
-hot day or a low battery, pick one step lower.
+* Start low (432 MHz) and play for a while before going higher.
+* A freeze doesn't harm the calculator: reset it, open Ndless again, and
+  PocketSNES puts *CPU speed* back to normal at the next start.
+* A speed that *sometimes* glitches can quietly corrupt the game in memory,
+  and that can end up in a save state. Keep a save state from normal speed
+  of anything you care about.
 
 
 Troubleshooting
@@ -193,8 +197,8 @@ Troubleshooting
   folders.
 * **"Couldn't load ..."** The file isn't a SNES ROM, it's damaged, or it's
   too big for the free memory.
-* **A game is slow.** Keep frameskip on automatic, unplug USB, look at the
-  FPS counter, and try overclocking.
+* **A game is slow.** Keep frameskip on automatic, unplug USB, and look at
+  the FPS counter.
 * **The calculator froze.** Press the reset button on the back with a paper
   clip, then open the Ndless installer again. If it froze at a raised CPU
   speed, PocketSNES goes back to normal speed by itself.
@@ -227,8 +231,8 @@ whenever that game runs.
 | Frames to skip | **5** (0–9) | Automatic: the most frames skipped in a row. Manual: N. |
 | FPS counter | **off**, on, detailed | Frames drawn per second over the most there can be: 60/60 is full speed. Detailed adds how long each part of a frame takes and logs it to `pocketsnes_perf.txt.tns`. |
 | Screen output (CX II) | **no tearing**, DMA | No tearing shows every frame whole. DMA is a little faster but can show a split line when the picture scrolls fast. |
-| CPU speed (CX II) | **normal**, highest tested, 408 … 504 MHz | Overclocks while a game runs. See [Overclocking](#overclocking). |
-| Overclock test (CX II) | | Finds the highest speed that runs without errors. The result shows next to it. |
+| CPU speed (CX II) | **normal**, highest tested, 408 … 504 MHz | Experimental, not reliable: overclocks while a game runs. See [Overclocking](#overclocking). |
+| Overclock test (CX II) | | Tries 408 to 504 MHz with memory and CPU checks and shows the highest that passed. Not a reliable guide: games can freeze below it. |
 | Run speed test | | In a game only: plays from where you are for about 35 seconds in five ways and shows the frame rates. Results also go to `pocketsnes_results.txt.tns`. |
 
 ### Saving
@@ -416,7 +420,10 @@ changed. Marker files catch freezes. Details in FINDINGS.md.
 **The overclock test** fills a buffer of up to 8 MB (far bigger than the
 8 KB data cache) with patterns, reads them back and inverts them, over and
 over, and checks a CPU calculation against its result at normal speed. Two
-rounds of 8 seconds per speed, each after its own clock switch.
+rounds of 8 seconds per speed, each after its own clock switch. It misses
+what makes games freeze: on the development calculator it passed 492 MHz
+while games froze at 480. One guess is that its small loops run from the
+CPU's caches, while a game fetches code from memory all the time.
 
 **Settings file.** `name=value` lines (`config_version=3`, `frameskip_type`,
 `cpu_speed`, `highest_tested_mhz`, … `key_a=122`, `key_a_2=121+20` for
@@ -441,10 +448,10 @@ Ideas that haven't been done yet, roughly from most to least promising:
   turned out the MMU's page table lives in the SRAM at 0xA4004000, which
   those tries overwrote, so a retry that leaves the first 32 KB alone might
   work.
-* **A higher overclock ceiling.** The memory keeps its normal-speed timings
-  when overclocked, which is probably what limits most calculators. Working
-  out the memory controller's timing registers could let calculators go
-  further.
+* **Overclocking is on hold.** It isn't reliable (see above), and there's
+  no known way yet to make it run well. Picking it up again would take
+  something concrete, such as working out the memory controller's timing
+  registers so the memory can be given slower timings at higher speeds.
 * **S-DD1 and SPC7110 support** (Star Ocean, Street Fighter Alpha 2, Far East
   of Eden Zero).
 * **Yoshi's Island's top-row glitches** in the core's Super FX code.

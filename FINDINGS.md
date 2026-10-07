@@ -133,8 +133,15 @@ The CPU clock
   raise stopped at 420 MHz on the way up and fell back to normal (a step
   that didn't finish). Others report 432-444 and 492 MHz as their limits;
   the memory runs at half the CPU clock with timings set for 198 MHz, which
-  is the likely limit. The overclock test (overclock.cpp) finds each
-  calculator's highest speed without memory or CPU errors.
+  is the likely limit.
+* Seen (the overclock test, overclock.cpp, same calculator): 408 to 492 MHz
+  passed (two rounds of 8 s each: 500-650 MB of memory pattern checks and a
+  CPU calculation, no errors), 504 MHz failed with memory errors at once.
+  So the test passed 492 MHz while games freeze at 480: it doesn't predict
+  whether games run. Guess, not checked: its loops run from the caches,
+  while the emulator's code (about 300 KB, against a 16 KB instruction
+  cache) is fetched from memory all the time, and games also run longer and
+  warmer. Overclocking is on hold: no known way to make it reliable.
 
 
 Where the time goes
