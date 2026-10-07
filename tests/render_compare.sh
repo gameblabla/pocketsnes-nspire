@@ -30,7 +30,7 @@ fi
 # Keys: walk right, jump now and then, with a shot every 2 frames.
 script=$(realpath "$OUT")/script.txt
 {
-    echo "wait 30"
+    echo "wait 130"   # past the 2-second "Resumed from slot" message
     echo "down right"
     for i in $(seq 1 300); do
         echo "shot s$(printf %04d "$i").png"
@@ -46,6 +46,7 @@ script=$(realpath "$OUT")/script.txt
 # From power-on: Start every 3 seconds, A every second, walking about.
 boot_script=$(realpath "$OUT")/boot_script.txt
 {
+    echo "wait 4"   # the screen before the game's first frame differs between front ends
     for i in $(seq 1 600); do
         [ $((i % 45)) -eq 1 ] && echo "press enter 3"
         [ $((i % 15)) -eq 8 ] && echo "press ctrl 3"
