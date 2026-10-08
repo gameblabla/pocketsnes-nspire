@@ -5,9 +5,9 @@ Play Super Nintendo games on a TI-Nspire CX or CX II calculator.
 
 This is gameblabla's PocketSNES port of Snes9x 1.43, with a new front end:
 a game list you can sort, a menu like gpSP's, 999 save state slots per game,
-settings per game and smooth tear-free drawing on the CX II. There's also an
-experimental overclock setting, but it isn't reliable (see
-[Overclocking](#overclocking)).
+settings per game, smooth tear-free drawing on the CX II, and the SNES CPU
+in ARM assembler (from psnes) as well as in C. There's also an experimental
+overclock setting, but it isn't reliable (see [Overclocking](#overclocking)).
 
 There's no sound, because the calculator has no speaker.
 
@@ -233,7 +233,8 @@ whenever that game runs.
 | Screen output (CX II) | **no tearing**, DMA | No tearing shows every frame whole. DMA is a little faster but can show a split line when the picture scrolls fast. |
 | CPU speed (CX II) | **normal**, highest tested, 408 … 504 MHz | Experimental, not reliable: overclocks while a game runs. See [Overclocking](#overclocking). |
 | Overclock test (CX II) | | Tries 408 to 504 MHz with memory and CPU checks and shows the highest that passed. Not a reliable guide: games can freeze below it. |
-| Run speed test | | In a game only: plays from where you are for about 35 seconds in five ways and shows the frame rates. Results also go to `pocketsnes_results.txt.tns`. |
+| CPU core | **ARM (fast)**, C | Which emulation of the SNES CPU runs the game: ARM is psnes's, in ARM assembler; C is Snes9x's. They do exactly the same thing (see [The CPU cores](#the-cpu-cores)); try C if a game acts up. Games with an SA-1 chip always use C. |
+| Run speed test | | In a game only: plays from where you are for about 40 seconds in six ways and shows the frame rates. The last two rows run the game without drawing on each CPU core, to compare them. Results also go to `pocketsnes_results.txt.tns`. |
 
 ### Saving
 
@@ -287,7 +288,8 @@ What runs
 ---------
 
 * Most SNES games run, including ones with DSP-1, DSP-2, Super FX, SA-1,
-  C4, OBC1 and Seta chips (the heavy ones slowly).
+  C4, OBC1 and Seta chips (the heavy ones slowly). SA-1 games run on the C
+  CPU core whatever *CPU core* says.
 * **S-DD1 and SPC7110 games don't run**: Star Ocean and Street Fighter Alpha
   2 (S-DD1), Far East of Eden Zero and Momotarou Dentetsu Happy (SPC7110).
 * There's no sound emulation at all, which also saves time.
@@ -336,6 +338,13 @@ Everything draws exactly the same pixels as the original renderer
 (`tests/render_compare.sh` checks that on 16 games and demos). The full
 measurements are in [FINDINGS.md](FINDINGS.md).
 
+**The ARM CPU core** (*CPU core* in Graphics & speed) runs the SNES CPU in
+hand-written ARM assembler instead of compiled C; the speed test's last two
+rows compare the two on the game you're playing. How much it gains depends
+on the game: games that spend their frame waiting for the screen (Super
+Mario World does) already skip most of the CPU's work, so they gain little;
+games that keep the CPU busy gain the most.
+
 
 For developers
 --------------
@@ -354,6 +363,7 @@ changed flags:
 
     make -f Makefile.nspire OPT_LEVEL=-O2 BUILD=build/o2
     make -f Makefile.nspire BENCH=1 BUILD_NAME=mine BUILD=build/bench TARGET=pocketsnes_speedtest
+    make -f Makefile.nspire ARM_CPU=0 BUILD=build/c-only    # without the ARM CPU core
 
 `BENCH=1` makes a build that plays `Super Mario World (USA).sfc.tns` (next to
 it) from its newest state, writes a hardware report
@@ -366,6 +376,7 @@ The PC test build needs g++ and zlib (and SDL2's headers for a window):
     ./pocketsnes-host                    # the game list, in a window
     tests/run.sh                         # the test suite (54 checks)
     make unit-tests                      # tile drawing, frame turning, settings
+    tests/asm/run.sh                     # the ARM CPU core against the C core, under qemu-arm
 
 [TESTING.md](TESTING.md) explains the PC build, its script mode and the
 tests.
@@ -375,6 +386,7 @@ tests.
 | Path | What |
 |---|---|
 | `pocketsnes/snes9x/`, `pocketsnes/include/` | the Snes9x 1.43 core (65c816 CPU, PPU, renderer in `gfx.cpp` and `tile.cpp`, chips) |
+| `pocketsnes/arm/`, `pocketsnes/snes9x/os9x_asm_cpu.cpp` | the 65c816 CPU in ARM assembler, from psnes, and its glue to the C core |
 | `frontend/main.cpp` | startup: welcome, game list, game, repeat |
 | `frontend/emu.cpp` | runs the core: frame pacing and frameskip, hotkeys, FPS counter and messages, save states, in-game saves, the speed test, CPU speed changes |
 | `frontend/menu.cpp` | the menus, built from tables of options; the controls page and the welcome screen |
@@ -388,6 +400,7 @@ tests.
 | `frontend/platform_nspire.cpp`, `clock_switch_nspire.S` | … on the calculator |
 | `frontend/platform_host.cpp` | … on a PC, for testing (SDL2 window, or scripted in virtual time) |
 | `tests/` | `run.sh` and its scripts, `unit_tests.cpp`, `render_compare.sh` |
+| `tests/asm/` | the CPU core tests under qemu-arm: opcode by opcode, and games frame by frame |
 | `tools/` | the clock switch test, the font and icon generators |
 | `FINDINGS.md` | what was measured and learned about the hardware |
 | `menu/`, `sal/`, `sdl/`, `unused/` | the original port's front end, no longer built |
@@ -433,6 +446,38 @@ newer builds can share the file; version 2 files' CPU speeds are converted.
 
 **Save states** are Snes9x snapshots compressed with zlib.
 
+### The CPU cores
+
+The ARM core comes from psnes 7.2.0 (DrPocketSnes for the GP2X, Wiz and
+Caanoo; gameblabla suggested it). It is Yoyofr's 65c816 core from
+OpenSnes9x, with changes by Squidge, notaz and Bitrider. It keeps the SNES
+registers in ARM registers, has a jump table of opcodes for each
+combination of the M and X flags (and one for emulation mode), and handles
+ordinary ROM and RAM itself.
+
+It was changed to do exactly what the C core does, so the two can stand in
+for each other mid-game and share save states:
+
+* Everything that isn't plain ROM or RAM (I/O registers, SRAM, special
+  chips, unmapped areas) goes through the C core's own `S9xGetByte` and
+  friends, with the cycle count, idle loop state and "branch skip" request
+  passed back and forth.
+* Cycles are counted as the C core counts them (CATSFC's timings), and in
+  the same order, so an I/O register sees the same cycle count on both.
+* The open bus byte is kept up to date the same way. It lives inside the
+  `CPU` struct, where the assembler reaches it, and `OpenBus` names that byte.
+* Decimal mode ADC/SBC and the emulation mode stack opcodes run the C
+  core's code; the stack wraps in bank 0 as in C.
+* Fixed from psnes: XCE set the carry when staying in native mode,
+  the idle loop flag was saved as the branch skip flag, and calls assumed
+  the ARM9's way of storing PC (`STMFD {PC}`); calls into C now keep the
+  stack 8-byte aligned, as the EABI needs.
+
+`tests/asm/run.sh` checks this under qemu-arm: every opcode in every mode
+from random states (registers, flags, cycles, memory and the open bus must
+match), then games run on both cores with the same input, compared frame
+by frame. See [TESTING.md](TESTING.md).
+
 
 Future steps
 ------------
@@ -462,6 +507,8 @@ Credits and license
 
 * Snes9x 1.43 by the Snes9x team; PocketSNES by Nebuleon; the TI-Nspire port
   by gameblabla.
+* The ARM assembler CPU core: Yoyofr (OpenSnes9x), Squidge, notaz, Reesy
+  and Bitrider (psnes / DrPocketSnes).
 * The menu follows lr-gpsp-nspire (gpSP by Exophase, Nspire port by
   andymcca).
 * Ndless by the Ndless team. The clock register was found by Wenting Zhang
