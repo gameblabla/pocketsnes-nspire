@@ -128,6 +128,12 @@ struct SICPU
 
 START_EXTERN_C
 void S9xMainLoop (void);
+#ifdef ARM_ASM_CPU
+/* The ARM assembler CPU core (os9x_asm_cpu.cpp, pocketsnes/arm). */
+void S9xMainLoop_Asm (void);
+void S9xAsmRegistersIn (void);
+void S9xAsmRegistersOut (void);
+#endif
 void S9xReset (void);
 void S9xSoftReset (void);
 void S9xDoHBlankProcessing_SFX ();

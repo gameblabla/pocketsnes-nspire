@@ -5,6 +5,7 @@
 #   BUILD_NAME=o3      name written into the speed test results
 #   BENCH=1            speed test build: runs the speed test on Super Mario
 #                      World from its newest save state, then closes
+#   ARM_CPU=0          without the ARM assembler CPU core (C core only)
 # e.g. make -f Makefile.nspire BENCH=1 BUILD_NAME=O3 BUILD=build/bench-O3 TARGET=pocketsnes_speedtest_O3
 
 TARGET  = pocketsnes
@@ -24,6 +25,12 @@ BUILD_NAME ?= dev
 BENCH      ?= 0
 
 DEFINES = -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -DBUILD_NAME=\"$(BUILD_NAME)\"
+# The SNES CPU in ARM assembler (pocketsnes/arm, from psnes), chosen in the
+# menu; ARM_CPU=0 leaves it out.
+ARM_CPU ?= 1
+ifeq ($(ARM_CPU),1)
+DEFINES += -DARM_ASM_CPU
+endif
 ifeq ($(BENCH),1)
 DEFINES += -DAUTO_BENCH
 endif
@@ -49,7 +56,11 @@ FRONTEND_SRC = frontend/keys.cpp frontend/draw.cpp frontend/ui.cpp frontend/conf
 # The CPU clock switch, copied into the on-chip SRAM to run (platform_nspire.cpp).
 FRONTEND_ASM = frontend/clock_switch_nspire.S
 
+CORE_ASM     = pocketsnes/arm/os9x_65c816_global.s pocketsnes/arm/os9x_65c816_cpu.s
 CORE_OBJ     = $(patsubst %.cpp,$(BUILD)/%.o,$(CORE_SRC))
+ifeq ($(ARM_CPU),1)
+CORE_OBJ    += $(patsubst %.s,$(BUILD)/%.o,$(CORE_ASM))
+endif
 FRONTEND_OBJ = $(patsubst %.cpp,$(BUILD)/%.o,$(FRONTEND_SRC)) $(patsubst %.S,$(BUILD)/%.o,$(FRONTEND_ASM))
 
 all: $(TARGET).tns
@@ -57,6 +68,11 @@ all: $(TARGET).tns
 $(BUILD)/pocketsnes/%.o: pocketsnes/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CORE_FLAGS) -MMD -c $< -o $@
+
+# The assembler core's files include each other (.include).
+$(BUILD)/pocketsnes/arm/%.o: pocketsnes/arm/%.s $(wildcard pocketsnes/arm/*.s)
+	@mkdir -p $(dir $@)
+	$(CC) $(ARCH) -Ipocketsnes/arm -c $< -o $@
 
 $(BUILD)/frontend/%.o: frontend/%.cpp
 	@mkdir -p $(dir $@)

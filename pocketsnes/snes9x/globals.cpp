@@ -141,7 +141,14 @@ CMemory Memory;
 
 struct SSNESGameFixes SNESGameFixes;
 
+#ifdef ARM_ASM_CPU
+/* The assembler CPU core keeps OpenBus up to date as the C core does; it
+ * reaches it at a fixed offset in CPU (AsmOpenBus, snes9x.h), so OpenBus is
+ * that byte. */
+__asm__ (".globl OpenBus\n\t.set OpenBus, CPU + 93");
+#else
 uint8 OpenBus = 0;
+#endif
 
 
 END_EXTERN_C
