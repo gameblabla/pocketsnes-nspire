@@ -99,3 +99,47 @@ identical. Without arguments it uses the test ROMs, Super Mario World with
 its save state, and the games in `~/nspire/build/testroms/calc` (with their
 saves). The reference build crashes in Chrono Trigger's intro (a 64-bit PC
 bug, see FINDINGS.md), so that game only compares up to there.
+
+The ARM CPU core against the C core
+-----------------------------------
+
+    . ~/nspire/build/env.sh      # the Ndless toolchain
+    tests/asm/run.sh [frames]    # 600 frames per game if not given
+
+The ARM assembler CPU core (`pocketsnes/arm`) can't run on a PC, so
+`tests/asm/Makefile` builds the core for ARM with the Ndless toolchain and
+newlib's semihosting library (file access through the host), and the tests
+run under `qemu-arm` (by default the one unpacked from Ubuntu's `qemu-user`
+package into `~/nspire/build/tools/qemu`; `QEMU=` picks another). Both cores
+must do exactly the same thing, so everything is compared, not just the
+picture:
+
+* **opcode_test** runs every opcode in emulation mode and in the four M/X
+  modes from random registers, flags and memory, once on the C core and
+  once on the assembler core (built to stop after one opcode), and compares
+  the registers, flags, cycle count, idle loop state, open bus byte and
+  memory, and that no stray bits are left in the assembler's registers. Its
+  memory map has RAM, ROM, SRAM and unmapped blocks, so the calls into C
+  are covered too. `opcode_test 100 1 all openbus` is what run.sh uses;
+  `opcode_test 500 7 6D openbus print=20` looks at one opcode.
+* **game_test** plays a ROM (from power-on or from a PocketSNES state) for
+  some frames on one core with scripted input, printing checksums of RAM,
+  VRAM, palette and sprites, SRAM, I/O registers and the picture, and the
+  registers and cycle count, for every frame. run.sh runs it on both cores
+  for the homebrew demos and, when they're in `~/nspire/build/testroms`,
+  Super Mario World, Chrono Trigger, Zelda: A Link to the Past and Yoshi's
+  Island (Super FX), and the lines must be identical.
+* **game_trace** is game_test printing every opcode of chosen frames with
+  the registers, on either core, so the first instruction where the two
+  differ can be found with `diff`:
+
+      Q=~/nspire/build/tools/qemu/root/usr/bin/qemu-arm
+      $Q build/asm-test/game_trace build/asm-test/roms/smw.sfc 298 c build/asm-test/roms/smw.sv001 - walk 298 298 > c.txt
+      $Q build/asm-test/game_trace build/asm-test/roms/smw.sfc 298 asm build/asm-test/roms/smw.sv001 - walk 298 298 > asm.txt
+      diff c.txt asm.txt | head
+
+  (Semihosting splits the command line at spaces, so run.sh links the ROMs
+  into `build/asm-test/roms` under names without them.)
+
+qemu says nothing about speed on the calculator: the speed test's last two
+rows compare the cores there.
