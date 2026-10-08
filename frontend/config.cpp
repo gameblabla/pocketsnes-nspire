@@ -78,6 +78,7 @@ static void default_settings_into(struct Config *c)
     c->sram_autosave = 1;
     c->screen_dma = 0;
     c->cpu_speed = CPU_SPEED_NORMAL;
+    c->cpu_core = CPU_CORE_ARM;
 }
 
 static void copy_settings(struct Config *to, const struct Config *from)
@@ -91,6 +92,7 @@ static void copy_settings(struct Config *to, const struct Config *from)
     to->sram_autosave = from->sram_autosave;
     to->screen_dma = from->screen_dma;
     to->cpu_speed = from->cpu_speed;
+    to->cpu_core = from->cpu_core;
 }
 
 static uint32_t clamp(long value, uint32_t max)
@@ -200,6 +202,8 @@ static void read_file(const char *path, struct Config *c, struct FileInfo *info)
             c->screen_dma = clamp(number, 1);
         else if (strcmp(line, "cpu_speed") == 0)
             info->cpu_speed = number;
+        else if (strcmp(line, "cpu_core") == 0)
+            c->cpu_core = clamp(number, NUM_CPU_CORES - 1);
         else if (strcmp(line, "highest_tested_mhz") == 0)
             info->tested_mhz = number;
         else if (strcmp(line, "rom_dir") == 0)
@@ -260,6 +264,7 @@ static void write_settings(FILE *f, const struct Config *c)
     fprintf(f, "sram_autosave=%u\n", (unsigned) c->sram_autosave);
     fprintf(f, "screen_dma=%u\n", (unsigned) c->screen_dma);
     fprintf(f, "cpu_speed=%u\n", (unsigned) c->cpu_speed);
+    fprintf(f, "cpu_core=%u\n", (unsigned) c->cpu_core);
 }
 
 static void write_keys(FILE *f, const struct Config *c)

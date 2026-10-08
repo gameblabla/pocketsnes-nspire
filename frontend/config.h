@@ -74,6 +74,16 @@ enum CpuSpeed
     NUM_CPU_SPEEDS
 };
 
+/* The SNES CPU's emulation (cfg.cpu_core): the ARM assembler core from
+ * psnes (pocketsnes/arm) or the C core. Games with an SA-1 always run on the
+ * C core, and so does the PC build. */
+enum CpuCore
+{
+    CPU_CORE_ARM,
+    CPU_CORE_C,
+    NUM_CPU_CORES
+};
+
 /* The multiplier of 12 MHz for a raised speed, 0 for the normal one (and for
  * "highest tested" before the overclock test has passed a speed). */
 int config_cpu_multiplier(uint32_t cpu_speed);
@@ -96,6 +106,7 @@ struct Config
     uint32_t sram_autosave;
     uint32_t screen_dma;        /* game frames by DMA (faster, can tear) */
     uint32_t cpu_speed;         /* enum CpuSpeed */
+    uint32_t cpu_core;          /* enum CpuCore */
     /* Keys: for all games, or a game's own (config_set_game_keys). */
     struct Binding keys[NUM_ACTIONS][KEY_SLOTS];
     /* For all games only. */

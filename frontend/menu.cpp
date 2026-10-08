@@ -190,6 +190,9 @@ static const char *const cpu_speeds[] =
 };
 static_assert(sizeof(cpu_speeds) / sizeof(cpu_speeds[0]) == NUM_CPU_SPEEDS, "a name for each CPU speed");
 
+static const char *const cpu_cores[] = { "ARM (fast)", "C" };
+static_assert(sizeof(cpu_cores) / sizeof(cpu_cores[0]) == NUM_CPU_CORES, "a name for each CPU core");
+
 static void update_speed_names(void)
 {
     if (platform_cpu_normal_mhz())
@@ -235,13 +238,16 @@ static void update_speed_names(void)
            4, &cfg.cpu_speed, cpu_speeds, NUM_CPU_SPEEDS - 1, ICON_NONE), \
     { OPTION_ACTION, "Overclock test", \
       "Finds this calculator's highest safe speed (408-504 MHz): about 2 minutes.", \
-      5, NULL, NULL, 0, run_overclock_test, NULL, NULL, 0, ICON_SPEED, tested_result }
+      5, NULL, NULL, 0, run_overclock_test, NULL, NULL, 0, ICON_SPEED, tested_result }, \
+    CHOICE("CPU core", \
+           "ARM: the SNES CPU in ARM assembler (faster). C: the old core, if a game acts up.", \
+           6, &cfg.cpu_core, cpu_cores, NUM_CPU_CORES - 1, ICON_NONE)
 
 static struct Option graphics_options[] =
 {
     GRAPHICS_OPTIONS,
     ACTION("Run speed test",
-           "Plays from here for about 35 seconds in five ways and shows the frame rates.",
+           "Plays from here for about 40 seconds in six ways, both CPU cores, and shows the frame rates.",
            7, run_speed_test, ICON_STAR),
     BACK_OPTION(9),
 };

@@ -979,16 +979,32 @@ struct SpeedTestPart
     uint32_t frameskip_type, frameskip_value;
     uint32_t seconds;
     int output;   /* enum ScreenOutput */
+    int cpu_core; /* enum CpuCore, or -1 for the one set */
 };
 
+/* The last two compare the CPU cores with nothing drawn, where the time
+ * per frame is all running the game. */
 static const struct SpeedTestPart speed_test_parts[] =
 {
-    { "Normal play, frameskip off", "Normal play", PACE_NORMAL, FRAMESKIP_OFF, 0, 10, OUTPUT_BEST },
-    { "No speed limit, every frame drawn", "No limit", PACE_UNCAPPED_DRAW_ALL, FRAMESKIP_OFF, 0, 5, OUTPUT_BEST },
-    { "Same, other output", "No limit, DMA", PACE_UNCAPPED_DRAW_ALL, FRAMESKIP_OFF, 0, 5, OUTPUT_DMA },
-    { "Same, other output", "No limit, flip", PACE_UNCAPPED_DRAW_ALL, FRAMESKIP_OFF, 0, 5, OUTPUT_FLIP },
-    { "No speed limit, nothing drawn", "Nothing drawn", PACE_UNCAPPED_DRAW_NONE, FRAMESKIP_OFF, 0, 5, OUTPUT_BEST },
+    { "Normal play, frameskip off", "Normal play", PACE_NORMAL, FRAMESKIP_OFF, 0, 10, OUTPUT_BEST, -1 },
+    { "No speed limit, every frame drawn", "No limit", PACE_UNCAPPED_DRAW_ALL, FRAMESKIP_OFF, 0, 5, OUTPUT_BEST, -1 },
+    { "Same, other output", "No limit, DMA", PACE_UNCAPPED_DRAW_ALL, FRAMESKIP_OFF, 0, 5, OUTPUT_DMA, -1 },
+    { "Same, other output", "No limit, flip", PACE_UNCAPPED_DRAW_ALL, FRAMESKIP_OFF, 0, 5, OUTPUT_FLIP, -1 },
+    { "No speed limit, nothing drawn, ARM CPU core", "Undrawn, ARM", PACE_UNCAPPED_DRAW_NONE, FRAMESKIP_OFF, 0, 5,
+      OUTPUT_BEST, CPU_CORE_ARM },
+    { "No speed limit, nothing drawn, C CPU core", "Undrawn, C", PACE_UNCAPPED_DRAW_NONE, FRAMESKIP_OFF, 0, 5,
+      OUTPUT_BEST, CPU_CORE_C },
 };
+
+static const char *const cpu_core_names[NUM_CPU_CORES] = { "ARM", "C" };
+
+/* Runs the game on the CPU core set (core < 0) or on the one given. The C
+ * core runs SA-1 games anyway (S9xMainLoop), and is the only one in the PC
+ * build. */
+static void use_cpu_core(int core)
+{
+    Settings.AsmCPU = (core < 0 ? (int) cfg.cpu_core : core) == CPU_CORE_ARM;
+}
 
 #define SPEED_TEST_PARTS (int) (sizeof(speed_test_parts) / sizeof(speed_test_parts[0]))
 
@@ -1029,6 +1045,7 @@ void emu_speed_test(int close_after_seconds)
         cfg.frameskip_value = part->frameskip_value;
         cfg.show_fps = 2;
         pace = part->pace;
+        use_cpu_core(part->cpu_core);
         int output_supported = platform_set_screen_output(part->output);
         snprintf(note, sizeof(note), "Speed test %d/%d (esc stops it)", i + 1, SPEED_TEST_PARTS);
         emu_show_message(note);
@@ -1058,6 +1075,7 @@ void emu_speed_test(int close_after_seconds)
 
     pace = PACE_NORMAL;
     cfg = saved_cfg;
+    use_cpu_core(-1);
     fast_forward = saved_fast_forward;
     speed_test_running = false;
     pending = 0;
@@ -1074,8 +1092,9 @@ void emu_speed_test(int close_after_seconds)
     FILE *f = fopen(path, "w");
     if (f)
     {
-        fprintf(f, "== %s, build %s, cpu %u MHz, screen: %s\n%s\n", game_title, BUILD_NAME,
-                (unsigned) mhz, platform_screen_mode_name(), clock_report);
+        fprintf(f, "== %s, build %s, cpu %u MHz, screen: %s, CPU core set: %s%s\n%s\n", game_title,
+                BUILD_NAME, (unsigned) mhz, platform_screen_mode_name(), cpu_core_names[cfg.cpu_core],
+                Settings.SA1 ? " (SA-1 game: C core)" : "", clock_report);
         for (int i = 0; i < done; i++)
             fprintf(f, "%s\n%s\n", results[i][0], results[i][1]);
         fclose(f);
@@ -1142,6 +1161,7 @@ void emu_benchmark(void)
     reset_timing();
     pending = 0;
 
+    use_cpu_core(-1);
     uint32_t start = platform_ticks();
     while (platform_ticks() - start < 5 * platform_tick_hz())
         S9xMainLoop ();
@@ -1337,6 +1357,7 @@ enum EmuExit emu_run(int may_load_state)
 
     for (;;)
     {
+        use_cpu_core(-1);   /* the menu may have changed it */
         S9xMainLoop ();
 
         if (pending & PENDING_SAVE)
