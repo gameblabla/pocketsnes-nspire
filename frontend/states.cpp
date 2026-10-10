@@ -372,7 +372,7 @@ static long file_bytes(const char *path, long *mtime)
     if (stat(path, &st) != 0)
         return -1;
     if (mtime)
-        *mtime = (long) st.st_mtime;
+        *mtime = (long) st.st_mtim.tv_sec;
     return (long) st.st_size;
 }
 
