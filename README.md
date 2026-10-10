@@ -166,9 +166,8 @@ To help a slow game:
 
 ### Overclocking
 
-**The overclock isn't reliable, and neither is the overclock test.** Use it
-at your own risk, and don't count on a speed being safe just because it
-worked for a while.
+**The overclock isn't reliable.** Use it at your own risk, and don't count
+on a speed being safe just because it worked for a while.
 
 *CPU speed* in *Graphics & speed* runs games faster than the calculator's
 normal 396 MHz, in steps of 12 MHz up to 504 MHz (menus and saving stay at
@@ -182,11 +181,15 @@ differs and isn't predictable. On the calculator this was developed on:
 * 456 MHz worked only sometimes,
 * 480 MHz glitched and froze in games.
 
-The *Overclock test* doesn't help much. On that same calculator it passed
-every speed up to 492 MHz and only failed at 504, while games froze at 480.
-Its memory and CPU checks don't load the calculator the way a game does, so
-its "highest tested" speed is not a safe speed. Treat it as an upper limit
-at best.
+The *Overclock test* (in a game's menu, *Graphics & speed*) plays the game
+you have open: a few seconds at normal speed, then the same seconds again
+at 408, 420, … 504 MHz, twice at each, with memory checks after. The game
+has to do exactly what it did at normal speed, frame by frame; the first
+speed where it doesn't, or that freezes the calculator, ends the test, and
+the speed before it becomes *highest tested*. (The first version only ran
+memory and CPU checks, and passed 492 MHz on a calculator whose games froze
+at 480.) A few seconds of one game still isn't hours of every game, so take
+a step or two below its result to be safe.
 
 If you try overclocking anyway:
 
@@ -242,7 +245,7 @@ whenever that game runs.
 | Screen output (CX II) | **no tearing**, DMA | No tearing shows every frame whole. DMA is a little faster but can show a split line when the picture scrolls fast. |
 | Brightness (CX II) | **calculator's**, 1 (dimmest) … 10 (brightest) | The screen's backlight while PocketSNES runs; the calculator's own comes back when PocketSNES closes. The + and − keys (Hotkeys) change it anywhere, a level at a time. |
 | CPU speed (CX II) | **normal**, highest tested, 408 … 504 MHz | Experimental, not reliable: overclocks while a game runs. See [Overclocking](#overclocking). |
-| Overclock test (CX II) | | Tries 408 to 504 MHz with memory and CPU checks and shows the highest that passed. Not a reliable guide: games can freeze below it. |
+| Overclock test (CX II) | | In a game: plays it at 408 to 504 MHz until it runs differently from normal speed (or freezes), and keeps the highest that worked. About 3 minutes. See [Overclocking](#overclocking). |
 | CPU core | **ARM (fast)**, C | Which emulation of the SNES CPU runs the game: ARM is psnes's, in ARM assembler; C is Snes9x's. They do exactly the same thing (see [The CPU cores](#the-cpu-cores)); try C if a game acts up. Games with an SA-1 chip always use C. |
 | Run speed test | | In a game only: plays from where you are for about 40 seconds in six ways and shows the frame rates. The last two rows run the game without drawing on each CPU core, to compare them. Results also go to `pocketsnes_results.txt.tns`. |
 
@@ -449,13 +452,17 @@ LCD reading the OS's on-chip buffer meanwhile. After each switch, a loop of
 known length is timed against the 32 kHz timer to check the clock really
 changed. Marker files catch freezes. Details in FINDINGS.md.
 
-**The overclock test** fills a buffer of up to 8 MB (far bigger than the
-8 KB data cache) with patterns, reads them back and inverts them, over and
-over, and checks a CPU calculation against its result at normal speed. Two
-rounds of 8 seconds per speed, each after its own clock switch. It misses
-what makes games freeze: on the development calculator it passed 492 MHz
-while games froze at 480. One guess is that its small loops run from the
-CPU's caches, while a game fetches code from memory all the time.
+**The overclock test** first plays 6 seconds of the open game at normal
+speed (no keys pressed, every frame drawn) from a snapshot, and keeps a
+fingerprint of the SNES's work RAM, video RAM, palette and sprite table
+after every frame. Each speed then gets two rounds, each after its own
+clock switch: the same frames again from the same snapshot, which must give
+the same fingerprints (the emulation is deterministic, so any difference is
+the overclock), then 2 seconds of memory checks (patterns over a buffer of
+up to 8 MB, far bigger than the 8 KB data cache) and a CPU calculation.
+The game part is the point: memory and CPU checks alone passed 492 MHz on
+the development calculator, whose games froze at 480. Afterwards the game is
+put back where it was.
 
 **Settings file.** `name=value` lines (`config_version=3`, `frameskip_type`,
 `cpu_speed`, `cpu_core`, `brightness`, `auto_slot`, `quit_new_save`,

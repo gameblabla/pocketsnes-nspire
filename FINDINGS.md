@@ -142,6 +142,11 @@ The CPU clock
   while the emulator's code (about 300 KB, against a 16 KB instruction
   cache) is fetched from memory all the time, and games also run longer and
   warmer. Overclocking is on hold: no known way to make it reliable.
+* Changed (2026-10-10): the overclock test now replays a few seconds of the
+  open game at each speed and compares the SNES's memory frame by frame
+  with a run at normal speed, before the memory checks. Not yet run on the
+  calculator: whether it catches what freezes games at 480 MHz is to be
+  seen.
 
 
 Where the time goes

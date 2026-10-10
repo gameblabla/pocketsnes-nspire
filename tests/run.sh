@@ -216,17 +216,29 @@ check "$(clock_log "$OUT/clockstuck/log.txt")" \
 check "$(exists "$OUT/clockstuck/ndless/pocketsnes_clock.tns")" no "... and leaves no freeze marker"
 
 echo "== Overclock test"
-# From the game list's settings, on a PC acting like a calculator that
-# doesn't go past 444 MHz: 408 to 444 pass, 456 doesn't switch.
-setup octest MonsterFarmJump.sfc
-octest_script=$(realpath tests/scripts/overclock_test.txt)
-(cd "$OUT/octest" && "$HOST" --script "$octest_script" --shots shots \
-    --exe-dir ndless --clock-limit 37 >/dev/null 2>&1)
+# In a game, on a PC acting like a calculator that doesn't go past 444 MHz:
+# 408 to 444 pass, 456 doesn't switch.
+setup octest MonsterFarmJump.sfc config_version=3 save_on_exit=0 load_on_start=0
+play_logged octest tests/scripts/overclock_test.txt MonsterFarmJump.sfc --clock-limit 37
 d=$OUT/octest/ndless
 check "$(grep -c '^highest_tested_mhz=444$' "$d/pocketsnes.cfg.tns")" 1 "the overclock test finds 444 MHz"
 check "$(grep -c -e '^456 MHz: didn.t switch' -e '^Highest tested speed: 444 MHz$' "$d/pocketsnes_overclock.txt.tns")" 2 \
     "... and writes what happened at each speed"
 check "$(exists "$d/pocketsnes_octest.tns")" no "... and leaves no marker"
+check "$(grep -c '^message: Overclock test: 444 MHz, 2 of 2' "$OUT/octest/log.txt")" 1 \
+    "... and played the game again at each speed (the game ran the same at normal speed and raised)"
+# A calculator that runs the game wrongly above 420 MHz: the game check
+# notices at 432, although the memory checks would pass there.
+setup ocglitch MonsterFarmJump.sfc config_version=3 save_on_exit=0 load_on_start=0
+play_logged ocglitch tests/scripts/overclock_test.txt MonsterFarmJump.sfc --glitch-above 35
+d=$OUT/ocglitch/ndless
+check "$(grep -c -e '^432 MHz: game went wrong' -e '^Highest tested speed: 420 MHz$' "$d/pocketsnes_overclock.txt.tns")$(grep -c '^highest_tested_mhz=420$' "$d/pocketsnes.cfg.tns")" 21 \
+    "a game that runs differently at 432 MHz stops the test there: 420 MHz is the highest"
+# The game list has no game to play: the test only says to open one.
+setup oclist MonsterFarmJump.sfc config_version=3 highest_tested_mhz=444
+play oclist tests/scripts/overclock_list.txt
+check "$(grep -c '^highest_tested_mhz=444$' "$OUT/oclist/ndless/pocketsnes.cfg.tns")$(exists "$OUT/oclist/ndless/pocketsnes_overclock.txt.tns")" 1no \
+    "from the game list the overclock test asks for a game and changes nothing"
 # The test froze the calculator at 456 MHz: the next start keeps 444.
 setup ocfreeze MonsterFarmJump.sfc config_version=3 highest_tested_mhz=0
 printf 'testing=456\npassed=444\n' > "$OUT/ocfreeze/ndless/pocketsnes_octest.tns"

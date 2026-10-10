@@ -161,7 +161,7 @@ static void update_speed_names(void);
 
 static enum Step run_overclock_test(void)
 {
-    overclock_test_run();
+    overclock_test_run(in_game);
     update_speed_names();
     return STEP_STAY;
 }
@@ -264,7 +264,7 @@ static void update_speed_names(void)
            "Overclocks the CX II in games. Highest tested is what the overclock test passed.", \
            5, &cfg.cpu_speed, cpu_speeds, NUM_CPU_SPEEDS - 1, ICON_NONE), \
     { OPTION_ACTION, "Overclock test", \
-      "Finds this calculator's highest safe speed (408-504 MHz): about 2 minutes.", \
+      "Plays the open game at 408-504 MHz until it goes wrong: about 3 minutes.", \
       6, NULL, NULL, 0, run_overclock_test, NULL, NULL, 0, ICON_SPEED, tested_result }, \
     CHOICE("CPU core", \
            "ARM: the SNES CPU in ARM assembler (faster). C: the old core, if a game acts up.", \

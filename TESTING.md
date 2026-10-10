@@ -69,7 +69,10 @@ freeze at a raised speed is undone at the next start), that in-game saves
 are written without quitting, the menu, the welcome screen on the first
 start, the game list and its menu (number keys starting games, moving a game
 with tab or the menu, the order kept, esc putting it back, sorting A to Z
-again), and the overclock test (with `--clock-limit 37` it must find 444 MHz;
+again), and the overclock test (run in a game; with `--clock-limit 37` it
+must find 444 MHz, with `--glitch-above 35`, which makes the PC report the
+game running differently above 420 MHz, it must stop at 432; from the game
+list it only asks for a game;
 a freeze marker left by the test is picked up at the next start; "highest
 tested" runs games at the result; old settings files keep their CPU speed),
 where the save made when leaving goes (the Auto slot, over the newest

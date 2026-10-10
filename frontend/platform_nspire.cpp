@@ -937,6 +937,11 @@ int platform_cpu_multiplier(void)
     return is_cx2 ? CLOCK_MULTIPLIER(CLOCK_CONTROL) : 0;
 }
 
+int platform_test_glitch(void)
+{
+    return 0;
+}
+
 void platform_clock_report(char *text, size_t size)
 {
     if (!is_cx2)

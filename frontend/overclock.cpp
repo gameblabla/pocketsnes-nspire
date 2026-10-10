@@ -4,6 +4,7 @@
 
 #include "config.h"
 #include "draw.h"
+#include "emu.h"
 #include "gui.h"
 #include "overclock.h"
 #include "platform.h"
@@ -17,12 +18,13 @@
 #define LAST_MULTIPLIER  42
 #define SPEEDS (LAST_MULTIPLIER - FIRST_MULTIPLIER + 1)
 #define ROUNDS 2
-#define ROUND_SECONDS 8
+#define GAME_SECONDS 6     /* of the game recorded at normal speed */
+#define MEMORY_SECONDS 2   /* of memory and CPU checks after it, each round */
 
 #define MARKER  "pocketsnes_octest.tns"
 #define RESULTS "pocketsnes_overclock.txt.tns"
 
-enum Outcome { NOT_TRIED, PASSED, NOT_REACHED, MEMORY_ERRORS, CPU_ERRORS, STOPPED };
+enum Outcome { NOT_TRIED, PASSED, NOT_REACHED, GAME_ERRORS, MEMORY_ERRORS, CPU_ERRORS, STOPPED };
 
 struct SpeedResult
 {
@@ -174,6 +176,7 @@ static const char *outcome_text(const struct SpeedResult *r)
     {
     case PASSED: return "passed";
     case NOT_REACHED: return "didn't switch";
+    case GAME_ERRORS: return "game went wrong";
     case MEMORY_ERRORS: return "memory errors";
     case CPU_ERRORS: return "CPU errors";
     case STOPPED: return "stopped";
@@ -188,7 +191,8 @@ static void write_results(void)
     FILE *f = fopen(path, "w");
     if (!f)
         return;
-    fprintf(f, "PocketSNES overclock test (%d rounds of %d s per speed)\n", ROUNDS, ROUND_SECONDS);
+    fprintf(f, "PocketSNES overclock test (%d rounds per speed: %d s of the game, %d s of checks)\n", ROUNDS,
+            GAME_SECONDS, MEMORY_SECONDS);
     for (int i = 0; i < SPEEDS; i++)
     {
         const struct SpeedResult *r = &results[i];
@@ -215,7 +219,7 @@ static void draw_list(void)
     if (best_mhz)
         snprintf(right, sizeof(right), "passed up to %u MHz", (unsigned) best_mhz);
     else
-        snprintf(right, sizeof(right), "%d speeds, %d s each", SPEEDS, ROUNDS * ROUND_SECONDS);
+        snprintf(right, sizeof(right), "%d speeds", SPEEDS);
     ui_frame("Overclock test", right);
 
     for (int i = 0; i < SPEEDS; i++)
@@ -243,7 +247,7 @@ static void draw_list(void)
 static void draw_testing(void)
 {
     draw_list();
-    ui_help("Memory and CPU checks at each speed. A freeze is OK: reset, and PocketSNES keeps the result.");
+    ui_help("Game and memory checks at each speed. A freeze is OK: reset, and PocketSNES keeps the result.");
     static const struct UiHint stop[] = { { "esc", "Stop" } };
     ui_footer(stop, 1);
 }
@@ -271,14 +275,24 @@ static void draw_done(const void *data)
 
 /* ---- The test ---- */
 
-/* One round at the speed being tried: memory and CPU checks until the time
- * is up. Returns the outcome (PASSED when nothing went wrong). */
+/* One round at the speed being tried: the recorded seconds of the game,
+ * then memory and CPU checks until the time is up. Returns the outcome
+ * (PASSED when nothing went wrong). */
 static enum Outcome run_round(int index)
 {
     struct SpeedResult *r = &results[index];
+    char note[64];
+    snprintf(note, sizeof(note), "Overclock test: %d MHz, %d of %d (esc stops it)", speed_mhz(index),
+             test_round + 1, ROUNDS);
+    int game = emu_game_check_replay(note);
+    if (game < 0)
+        return STOPPED;
+    if (game == 0)
+        return GAME_ERRORS;
+
     uint64_t bytes_before = bytes_checked;
     round_start = platform_ticks();
-    uint32_t length = ROUND_SECONDS * platform_tick_hz();
+    uint32_t length = MEMORY_SECONDS * platform_tick_hz();
     enum Outcome outcome = PASSED;
 
     while (platform_ticks() - round_start < length)
@@ -317,13 +331,18 @@ static enum Outcome run_round(int index)
     return outcome;
 }
 
-void overclock_test_run(void)
+void overclock_test_run(int in_game)
 {
     char path[600];
 
     if (!platform_cpu_normal_mhz())
     {
         gui_message("The overclock test is for the TI-Nspire CX II.", NULL);
+        return;
+    }
+    if (!in_game)
+    {
+        gui_message("The overclock test plays a game.", "Start one, then run it from its menu.");
         return;
     }
     memset(results, 0, sizeof(results));
@@ -336,6 +355,18 @@ void overclock_test_run(void)
         return;
     }
     gui_wait_release();
+
+    /* What the game does at normal speed, to compare with. */
+    int recorded = emu_game_check_record(GAME_SECONDS, "Overclock test: normal speed first (esc stops it)");
+    if (recorded <= 0)
+    {
+        emu_game_check_end();
+        stop_checks();
+        if (!recorded)
+            gui_message("Not enough free memory for the overclock test.", NULL);
+        gui_wait_release();
+        return;
+    }
 
     int stopped = 0;
     for (int i = 0; i < SPEEDS; i++)
@@ -368,6 +399,7 @@ void overclock_test_run(void)
     }
 
     stop_checks();
+    emu_game_check_end();
     file_path(path, sizeof(path), MARKER);
     remove(path);
     write_results();

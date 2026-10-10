@@ -59,4 +59,15 @@ void emu_speed_test(int close_after_seconds);
  * the speed test and closes it. */
 void emu_benchmark(void);
 
+/* The overclock test's game check. emu_game_check_record plays the game
+ * from where it is, at the speed set now, for about the seconds given, and
+ * keeps a fingerprint of the SNES's memory after every frame: 1 when done,
+ * 0 without the memory for it, -1 stopped with esc. Each
+ * emu_game_check_replay then plays the same frames again from the same
+ * point, showing note, and compares: 1 the same, 0 different, -1 stopped.
+ * emu_game_check_end puts the game back where it was. */
+int  emu_game_check_record(uint32_t seconds, const char *note);
+int  emu_game_check_replay(const char *note);
+void emu_game_check_end(void);
+
 #endif

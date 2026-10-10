@@ -1,0 +1,29 @@
+# In the game list (on a folder): menu, Graphics & speed (first entry), then
+# Overclock test (seventh line), which needs a game: it only says so.
+wait 5
+press menu
+wait 5
+press enter
+wait 5
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press enter
+wait 10
+shot message.png
+press enter
+wait 5
+press esc
+wait 3
+press esc
+wait 3
+quit

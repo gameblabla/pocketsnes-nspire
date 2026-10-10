@@ -1218,6 +1218,106 @@ void emu_benchmark(void)
     platform_write_memory_tests(path);
 }
 
+/* ---- The overclock test's game check ---- */
+
+/* About 2 KB of fingerprints is plenty: the recording is a few seconds. */
+#define CHECK_MAX_FRAMES 600
+
+static uint8 *check_snapshot;
+static uint32 check_snapshot_size;
+static uint32_t check_prints[CHECK_MAX_FRAMES];
+static int check_frames;
+static bool check_saved_fast_forward, check_saved_sram_dirty;
+
+static uint32_t print_words(uint32_t h, const void *data, size_t bytes)
+{
+    const uint32_t *w = (const uint32_t *) data;
+    for (size_t i = 0; i < bytes / 4; i++)
+        h = (h ^ w[i]) * 16777619u;
+    return h;
+}
+
+/* What the game has in the SNES's work RAM, video RAM, palette and sprite
+ * table: a game that ran differently has something different there. */
+static uint32_t memory_print(void)
+{
+    uint32_t h = 2166136261u;
+    h = print_words(h, Memory.RAM, 0x20000);
+    h = print_words(h, Memory.VRAM, 0x10000);
+    h = print_words(h, PPU.CGDATA, sizeof(PPU.CGDATA));
+    h = print_words(h, PPU.OAMData, sizeof(PPU.OAMData));
+    return platform_test_glitch() ? h ^ 1 : h;
+}
+
+/* Plays from the snapshot with no keys pressed and every frame drawn,
+ * recording the fingerprints (until the time is up) or comparing with
+ * them. 1 done (and the same), 0 different, -1 stopped. */
+static int check_play(bool record, uint32_t seconds, const char *note)
+{
+    S9xUnfreezeFromMemory(check_snapshot, check_snapshot_size);
+    clear_screens_later();
+    emu_show_message(note);
+    reset_timing();
+    pending = 0;
+
+    uint32_t start = platform_ticks(), length = seconds * platform_tick_hz();
+    int frames = record ? CHECK_MAX_FRAMES : check_frames;
+    for (int i = 0; i < frames; i++)
+    {
+        if (record && platform_ticks() - start >= length)
+        {
+            frames = i;
+            break;
+        }
+        S9xMainLoop ();
+        if (pending & PENDING_MENU)
+            return -1;
+        uint32_t print = memory_print();
+        if (record)
+            check_prints[i] = print;
+        else if (print != check_prints[i])
+            return 0;
+    }
+    if (record)
+        check_frames = frames;
+    return 1;
+}
+
+int emu_game_check_record(uint32_t seconds, const char *note)
+{
+    if (!S9xFreezeToMemory(&check_snapshot, &check_snapshot_size))
+        return 0;
+    check_saved_fast_forward = fast_forward;
+    check_saved_sram_dirty = sram_dirty;
+    fast_forward = false;
+    speed_test_running = true;   /* no keys, and esc stops it */
+    pace = PACE_UNCAPPED_DRAW_ALL;
+    use_cpu_core(-1);
+    return check_play(true, seconds, note);
+}
+
+int emu_game_check_replay(const char *note)
+{
+    return check_play(false, 0, note);
+}
+
+void emu_game_check_end(void)
+{
+    if (!check_snapshot)
+        return;
+    pace = PACE_NORMAL;
+    fast_forward = check_saved_fast_forward;
+    speed_test_running = false;
+    pending = 0;
+    S9xUnfreezeFromMemory(check_snapshot, check_snapshot_size);
+    sram_dirty = check_saved_sram_dirty;
+    free(check_snapshot);
+    check_snapshot = NULL;
+    clear_screens_later();
+    shown_multiplier = -1;   /* the game shows its clock again when it resumes */
+    reset_timing();
+}
+
 /* ---- CPU speed ---- */
 
 /* A raised CPU speed (Graphics & speed) is only used while a game runs:
