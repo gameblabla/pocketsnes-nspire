@@ -45,15 +45,16 @@ static const char *const action_ids[NUM_ACTIONS] =
     "brighter", "dimmer"
 };
 
-/* The PocketSNES button layout (README.md), plus the hotkeys. The newer
- * hotkeys start unbound, except brightness: + and -, as in gpSP (and the OS,
- * with ctrl), so Select is (-) rather than PocketSNES's -. */
+/* The default layout (README.md): the one played with while PocketSNES was
+ * developed. The d-pad on 8 4 6 5, A B X Y on shift del ctrl var (the
+ * SNES's diamond), L R on tab menu, Start Select on cat frac; brightness on
+ * + and -, as in gpSP (and the OS, with ctrl). */
 static const uint8_t default_keys[NUM_ACTIONS] =
 {
     KEY_8, KEY_5, KEY_4, KEY_6,
-    KEY_CTRL, KEY_SHIFT, KEY_VAR, KEY_DEL, KEY_TAB, KEY_MENU, KEY_ENTER, KEY_NEGATIVE,
+    KEY_SHIFT, KEY_DEL, KEY_CTRL, KEY_VAR, KEY_TAB, KEY_MENU, KEY_CAT, KEY_FRAC,
     KEY_ESC, KEY_Q, KEY_F, KEY_S, KEY_L,
-    0, 0, 0, 0, 0,
+    KEY_N, KEY_RPAREN, KEY_LPAREN, 0, KEY_R,
     KEY_PLUS, KEY_MINUS
 };
 
@@ -76,9 +77,9 @@ void config_default_keys(void)
 
 static void default_settings_into(struct Config *c)
 {
-    c->frameskip_type = FRAMESKIP_AUTO;
+    c->frameskip_type = FRAMESKIP_OFF;
     c->frameskip_value = 5;
-    c->show_fps = 0;
+    c->show_fps = 1;
     c->auto_increment = 1;
     c->save_on_exit = 1;
     c->auto_slot = 0;
@@ -89,6 +90,17 @@ static void default_settings_into(struct Config *c)
     c->cpu_speed = CPU_SPEED_NORMAL;
     c->cpu_core = CPU_CORE_ARM;
     c->brightness = 0;
+}
+
+void config_reset_all(void)
+{
+    char rom_dir[sizeof(cfg.rom_dir)];
+    snprintf(rom_dir, sizeof(rom_dir), "%s", cfg.rom_dir);
+    default_settings_into(&cfg);
+    default_keys_into(&cfg);
+    snprintf(cfg.rom_dir, sizeof(cfg.rom_dir), "%s", rom_dir);
+    global = cfg;
+    config_save();
 }
 
 static void copy_settings(struct Config *to, const struct Config *from)

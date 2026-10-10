@@ -124,6 +124,10 @@ extern struct Config cfg;
 extern const char *const action_names[NUM_ACTIONS];
 
 void config_default_keys(void);
+/* Every setting and key for all games back to the default (the game list's
+ * Settings); the ROM folder and the overclock test's result stay, and so do
+ * games' own settings. Saves it. */
+void config_reset_all(void);
 
 /* Loads pocketsnes.cfg.tns from the program's folder (missing settings get
  * their defaults). */

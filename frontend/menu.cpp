@@ -151,6 +151,16 @@ static enum Step reset_hotkeys(void)
     return STEP_STAY;
 }
 
+static enum Step reset_everything(void)
+{
+    if (gui_confirm("Put every setting and key back", "to the defaults, for all games?"))
+    {
+        config_reset_all();
+        set_status("Every setting and key is back to the default.");
+    }
+    return STEP_STAY;
+}
+
 static enum Step run_speed_test(void)
 {
     emu_speed_test(0);
@@ -347,7 +357,7 @@ static struct Option hotkey_options[] =
     BINDING_OPTION(ACTION_RESTART, 9),
     BINDING_OPTION(ACTION_BRIGHTER, 10),
     BINDING_OPTION(ACTION_DIMMER, 11),
-    ACTION("Reset to defaults", "Back to esc menu, Q quit, F fast forward, S save, L load, + and - brightness.",
+    ACTION("Reset to defaults", "esc menu, Q quit, F fast, S save, L load, N newest, ( ) slots, R restart, + - brightness.",
            13, reset_hotkeys, ICON_RESTART),
     BACK_OPTION(14),
 };
@@ -426,6 +436,8 @@ static struct Option list_options[] =
 {
     SETTINGS_SUBMENUS(0, &list_graphics_menu),
     SUBMENU("Controls & about", "All your keys on one page, and the credits.", 4, &about_menu, ICON_INFO),
+    ACTION("Reset all settings", "Every setting and key back to the default, for all games.", 5,
+           reset_everything, ICON_RESTART),
     ACTION("Back to the game list", "Close this menu.", 6, back_to_list, ICON_BACK),
 };
 

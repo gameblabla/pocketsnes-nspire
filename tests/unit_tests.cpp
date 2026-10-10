@@ -356,15 +356,17 @@ static void test_config(void)
     CHECK(cfg.auto_increment == 1 && cfg.save_on_exit == 1 && cfg.load_on_start == 1,
           "defaults: auto-increment, save when leaving and load on start are on");
     CHECK(cfg.cpu_speed == CPU_SPEED_NORMAL && cfg.screen_dma == 0, "defaults: normal CPU speed, no DMA");
-    CHECK(cfg.keys[ACTION_A][0].key == KEY_CTRL && !cfg.keys[ACTION_A][0].with && !cfg.keys[ACTION_A][1].key,
-          "defaults: A is ctrl, with no second key");
-    CHECK(cfg.keys[ACTION_LOAD_NEWEST][0].key == 0, "defaults: Load newest has no key");
+    CHECK(cfg.keys[ACTION_A][0].key == KEY_SHIFT && !cfg.keys[ACTION_A][0].with && !cfg.keys[ACTION_A][1].key,
+          "defaults: A is shift, with no second key");
+    CHECK(cfg.keys[ACTION_LOAD_NEWEST][0].key == KEY_N && cfg.keys[ACTION_SHOW_FPS][0].key == 0,
+          "defaults: Load newest on N, the FPS counter hotkey has no key");
+    CHECK(cfg.frameskip_type == FRAMESKIP_OFF && cfg.show_fps == 1, "defaults: frameskip off, FPS counter on");
     CHECK(cfg.auto_slot == 0 && cfg.quit_new_save == 1 && cfg.brightness == 0,
           "defaults: no auto slot, a new save on quit, the calculator's own brightness");
     CHECK(cfg.keys[ACTION_BRIGHTER][0].key == KEY_PLUS && cfg.keys[ACTION_DIMMER][0].key == KEY_MINUS,
           "defaults: brightness on + and -");
-    CHECK(cfg.keys[ACTION_START][0].key == KEY_ENTER && cfg.keys[ACTION_SELECT][0].key == KEY_NEGATIVE,
-          "defaults: Start on enter, Select on (-)");
+    CHECK(cfg.keys[ACTION_START][0].key == KEY_CAT && cfg.keys[ACTION_SELECT][0].key == KEY_FRAC,
+          "defaults: Start on cat, Select on frac");
 
     /* A version 1 file (no config_version): its choices are kept, the three
      * save options come on. */
@@ -382,7 +384,7 @@ static void test_config(void)
      * keys included; bad keys are dropped. */
     write_file(global_path, "config_version=2\nauto_increment=0\nsave_on_exit=0\nload_on_start=1\n"
                             "cpu_speed=3\nscreen_dma=1\nkey_a=6\nkey_a_2=121+20\nkey_save_state_2=121+23\n"
-                            "key_b=999\nkey_x=113\nkey_y=121+121\nkey_next_slot_2=20\n");
+                            "key_b=999\nkey_x=113\nkey_y=121+121\nkey_next_slot=0\nkey_next_slot_2=20\n");
     config_load();
     CHECK(cfg.auto_increment == 0 && cfg.save_on_exit == 0 && cfg.load_on_start == 1,
           "version 2: save options read as written");
@@ -426,7 +428,7 @@ static void test_config(void)
     CHECK(cfg.brightness == BRIGHTNESS_LEVELS && cfg.auto_slot == 1, "out of range values are clamped");
     write_file(global_path, "config_version=2\nauto_increment=0\nsave_on_exit=0\nload_on_start=1\n"
                             "cpu_speed=3\nscreen_dma=1\nkey_a=6\nkey_a_2=121+20\nkey_save_state_2=121+23\n"
-                            "key_b=999\nkey_x=113\nkey_y=121+121\nkey_next_slot_2=20\n");
+                            "key_b=999\nkey_x=113\nkey_y=121+121\nkey_next_slot=0\nkey_next_slot_2=20\n");
     config_load();
 
     /* Saving and loading again gives the same. */
@@ -551,6 +553,21 @@ static void test_selfstore(void)
     program_file[0] = 0;
 }
 
+static void test_reset_all(void)
+{
+    config_load();
+    cfg.show_fps = 0;
+    cfg.frameskip_type = FRAMESKIP_AUTO;
+    cfg.keys[ACTION_START][0].key = KEY_ENTER;
+    snprintf(cfg.rom_dir, sizeof(cfg.rom_dir), "/documents/games");
+    config_save();
+    config_reset_all();
+    config_load();
+    CHECK(cfg.show_fps == 1 && cfg.frameskip_type == FRAMESKIP_OFF && cfg.keys[ACTION_START][0].key == KEY_CAT,
+          "Reset all settings: settings and keys back to the defaults, and saved");
+    CHECK(strcmp(cfg.rom_dir, "/documents/games") == 0, "... and the ROM folder stays");
+}
+
 static void test_brightness(void)
 {
     CHECK(brightness_value(10) == 0 && brightness_value(1) == 225 && brightness_value(7) == 75,
@@ -647,6 +664,7 @@ int main(void)
     test_config();
     test_brightness();
     test_selfstore();
+    test_reset_all();
     test_bindings();
 
     char command[700];

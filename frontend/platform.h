@@ -59,9 +59,12 @@
 #define KEY_MULTIPLY    73
 #define KEY_VAR         82
 #define KEY_MINUS       83
+#define KEY_RPAREN      84
 #define KEY_PERIOD      85
+#define KEY_LPAREN      86
 #define KEY_5           87
 #define KEY_CAT         88
+#define KEY_FRAC        89
 #define KEY_DEL         90
 #define KEY_SCRATCHPAD  91
 #define KEY_CLICK       98

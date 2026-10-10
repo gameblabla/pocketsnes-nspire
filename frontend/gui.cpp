@@ -140,6 +140,32 @@ static void draw_message(const void *data)
     ui_dialog(NULL, lines, 2, ok, 1);
 }
 
+static void draw_question(const void *data)
+{
+    const struct MessageLines *m = (const struct MessageLines *) data;
+    static const struct UiHint yes_no[] = { { "enter", "Yes" }, { "esc", "No" } };
+    const char *lines[2] = { m->line1, m->line2 };
+    ui_frame(NULL, NULL);
+    ui_dialog(NULL, lines, 2, yes_no, 2);
+}
+
+int gui_confirm(const char *line1, const char *line2)
+{
+    struct MessageLines m = { line1, line2 };
+    gui_wait_release();
+    for (;;)
+    {
+        draw_question(&m);
+        gui_present();
+        enum GuiAction action = gui_input();
+        if (action == GUI_SELECT || action == GUI_BACK || action == GUI_QUIT)
+        {
+            gui_wait_release();
+            return action == GUI_SELECT;
+        }
+    }
+}
+
 void gui_message(const char *line1, const char *line2)
 {
     struct MessageLines m = { line1, line2 };

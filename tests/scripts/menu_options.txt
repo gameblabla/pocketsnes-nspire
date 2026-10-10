@@ -30,7 +30,7 @@ press right
 wait 3
 press esc
 wait 3
-# Graphics & speed (entry 3): FPS counter on, screen output DMA, CPU speed
+# Graphics & speed (entry 3): FPS counter from on (the default) to detailed, screen output DMA, CPU speed
 # (past Brightness) 432 (four steps right: highest tested, 408, 420, 432)
 press up
 wait 3

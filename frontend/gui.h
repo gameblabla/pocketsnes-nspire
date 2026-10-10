@@ -47,5 +47,7 @@ void gui_show_until_key(void (*draw)(const void *data), const void *data);
 
 /* Draws a message and waits for a key. */
 void gui_message(const char *line1, const char *line2);
+/* Asks: enter is yes (1), esc no (0). */
+int gui_confirm(const char *line1, const char *line2);
 
 #endif

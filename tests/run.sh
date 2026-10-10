@@ -292,8 +292,8 @@ echo "== Menu"
 setup menu MonsterFarmJump.sfc config_version=2
 play menu tests/scripts/menu_options.txt MonsterFarmJump.sfc
 cfg=$OUT/menu/ndless/PocketSNES_saves/pocketsnes.cfg.tns
-check "$(grep -c -e '^auto_increment=0$' -e '^save_on_exit=0$' -e '^load_on_start=0$' -e '^show_fps=1$' "$cfg")" 4 \
-    "menu turned off auto-increment, saving when leaving and loading on start, and the FPS counter on"
+check "$(grep -c -e '^auto_increment=0$' -e '^save_on_exit=0$' -e '^load_on_start=0$' -e '^show_fps=2$' "$cfg")" 4 \
+    "menu turned off auto-increment, saving when leaving and loading on start, and the FPS counter to detailed"
 check "$(grep -c -e '^screen_dma=1$' -e '^cpu_speed=4$' "$cfg")" 2 "menu set the screen output to DMA and the CPU speed to 432 MHz"
 check "$(grep -c -e '^key_a=6$' -e '^key_a_2=121+20$' -e '^key_save_state_2=121+23$' "$cfg")" 3 \
     "menu set A to Z and shift+3, and shift+S as a second key for Save state"
