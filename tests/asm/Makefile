@@ -24,13 +24,19 @@ LIBS    = $(ZLIB)/libz.a
 CORE_SRC = $(wildcard pocketsnes/snes9x/*.cpp)
 CORE_OBJ = $(patsubst %.cpp,$(BUILD)/%.o,$(CORE_SRC))
 ASM_DEPS = $(wildcard pocketsnes/arm/*.s)
-COMMON   = $(BUILD)/tests/asm/stubs.o $(BUILD)/tests/asm/newlib_shim.o $(BUILD)/arm/global.o
+COMMON   = $(BUILD)/tests/asm/stubs.o $(BUILD)/tests/asm/newlib_shim.o $(BUILD)/arm/global.o \
+           $(BUILD)/frontend/romzip.o
 
 all: $(BUILD)/opcode_test $(BUILD)/game_test $(BUILD)/game_trace
 
 $(BUILD)/pocketsnes/%.o: pocketsnes/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CORE_FLAGS) -MMD -c $< -o $@
+
+# The ROM loader reads zipped ROMs through the front end's romzip.cpp.
+$(BUILD)/frontend/romzip.o: frontend/romzip.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(TEST_FLAGS) -MMD -c $< -o $@
 
 $(BUILD)/tests/asm/%.o: tests/asm/%.cpp
 	@mkdir -p $(dir $@)

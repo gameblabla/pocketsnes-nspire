@@ -239,6 +239,19 @@ check "$(grep -c -e '^456 MHz: didn.t switch' -e '^Highest tested speed: 444 MHz
 check "$(exists "$d/PocketSNES_saves/pocketsnes_octest.tns")" no "... and leaves no marker"
 check "$(grep -c '^message: Overclock test: 444 MHz, 2 of 2' "$OUT/octest/log.txt")" 1 \
     "... and played the game again at each speed (the game ran the same at normal speed and raised)"
+# Super Mario World talks to the sound chip, which this port answers with
+# rand(): the game check has to start each run the same way, or it sees a
+# difference at every speed (it stopped at 408 MHz on the calculator).
+SMW="$HOME/nspire/build/testroms/Super Mario World (USA).sfc.tns"
+if [ -e "$SMW" ]; then
+    setup ocsmw MonsterFarmJump.sfc config_version=3 save_on_exit=0 load_on_start=1
+    cp "$SMW" "$OUT/ocsmw/roms/SMW.sfc.tns"
+    mkdir -p "$OUT/ocsmw/roms/PocketSNES_saves"
+    cp "$HOME/nspire/build/testroms/smw.sv001.tns" "$OUT/ocsmw/roms/PocketSNES_saves/SMW.sfc.sv001.tns"
+    play_logged ocsmw tests/scripts/overclock_test.txt SMW.sfc --clock-limit 37
+    check "$(grep -c '^Highest tested speed: 444 MHz$' "$OUT/ocsmw/ndless/PocketSNES_saves/pocketsnes_overclock.txt.tns")" 1 \
+        "Super Mario World (sound chip reads) runs the same at every speed in the overclock test"
+fi
 # A calculator that runs the game wrongly above 420 MHz: the game check
 # notices at 432, although the memory checks would pass there.
 setup ocglitch MonsterFarmJump.sfc config_version=3 save_on_exit=0 load_on_start=0

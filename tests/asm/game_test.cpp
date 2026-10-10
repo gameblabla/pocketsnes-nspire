@@ -39,6 +39,10 @@ static uint8 *screen_buffer, *sub_screen, *zbuffer, *sub_zbuffer;
 static uint8 *screen_start;
 static int frame_number;
 static const char *input_kind = "none";
+/* INPUT ending in "-replay": after the frames, the overclock test's game
+ * check (emu.cpp): a snapshot, then the same frames twice from it with no
+ * keys, which must leave the same memory after every frame. */
+static bool replay;
 static bool no_render;   /* INPUT ends in "-norender": nothing drawn (for timing) */
 
 extern "C"
@@ -325,6 +329,12 @@ int main (int argc, char **argv)
 	    *suffix = 0;
 	    no_render = true;
 	}
+	suffix = strstr (kind, "-replay");
+	if (suffix)
+	{
+	    *suffix = 0;
+	    replay = true;
+	}
 	input_kind = kind;
     }
 #ifdef GAME_TRACE
@@ -405,6 +415,46 @@ int main (int argc, char **argv)
 	    snprintf (path, sizeof (path), "%s%04d.png", png_prefix, frame_number);
 	    write_png (path, (const uint16 *) screen_start, SNES_WIDTH, PPU.ScreenHeight, SCREEN_W);
 	}
+    }
+
+    if (replay)
+    {
+	static uint32 prints [2][360];
+	uint8 *snapshot;
+	uint32 snapshot_size;
+	input_kind = "none";
+	if (!S9xFreezeToMemory (&snapshot, &snapshot_size))
+	    return 1;
+	/* What a snapshot leaves out, as emu.cpp keeps it. */
+	struct SCPUState cpu = CPU;
+	struct SICPU icpu = ICPU;
+	struct SIAPU iapu = IAPU;
+	uint8 open_bus = OpenBus;
+	int first_different = -1;
+	for (int pass = 0; pass < 2; pass++)
+	{
+	    S9xUnfreezeFromMemory (snapshot, snapshot_size);
+	    CPU = cpu;
+	    ICPU = icpu;
+	    IAPU = iapu;
+	    OpenBus = open_bus;
+	    srand (1);
+	    for (int i = 0; i < 360; i++)
+	    {
+		IPPU.RenderThisFrame = TRUE;
+		S9xMainLoop ();
+		uint32 h = crc32 (0, Memory.RAM, 0x20000);
+		h = crc32 (h, Memory.VRAM, 0x10000);
+		h = crc32 (h, (const Bytef *) PPU.CGDATA, sizeof (PPU.CGDATA));
+		prints [pass][i] = crc32 (h, PPU.OAMData, sizeof (PPU.OAMData));
+		if (pass == 1 && first_different < 0 && prints [1][i] != prints [0][i])
+		    first_different = i + 1;
+	    }
+	}
+	if (first_different < 0)
+	    printf ("replay: the same for 360 frames\n");
+	else
+	    printf ("replay: different from frame %d\n", first_different);
     }
     return 0;
 }

@@ -1237,6 +1237,23 @@ static uint32 check_snapshot_size;
 static uint32_t check_prints[CHECK_MAX_FRAMES];
 static int check_frames;
 static bool check_saved_fast_forward, check_saved_sram_dirty;
+/* What a snapshot leaves out but the game can depend on: some CPU state,
+ * open bus, and the stand-in for the sound chip, which answers with rand()
+ * (ppu.cpp); each run starts from these and the same rand() seed, or games
+ * that talk to the sound chip (SMW) run differently every time. */
+static struct SCPUState check_cpu;
+static struct SICPU check_icpu;
+static struct SIAPU check_iapu;
+static uint8 check_open_bus;
+
+static void check_restore(void)
+{
+    S9xUnfreezeFromMemory(check_snapshot, check_snapshot_size);
+    CPU = check_cpu;
+    ICPU = check_icpu;
+    IAPU = check_iapu;
+    OpenBus = check_open_bus;
+}
 
 static uint32_t print_words(uint32_t h, const void *data, size_t bytes)
 {
@@ -1263,7 +1280,8 @@ static uint32_t memory_print(void)
  * them. 1 done (and the same), 0 different, -1 stopped. */
 static int check_play(bool record, uint32_t seconds, const char *note)
 {
-    S9xUnfreezeFromMemory(check_snapshot, check_snapshot_size);
+    check_restore();
+    srand(1);
     clear_screens_later();
     emu_show_message(note);
     reset_timing();
@@ -1296,6 +1314,10 @@ int emu_game_check_record(uint32_t seconds, const char *note)
 {
     if (!S9xFreezeToMemory(&check_snapshot, &check_snapshot_size))
         return 0;
+    check_cpu = CPU;
+    check_icpu = ICPU;
+    check_iapu = IAPU;
+    check_open_bus = OpenBus;
     check_saved_fast_forward = fast_forward;
     check_saved_sram_dirty = sram_dirty;
     fast_forward = false;
@@ -1318,7 +1340,7 @@ void emu_game_check_end(void)
     fast_forward = check_saved_fast_forward;
     speed_test_running = false;
     pending = 0;
-    S9xUnfreezeFromMemory(check_snapshot, check_snapshot_size);
+    check_restore();
     sram_dirty = check_saved_sram_dirty;
     free(check_snapshot);
     check_snapshot = NULL;

@@ -83,5 +83,24 @@ game alttp_boot alttp.sfc - start
 game yi_state yi.sfc yi.sv001 walk
 game yi_boot yi.sfc - start
 
+# The overclock test's game check (emu.cpp): from a snapshot, the same
+# frames twice must leave the same memory, on each core.
+replay() {
+    local name=$1 rom=$BUILD/roms/$2 state=$3 input=$4
+    if [ ! -e "$rom" ]; then echo "SKIP  replay $name (no $2)"; return; fi
+    [ "$state" = - ] || state=$BUILD/roms/$state
+    for core in c asm; do
+        local last
+        last=$("$QEMU" -cpu arm926 $BUILD/game_test "$rom" 120 $core "$state" - "$input-replay" 2>&1 | tail -1)
+        case "$last" in "replay: the same"*) result pass "replay $name ($core): $last" ;;
+            *) result fail "replay $name ($core): $last" ;; esac
+    done
+}
+
+echo "== Replays from a snapshot (the overclock test)"
+replay smw_state smw.sfc smw.sv001 walk
+replay ct_boot ct.sfc - start
+replay monsterfarm MonsterFarmJump.sfc - busy
+
 echo "== $PASS passed, $FAIL failed (output in $OUT)"
 [ "$FAIL" -eq 0 ]
