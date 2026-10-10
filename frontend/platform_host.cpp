@@ -23,7 +23,8 @@
  * like a calculator whose clock doesn't change when asked, --clock-limit N
  * like one that doesn't go past multiplier N (12N MHz), --glitch-above N
  * like one that runs games wrongly above multiplier N (the overclock test's
- * game check sees a difference), and --backlight N sets the pretend
+ * game check sees a difference), --program FILE uses FILE as the program file
+ * that holds the settings (selfstore.h), and --backlight N sets the pretend
  * calculator's own backlight value (0 brightest, 225 darkest; changes are
  * logged as "backlight N"). */
 #include <limits.h>
@@ -69,6 +70,7 @@ static int os_backlight = 112, backlight = 112;   /* see platform_set_backlight 
 static int clock_stuck;
 static int clock_limit = 63;
 static int glitch_above = 63;
+static char program_path[1024];
 
 #ifdef HOST_SDL
 static SDL_Window *window;
@@ -294,6 +296,8 @@ int platform_init(int *argc, char **argv)
             clock_stuck = 1;
         else if (strcmp(argv[i], "--clock-limit") == 0 && i + 1 < *argc)
             clock_limit = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--program") == 0 && i + 1 < *argc)
+            snprintf(program_path, sizeof(program_path), "%s", argv[++i]);
         else if (strcmp(argv[i], "--glitch-above") == 0 && i + 1 < *argc)
             glitch_above = atoi(argv[++i]);
         else if (strcmp(argv[i], "--backlight") == 0 && i + 1 < *argc)
@@ -483,6 +487,11 @@ uint32_t platform_set_cpu_multiplier(int multiplier)
 uint32_t platform_cpu_normal_mhz(void)
 {
     return 396;
+}
+
+const char *platform_program_path(void)
+{
+    return program_path[0] ? program_path : NULL;
 }
 
 int platform_test_glitch(void)

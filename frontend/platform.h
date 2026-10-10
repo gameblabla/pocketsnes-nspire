@@ -178,6 +178,11 @@ void platform_clock_report(char *text, size_t size);
  * calculator. */
 int platform_test_glitch(void);
 
+/* The program's own file, where the settings for all games are kept
+ * (selfstore.h), or NULL where there is none (the PC build without
+ * --program FILE). */
+const char *platform_program_path(void);
+
 /* The screen's backlight on a CX II, in the value the OS writes to its
  * register: 0 (brightest) to 225 (darkest). platform_os_backlight() is the
  * value at startup (the calculator's own brightness), or -1 where it can't

@@ -17,6 +17,7 @@
 #include "bindings.h"
 #include "brightness.h"
 #include "config.h"
+#include "selfstore.h"
 #include "platform.h"
 #include "rotate.h"
 
@@ -78,6 +79,13 @@ int platform_key_pressed(int key)
 const char *platform_exe_dir(void)
 {
     return exe_dir;
+}
+
+static char program_file[600];   /* "" until test_selfstore */
+
+const char *platform_program_path(void)
+{
+    return program_file[0] ? program_file : NULL;
 }
 
 int platform_os_backlight(void)
@@ -484,6 +492,65 @@ static void test_config(void)
 
 /* ---- Brightness levels ---- */
 
+/* ---- Settings kept in the program file (selfstore.h) ---- */
+
+static long file_size(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return -1;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fclose(f);
+    return size;
+}
+
+static void test_selfstore(void)
+{
+    char backup[700];
+    unsigned char program[3000], back[3000];
+    for (size_t i = 0; i < sizeof(program); i++)
+        program[i] = (unsigned char) (i * 7 + 1);
+    snprintf(program_file, sizeof(program_file), "%s/_PocketSNES.tns", exe_dir);
+    snprintf(backup, sizeof(backup), "%s/PocketSNES_saves/pocketsnes.cfg.tns", exe_dir);
+    FILE *f = fopen(program_file, "wb");
+    fwrite(program, 1, sizeof(program), f);
+    fclose(f);
+
+    CHECK(selfstore_read(program_file) == NULL, "a program without settings in it has none");
+    config_load();
+    cfg.show_fps = 2;
+    cfg.brightness = 4;
+    config_save();
+    CHECK(file_size(program_file) == (long) sizeof(program) + SELFSTORE_SIZE + 16,
+          "saving adds the settings area to the program file");
+    cfg.brightness = 9;
+    config_save();
+    CHECK(file_size(program_file) == (long) sizeof(program) + SELFSTORE_SIZE + 16,
+          "... and saving again writes over it, the size stays");
+    f = fopen(program_file, "rb");
+    size_t got = fread(back, 1, sizeof(back), f);
+    fclose(f);
+    CHECK(got == sizeof(back) && memcmp(back, program, sizeof(program)) == 0, "... and the program's own bytes are untouched");
+
+    /* Settings come from the program even without the copy. */
+    remove(backup);
+    config_load();
+    CHECK(cfg.show_fps == 2 && cfg.brightness == 9, "settings are read from the program file");
+    /* A new version copied over: no settings in it, so the copy is used. */
+    config_save();
+    f = fopen(program_file, "wb");
+    fwrite(program, 1, sizeof(program), f);
+    fclose(f);
+    config_load();
+    CHECK(cfg.show_fps == 2 && cfg.brightness == 9, "a new program file picks up the copy in PocketSNES_saves");
+    config_save();
+    char *text = selfstore_read(program_file);
+    CHECK(text && strstr(text, "brightness=9\n"), "... and stores it in itself at the next save");
+    free(text);
+    program_file[0] = 0;
+}
+
 static void test_brightness(void)
 {
     CHECK(brightness_value(10) == 0 && brightness_value(1) == 225 && brightness_value(7) == 75,
@@ -579,6 +646,7 @@ int main(void)
     test_rotation();
     test_config();
     test_brightness();
+    test_selfstore();
     test_bindings();
 
     char command[700];

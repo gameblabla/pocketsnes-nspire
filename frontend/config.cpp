@@ -6,6 +6,7 @@
 #include "config.h"
 #include "brightness.h"
 #include "paths.h"
+#include "selfstore.h"
 #include "platform.h"
 
 /* Saved as "name=value" lines so older and newer builds can share the file.
@@ -195,8 +196,41 @@ static void drop_clashing_defaults(struct Config *c, const struct FileInfo *info
     }
 }
 
-/* Reads "name=value" lines into c, over whatever it holds. */
-static void read_file(const char *path, struct Config *c, struct FileInfo *info)
+/* A whole file (malloc'd, 0-terminated), or NULL. */
+static char *load_text(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    size_t size = 0, capacity = 0;
+    char *text = NULL;
+    for (;;)
+    {
+        if (size + 1024 + 1 > capacity)
+        {
+            capacity = capacity ? capacity * 2 : 4096;
+            char *grown = (char *) realloc(text, capacity);
+            if (!grown)
+            {
+                free(text);
+                fclose(f);
+                return NULL;
+            }
+            text = grown;
+        }
+        size_t got = fread(text + size, 1, 1024, f);
+        size += got;
+        if (got < 1024)
+            break;
+    }
+    fclose(f);
+    text[size] = 0;
+    return text;
+}
+
+/* Reads "name=value" lines into c, over whatever it holds; text NULL is no
+ * settings at all. */
+static void read_text(const char *text, struct Config *c, struct FileInfo *info)
 {
     char line[600];
 
@@ -205,13 +239,15 @@ static void read_file(const char *path, struct Config *c, struct FileInfo *info)
     info->auto_resume = -1;
     info->cpu_speed = info->tested_mhz = -1;
     info->quit_new_save = -1;
-    FILE *f = fopen(path, "r");
-    if (!f)
+    if (!text)
         return;
     info->found = 1;
 
-    while (fgets(line, sizeof(line), f))
+    while (*text)
     {
+        size_t len = strcspn(text, "\n");
+        snprintf(line, sizeof(line), "%.*s", (int) (len < sizeof(line) ? len : sizeof(line) - 1), text);
+        text += len + (text[len] == '\n');
         char *value = strchr(line, '=');
         if (!value)
             continue;
@@ -271,11 +307,17 @@ static void read_file(const char *path, struct Config *c, struct FileInfo *info)
                 }
         }
     }
-    fclose(f);
     if (info->cpu_speed >= 0)
         c->cpu_speed = cpu_speed_from_file(info->cpu_speed, info->version);
     drop_clashing_defaults(c, info);
     c->quit_new_save = info->quit_new_save >= 0 ? (uint32_t) info->quit_new_save : c->auto_increment;
+}
+
+static void read_file(const char *path, struct Config *c, struct FileInfo *info)
+{
+    char *text = load_text(path);
+    read_text(text, c, info);
+    free(text);
 }
 
 void config_load(void)
@@ -288,8 +330,18 @@ void config_load(void)
     default_keys_into(&global);
     snprintf(global.rom_dir, sizeof(global.rom_dir), "%s", platform_exe_dir());
 
-    config_path(path, sizeof(path));
-    read_file(path, &global, &info);
+    /* The settings in the program file (selfstore.h), or else the copy in
+     * PocketSNES_saves: a new version copied over the program has none in
+     * it yet, and picks them up from there. */
+    const char *program = platform_program_path();
+    char *text = program ? selfstore_read(program) : NULL;
+    if (!text)
+    {
+        config_path(path, sizeof(path));
+        text = load_text(path);
+    }
+    read_text(text, &global, &info);
+    free(text);
     settings_file_found = info.found;
     tested_mhz = info.tested_mhz > 0 && info.tested_mhz <= 756 ? (uint32_t) info.tested_mhz : 0;
     if (info.found && info.version < 2)
@@ -353,6 +405,13 @@ void config_save(void)
         write_keys(f, &global);
         fclose(f);
     }
+    /* The same in the program file; the copy above stays for a new version
+     * copied over it. */
+    const char *program = platform_program_path();
+    char *text = program ? load_text(path) : NULL;
+    if (text)
+        selfstore_write(program, text);
+    free(text);
 
     if (!game_file[0])
         return;

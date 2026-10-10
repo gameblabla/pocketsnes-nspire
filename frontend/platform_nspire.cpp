@@ -47,6 +47,7 @@ static uint32_t os_framebuffer;
 static uint32_t keys_now[4], keys_old[4];
 static int touchpad;
 static char exe_dir[256];
+static char program_path[256];
 
 /* The first SP804 dual timer, run free at 32768 Hz the same way nSDL's
  * SDL_GetTicks does. Its old settings are put back on exit. */
@@ -454,6 +455,7 @@ int platform_init(int *argc, char **argv)
         return 0;
     }
 
+    snprintf(program_path, sizeof(program_path), "%s", argv[0]);
     strncpy(exe_dir, argv[0], sizeof(exe_dir) - 1);
     char *slash = strrchr(exe_dir, '/');
     if (slash)
@@ -1677,6 +1679,11 @@ static void register_rom_types(const char *program_path)
     /* The types that have no program yet. */
     for (size_t i = 0; i < sizeof(rom_types) / sizeof(rom_types[0]); i++)
         cfg_register_fileext(rom_types[i], name);
+}
+
+const char *platform_program_path(void)
+{
+    return program_path[0] ? program_path : NULL;
 }
 
 const char *platform_exe_dir(void)
