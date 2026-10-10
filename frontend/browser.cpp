@@ -50,7 +50,7 @@ static int is_rom_name(const char *name)
 #ifndef _TINSPIRE
     /* The PC build also takes plain ROM files. */
     if (ends_with(name, ".sfc") || ends_with(name, ".smc") || ends_with(name, ".swc") ||
-        ends_with(name, ".fig"))
+        ends_with(name, ".fig") || ends_with(name, ".zip"))
         return 1;
 #endif
     return 0;

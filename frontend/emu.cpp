@@ -20,6 +20,7 @@
 #include "bindings.h"
 #include "menu.h"
 #include "paths.h"
+#include "romzip.h"
 #include "platform.h"
 #include "states.h"
 #include "ui.h"
@@ -883,7 +884,14 @@ static bool looks_like_rom(const char *path)
     long bytes = ftell(f);
     fclose(f);
 
-    if (got >= 6 && memcmp(head, "*TIMLP", 6) == 0)
+    char inner[256];
+    if (got >= 4 && memcmp(head, "PK\3\4", 4) == 0)
+    {
+        if (romzip_rom_name(path, inner, sizeof(inner)))
+            return true;
+        load_error = "It's a zip with no SNES ROM in it.";
+    }
+    else if (got >= 6 && memcmp(head, "*TIMLP", 6) == 0)
         load_error = "It's a TI-Nspire document, not a SNES ROM.";
     else if (got >= 4 && memcmp(head, "PRG", 4) == 0)
         load_error = "It's a program, not a SNES ROM.";

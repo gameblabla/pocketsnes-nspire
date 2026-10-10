@@ -303,6 +303,39 @@ for rom in Tiny.sfc Notes; do
     check "$?" 0 "opening $rom.tns (not a ROM) shows a message instead of crashing"
 done
 
+echo "== Zipped ROMs"
+# A ROM in a zip (Game.zip.tns) plays the same as the ROM itself, deflated
+# or stored, also with other files in the zip.
+setup unzipped MonsterFarmJump.sfc config_version=3 save_on_exit=0 load_on_start=0
+play unzipped tests/scripts/zip_play.txt MonsterFarmJump.sfc
+for kind in deflate store; do
+    setup "zip$kind" MonsterFarmJump.sfc config_version=3 save_on_exit=0 load_on_start=0
+    printf 'read me\n' > "$OUT/zip$kind/readme.txt"
+    python3 tests/make_zip.py "$OUT/zip$kind/roms/Monster.zip.tns" $kind "$OUT/zip$kind/readme.txt" \
+        "$ROMS/MonsterFarmJump.sfc=Monster Farm Jump/MonsterFarmJump.sfc"
+    rm "$OUT/zip$kind/roms/MonsterFarmJump.sfc.tns"
+    play "zip$kind" tests/scripts/zip_play.txt Monster.zip
+    check "$(same "$OUT/unzipped/shots/game.png" "$OUT/zip$kind/shots/game.png")" same \
+        "a zipped ROM ($kind) plays the same as the ROM itself"
+done
+# A zip in place of the ROM takes over the ROM's saves.
+setup ziptake MonsterFarmJump.sfc config_version=3 save_on_exit=0 load_on_start=0
+mkdir -p "$OUT/ziptake/roms/PocketSNES_saves"
+printf 'state' > "$OUT/ziptake/roms/PocketSNES_saves/MonsterFarmJump.sfc.sv003.tns"
+printf 'sram' > "$OUT/ziptake/roms/PocketSNES_saves/MonsterFarmJump.sfc.srm.tns"
+python3 tests/make_zip.py "$OUT/ziptake/roms/MonsterZip.zip.tns" deflate "$ROMS/MonsterFarmJump.sfc"
+rm "$OUT/ziptake/roms/MonsterFarmJump.sfc.tns"
+play ziptake tests/scripts/wait_quit.txt "MonsterZip.zip"
+s=$OUT/ziptake/roms/PocketSNES_saves
+check "$(exists "$s/MonsterZip.zip.sv003.tns")$(exists "$s/MonsterZip.zip.srm.tns")$(exists "$s/MonsterFarmJump.sfc.sv003.tns")" yesyesno \
+    "a zip that replaced the ROM takes over its saves"
+# A zip with no ROM in it says so.
+setup zipnorom MonsterFarmJump.sfc
+python3 tests/make_zip.py "$OUT/zipnorom/roms/Empty.zip.tns" deflate tests/make_zip.py
+(cd "$OUT/zipnorom" && timeout 20 "$HOST" --script "$message_script" --shots shots --exe-dir ndless \
+    "roms/Empty.zip.tns" >/dev/null 2>&1)
+check "$?" 0 "a zip without a ROM shows a message instead of crashing"
+
 echo "== First start"
 # No settings file yet: a welcome screen first, then the game list; the next
 # start goes straight to the game list.

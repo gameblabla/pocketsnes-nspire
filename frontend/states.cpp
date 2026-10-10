@@ -12,6 +12,7 @@
 #include "memmap.h"
 #include "snapshot.h"
 #include "paths.h"
+#include "romzip.h"
 #include "states.h"
 
 /* A state file is this header followed by the zlib-compressed snapshot. */
@@ -75,6 +76,58 @@ static int read_header(const char *path, struct StateHeader *header)
     return ok;
 }
 
+/* A zipped ROM's saves are named after the zip ("Game.zip.sv001.tns"). A zip
+ * that took the place of the unzipped ROM takes over that ROM's saves, named
+ * after the ROM in the zip, unless that ROM is still in the folder. */
+static void take_over_unzipped_saves(const char *rom_path)
+{
+    char inner[256], path[900], to[900];
+    if (!romzip_is_zip(rom_path) || !romzip_rom_name(rom_path, inner, sizeof(inner)) ||
+        strcasecmp(inner, base_name) == 0)
+        return;
+    const char *slash = strrchr(rom_path, '/');
+    snprintf(path, sizeof(path), "%.*s%s.tns", slash ? (int) (slash - rom_path + 1) : 0, rom_path, inner);
+    struct stat st;
+    if (stat(path, &st) == 0)
+        return;
+    snprintf(path, sizeof(path), "%.*s%s", slash ? (int) (slash - rom_path + 1) : 0, rom_path, inner);
+    if (stat(path, &st) == 0)
+        return;
+
+    DIR *dir = opendir(save_dir);
+    if (!dir)
+        return;
+    size_t base_len = strlen(base_name), inner_len = strlen(inner);
+    char (*names)[256] = NULL;
+    int count = 0, capacity = 0, own = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL)
+    {
+        const char *name = entry->d_name;
+        if (strncasecmp(name, base_name, base_len) == 0 && name[base_len] == '.')
+            own = 1;
+        if (strncasecmp(name, inner, inner_len) != 0 || name[inner_len] != '.' || strlen(name) >= 256)
+            continue;
+        if (count == capacity)
+        {
+            capacity = capacity ? capacity * 2 : 16;
+            char (*grown)[256] = (char (*)[256]) realloc(names, capacity * sizeof(*names));
+            if (!grown)
+                break;
+            names = grown;
+        }
+        snprintf(names[count++], 256, "%s", name);
+    }
+    closedir(dir);
+    for (int i = 0; !own && i < count; i++)
+    {
+        snprintf(path, sizeof(path), "%s/%s", save_dir, names[i]);
+        snprintf(to, sizeof(to), "%s/%s%s", save_dir, base_name, names[i] + inner_len);
+        rename(path, to);
+    }
+    free(names);
+}
+
 void states_open_game(const char *rom_path)
 {
     const char *slash = strrchr(rom_path, '/');
@@ -92,6 +145,8 @@ void states_open_game(const char *rom_path)
     char *dot = strrchr(base_name, '.');
     if (dot && dot != base_name)
         *dot = 0;
+
+    take_over_unzipped_saves(rom_path);
 
     memset(used, 0, sizeof(used));
     memset(counters, 0, sizeof(counters));

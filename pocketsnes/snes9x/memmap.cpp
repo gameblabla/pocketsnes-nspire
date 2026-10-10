@@ -87,6 +87,7 @@
   Nintendo Co., Limited and its subsidiary companies.
 *******************************************************************************/
 
+#include "../../frontend/romzip.h"
 #include <string.h>
 #ifdef HAVE_STRINGS_H
 #include <strings.h>
@@ -902,7 +903,12 @@ uint32 CMemory::FileLoader (uint8* buffer, const char* filename, int32 maxsize)
 	case DEFAULT:
 	default:
 		// any other roms go here
-		if ((ROMFile = fopen(fname, "rb")) == NULL)
+		// A zip (game.zip.tns on the calculator): the ROM in it (romzip.h).
+		uint32 zipped = 0;
+		if (romzip_is_zip (fname) &&
+		    (zipped = romzip_read (fname, buffer, maxsize + 0x200)) == 0)
+			return (0);
+		if (!zipped && (ROMFile = fopen(fname, "rb")) == NULL)
 			return (0);
 		
 		strcpy (ROMFilename, fname);
@@ -913,8 +919,16 @@ uint32 CMemory::FileLoader (uint8* buffer, const char* filename, int32 maxsize)
 		
 		do
 		{
-			FileSize = fread (ptr, 1, maxsize + 0x200 - (ptr - ROM), ROMFile);
-			fclose (ROMFile);
+			if (zipped)
+			{
+				FileSize = zipped;
+				zipped = 0;
+			}
+			else
+			{
+				FileSize = fread (ptr, 1, maxsize + 0x200 - (ptr - ROM), ROMFile);
+				fclose (ROMFile);
+			}
 			
 			int calc_size = FileSize & ~0x1FFF; // round to the lower 0x2000
 		
