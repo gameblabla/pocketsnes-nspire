@@ -19,16 +19,20 @@ Calculator keys on the PC keyboard:
 
 | PC key                 | Calculator key  | Default use           |
 |------------------------|-----------------|-----------------------|
-| Ctrl / Shift           | ctrl / shift    | SNES A / B            |
-| F2 / Backspace         | var / del       | SNES X / Y            |
+| Shift / Backspace      | shift / del     | SNES A / B            |
+| Ctrl / F2              | ctrl / var      | SNES X / Y            |
 | Tab / F1               | tab / menu      | SNES L / R            |
-| Enter / -              | enter / -       | SNES Start / Select   |
+| F5 / F6                | cat / frac      | SNES Start / Select   |
 | arrows, 8 5 4 6        | same            | d-pad                 |
 | Esc                    | esc             | menu                  |
-| Q / F / S / L          | same            | quit / fast forward / save / load |
+| Q / F / S / L / N / R  | same            | quit / fast forward / save / load / load newest / restart |
+| ] / [                  | ) / (           | next / previous slot  |
+| keypad + / -           | + / -           | brightness            |
 
-F3 is doc, F4 scratchpad, F5 cat, Home the on key; letters and digits are
-themselves.
+F3 is doc, F4 scratchpad, Home the on key; letters and digits are
+themselves. `--program FILE` keeps the settings in FILE as the calculator
+keeps them in the program (`--glitch-above N` and the others are listed at
+the top of `frontend/platform_host.cpp`).
 
 Scripted runs
 -------------
@@ -79,7 +83,13 @@ where the save made when leaving goes (the Auto slot, over the newest
 state, older settings files), and brightness (the + and - keys in a game
 and in the game list, the menu line, and the calculator's own brightness
 back at the end; `--backlight N` sets the pretend calculator's own value,
-and `--log` records every change as `backlight N`).
+and `--log` records every change as `backlight N`), zipped ROMs (deflated
+and stored zips play exactly like the ROM, a zip takes over the unzipped
+ROM's saves, a zip without a ROM says so), saves (gzipped and plain in-game
+saves, one from a PC emulator taken in, stored states loading back exactly,
+the save manager uncompressing and deleting), and files from older versions
+moving into `PocketSNES_saves`. `make unit-tests` also checks the settings
+kept inside the program file and *Reset all settings*.
 Results and screenshots go to
 `tests/out/`. Every test starts with a settings file (so not on a "first
 start") unless it removes it.

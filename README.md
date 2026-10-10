@@ -4,9 +4,10 @@ PocketSNES for TI-Nspire
 Play Super Nintendo games on a TI-Nspire CX or CX II calculator.
 
 This is gameblabla's PocketSNES port of Snes9x 1.43, with a new front end:
-a game list you can sort, a menu like gpSP's, 999 save state slots per game,
-settings per game, smooth tear-free drawing on the CX II, and the SNES CPU
-in ARM assembler (from psnes) as well as in C. There's also an experimental
+a game list you can sort, zipped ROMs, a menu like gpSP's, 999 compressed
+save state slots per game with a save manager, settings per game, smooth
+tear-free drawing on the CX II, and the SNES CPU in ARM assembler (from
+psnes) as well as in C. There's also an experimental
 overclock setting, but it isn't reliable (see [Overclocking](#overclocking)).
 
 There's no sound, because the calculator has no speaker.
@@ -31,18 +32,23 @@ You need a TI-Nspire with a colour screen (CX or CX II) and
 1. **Install Ndless** for your OS version (see [ndless.me](https://ndless.me)).
    On a CX II, Ndless has to be switched on again after every reset: just
    open the Ndless installer document.
-2. **Copy `pocketsnes.tns` to the calculator**, into any folder (a folder
+2. **Copy `_PocketSNES.tns` to the calculator**, into any folder (a folder
    called `snes` works well). Use TI-Nspire Computer Link, the Student
-   Software, TiLP, or any other transfer tool. Keep the name
-   `pocketsnes.tns`, so ROMs can open in it straight from the documents.
+   Software, TiLP, or any other transfer tool. The `_` keeps it at the top
+   of the folder, above your games.
 3. **Copy your ROMs over and add `.tns` to their names.** The calculator only
-   accepts `.tns` files, so `Super Mario World.sfc` becomes
+   accepts `.tns` files. A zipped ROM works as it is, so you can download a
+   ROM and just rename it: `Super Mario World.zip` becomes
+   `Super Mario World.zip.tns`, and `Super Mario World.sfc` becomes
    `Super Mario World.sfc.tns`. Any folder works.
-4. **Open `pocketsnes.tns`.** The first time, a welcome screen shows the
+4. **Open `_PocketSNES.tns`.** The first time, a welcome screen shows the
    keys. Then the game list opens: pick a game and press **enter**, or press
    the **number** next to it.
 5. That's it. After the first run, you can also open a ROM straight from the
    calculator's documents.
+
+**Updating:** copy the new `_PocketSNES.tns` over the old one. Your
+settings and saves stay (see [Files](#files)).
 
 When you leave a game with **Q** (or *Exit PocketSNES* in the menu),
 PocketSNES saves where you were, and the game carries on from there next
@@ -57,10 +63,10 @@ Controls
 | SNES button    | Calculator key                              |
 |----------------|---------------------------------------------|
 | D-pad          | arrows (touchpad), or 8 4 6 5               |
-| A / B          | ctrl / shift                                |
-| X / Y          | var / del                                   |
+| A / B          | shift / del                                 |
+| X / Y          | ctrl / var                                  |
 | L / R          | tab / menu                                  |
-| Start / Select | enter / (−)                                 |
+| Start / Select | cat / frac                                  |
 
 | Hotkey       | Key  | What it does                                        |
 |--------------|------|-----------------------------------------------------|
@@ -69,15 +75,18 @@ Controls
 | Fast forward | F    | on/off: runs as fast as it can                      |
 | Save state   | S    | saves a state (each save gets a new slot)           |
 | Load state   | L    | loads the selected slot                             |
+| Load newest  | N    | loads the newest state                              |
+| Next / previous slot | ) / ( | picks the slot Load state loads             |
+| Restart      | R    | resets the game                                     |
 | Brightness   | + / − | brighter / dimmer (CX II), in menus too            |
 
-Brightness is on + and −, as in gpSP, so Select is on (−) rather than on −
-as in earlier PocketSNES. More hotkeys (load newest, next/previous slot, FPS
-counter, restart) are there but have no key until you give them one. Every
-key can be changed in the menu under *SNES buttons* and *Hotkeys*. Each
-action takes two keys, and a key can be a combination (hold one key and press
-another). *Controls & about* in the menu always shows your keys as they are
-now.
+A B X Y sit like the SNES's diamond on shift, del, ctrl and var. The FPS
+counter hotkey has no key until you give it one. Every key can be changed in
+the menu under *SNES buttons* and *Hotkeys*. Each action takes two keys, and
+a key can be a combination (hold one key and press another). *Controls &
+about* in the menu always shows your keys as they are now. To start over,
+*Reset all settings* in the game list's settings (**menu** on a folder) puts
+every setting and key back to these.
 
 ### In menus
 
@@ -133,17 +142,44 @@ them much:
 * **Save states** freeze the whole game at any moment. **S** saves one, **L**
   loads one, and leaving a game saves one so you can carry on next time.
   Each game has 999 slots. Every save goes to a new slot, so an old save is
-  never overwritten. A state takes a few dozen KB.
+  never overwritten. A state takes about 5–30 KB compressed.
 
 You can pick a slot in the menu (*Save state* / *Load state*, left/right
-choose the slot). Everything a game saves goes in a `.pocketsnes` folder
-next to the ROM.
+choose the slot). Everything a game saves goes in a `PocketSNES_saves`
+folder next to the ROM (the game list doesn't show it).
 
 Where the save made when you leave goes is up to you (menu → *Saving*):
 a new slot each time (the default), over your newest state (*New save on
 quit* off), or always the same separate **Auto** slot, which keeps it out of
 slots 001–999 (*Auto save slot* on). The Auto slot comes before 001 when you
 pick a slot, and starting a game loads it when it's the newest.
+
+**Compression.** States and in-game saves are compressed (*Saving →
+Compress saves*, on by default): a state is about 7 KB instead of 356 KB.
+Switched off, new saves are written as they are.
+
+**The save manager** (*Saving → Save manager* in a game, or **menu** on a
+game in the game list) lists the game's in-game save and states with their
+sizes. **enter** marks one (**A** marks all); **C** compresses, **U**
+uncompresses and **del** deletes the marked ones, or the selected one if
+none is marked. Deleting asks first.
+
+### Saves on a PC
+
+* **In-game saves** work in PC emulators (Snes9x, bsnes, RetroArch and
+  others), which read a plain `.srm` named like the ROM. Uncompress it in
+  the save manager (or switch *Compress saves* off), copy
+  `Super Mario World.sfc.srm.tns` from `PocketSNES_saves` to the PC, and
+  rename it `Super Mario World.srm`, next to `Super Mario World.sfc`. A
+  compressed one (`.srm.gz.tns`) works too: rename it to `.srm.gz` and
+  unpack it with 7-Zip or any gzip tool.
+* **From a PC:** rename `Super Mario World.srm` to
+  `Super Mario World.srm.tns` and put it in `PocketSNES_saves` next to the
+  ROM. PocketSNES takes it the next time the game starts, if the game has
+  no in-game save of its own yet (otherwise it keeps the newer file).
+* **Save states** don't move to PC emulators: they're Snes9x 1.43's format
+  for this port (without the sound chip), which today's emulators can't
+  read. Use in-game saves to move a game between the calculator and a PC.
 
 
 Speed and overclocking
@@ -216,10 +252,10 @@ Troubleshooting
   speed, PocketSNES goes back to normal speed by itself.
 * **A save state is broken.** In the game list, press **menu** on the game
   and choose *Play without a state*.
-* **I want the default settings back.** Delete `pocketsnes.cfg.tns` next to
-  `pocketsnes.tns`.
-* **Opening a ROM from the documents doesn't start PocketSNES.** The program
-  has to be called `pocketsnes.tns` and must have run once.
+* **I want the default settings back.** In the game list, press **menu** on
+  a folder and choose *Reset all settings*.
+* **Opening a ROM from the documents doesn't start PocketSNES.** PocketSNES
+  must have run once (from any name: the documents then open ROMs in it).
 
 
 ---
@@ -239,9 +275,9 @@ whenever that game runs.
 
 | Setting | Choices (default first) | What it does |
 |---|---|---|
-| Frameskip | **automatic**, manual, off | Automatic skips drawing only when the game falls behind, so the game keeps full speed. Manual draws 1 frame in every N+1. Off draws every frame; the game slows down if drawing can't keep up. |
+| Frameskip | automatic, manual, **off** | Automatic skips drawing only when the game falls behind, so the game keeps full speed. Manual draws 1 frame in every N+1. Off draws every frame; the game slows down if drawing can't keep up. |
 | Frames to skip | **5** (0–9) | Automatic: the most frames skipped in a row. Manual: N. |
-| FPS counter | **off**, on, detailed | Frames drawn per second over the most there can be: 60/60 is full speed. Detailed adds how long each part of a frame takes and logs it to `pocketsnes_perf.txt.tns`. |
+| FPS counter | off, **on**, detailed | Frames drawn per second over the most there can be: 60/60 is full speed. Detailed adds how long each part of a frame takes and logs it to `pocketsnes_perf.txt.tns`. |
 | Screen output (CX II) | **no tearing**, DMA | No tearing shows every frame whole. DMA is a little faster but can show a split line when the picture scrolls fast. |
 | Brightness (CX II) | **calculator's**, 1 (dimmest) … 10 (brightest) | The screen's backlight while PocketSNES runs; the calculator's own comes back when PocketSNES closes. The + and − keys (Hotkeys) change it anywhere, a level at a time. |
 | CPU speed (CX II) | **normal**, highest tested, 408 … 504 MHz | Experimental, not reliable: overclocks while a game runs. See [Overclocking](#overclocking). |
@@ -259,6 +295,8 @@ whenever that game runs.
 | New save on quit | on | That save goes to a new slot. Off: it saves over your newest state. (Doesn't matter with Auto save slot on.) |
 | Load newest on start | on | Games start from their newest state. *Play without a state* in the game list skips it once. |
 | Write in-game saves | automatic | When the game's own save is written to the calculator: a couple of seconds after the game saves, or only on exit. |
+| Compress saves | on | New states and in-game saves are compressed (a state: about 7 KB instead of 356 KB). Off: in-game saves are the plain `.srm` PC emulators read. |
+| Save manager | | This game's saves and their sizes; compress, uncompress or delete them. See [Saving](#saving). |
 
 ### SNES buttons and Hotkeys
 
@@ -278,21 +316,30 @@ at the bottom. The arrows always work as the d-pad.
 Files
 -----
 
-Next to each ROM, in a `.pocketsnes` folder:
+Next to each ROM, in a `PocketSNES_saves` folder (named so you can tell
+it from other emulators' saves; older versions used a hidden `.pocketsnes`
+folder, which moves over by itself):
 
 | File | What |
 |---|---|
-| `game.sfc.srm.tns` | the in-game save |
-| `game.sfc.sv001.tns` … `game.sfc.sv999.tns` | save states (compressed) |
+| `game.sfc.srm.gz.tns` | the in-game save, gzipped (Compress saves on) |
+| `game.sfc.srm.tns` | the in-game save as it is (Compress saves off) |
+| `game.sfc.sv001.tns` … `game.sfc.sv999.tns` | save states (compressed unless switched off) |
 | `game.sfc.svauto.tns` | the Auto slot's state (Saving → Auto save slot) |
 | `game.sfc.cfg.tns` | the game's own settings or keys, if it has any |
 | `game_order.txt.tns` | the order of the folder's games, once you've moved one |
 
-Next to `pocketsnes.tns`:
+A zipped ROM's files are named after the zip (`game.zip.sv001.tns`); a zip
+that replaces the unzipped ROM takes over its files.
+
+**Settings for all games are kept inside `_PocketSNES.tns` itself**, in a
+small area after the program, so they go wherever the program goes. A copy
+is kept in the `PocketSNES_saves` folder next to the program, so a new
+version copied over the old one picks them up. That folder also has:
 
 | File | What |
 |---|---|
-| `pocketsnes.cfg.tns` | settings and keys for all games, and the overclock test's result (delete it to start fresh) |
+| `pocketsnes.cfg.tns` | the copy of the settings and keys for all games, and the overclock test's result |
 | `pocketsnes_overclock.txt.tns` | what the overclock test found at each speed |
 | `pocketsnes_results.txt.tns` | the last speed test's results |
 | `pocketsnes_perf.txt.tns` | the detailed FPS log, if you turned it on |
@@ -371,7 +418,7 @@ The calculator build needs the [Ndless SDK](https://github.com/ndless-nspire/Ndl
 toolchain on PATH (`nspire-gcc`, `nspire-g++`, `nspire-ld`, `genzehn`,
 `make-prg`):
 
-    make -f Makefile.nspire              # makes pocketsnes.tns
+    make -f Makefile.nspire              # makes _PocketSNES.tns
     make -C tools/clocktest              # the stand-alone clock switch test
 
 Variants each need their own `BUILD` folder, because make doesn't notice
@@ -409,7 +456,11 @@ tests.
 | `frontend/browser.cpp` | the game list: numbers, moving games, the order file |
 | `frontend/overclock.cpp` | the overclock test |
 | `frontend/config.cpp` | settings and keys: the file for all games and each game's own |
-| `frontend/states.cpp` | save state slots and file names |
+| `frontend/states.cpp` | save state slots and file names, in-game saves (plain or gzipped), what the save manager does |
+| `frontend/savemanager.cpp` | the save manager screen |
+| `frontend/paths.cpp` | where files go (`PocketSNES_saves`), moving older versions' files over |
+| `frontend/selfstore.cpp` | the settings kept inside the program file |
+| `frontend/romzip.cpp` | reading ROMs out of zips |
 | `frontend/ui.cpp`, `gui.cpp`, `draw.cpp`, `fonts.h`, `icons.h`, `keys.cpp` | the look of every screen, menu input, text and icons, key names and bindings |
 | `frontend/rotate.cpp` | turning frames for the CX II's portrait LCD |
 | `frontend/platform.h` | everything hardware: screen, keys, timer, CPU clock |
@@ -461,8 +512,13 @@ the same fingerprints (the emulation is deterministic, so any difference is
 the overclock), then 2 seconds of memory checks (patterns over a buffer of
 up to 8 MB, far bigger than the 8 KB data cache) and a CPU calculation.
 The game part is the point: memory and CPU checks alone passed 492 MHz on
-the development calculator, whose games froze at 480. Afterwards the game is
-put back where it was.
+the development calculator, whose games froze at 480. Each run starts from
+exactly the same point: the snapshot, plus what a snapshot leaves out (some
+CPU state and open bus) and the same `rand()` seed, because this port
+answers the game's reads of the sound chip with `rand()`; without that,
+Super Mario World ran differently every time and the test stopped at 408.
+`tests/asm/run.sh` checks that games replay identically on both CPU cores.
+Afterwards the game is put back where it was.
 
 **Settings file.** `name=value` lines (`config_version=3`, `frameskip_type`,
 `cpu_speed`, `cpu_core`, `brightness`, `auto_slot`, `quit_new_save`,
@@ -472,7 +528,20 @@ when leaving behaved before. Key numbers are lr-gpsp-nspire's. A game's own file
 `own_settings=1` / `own_keys=1`. Unknown lines are ignored, so older and
 newer builds can share the file; version 2 files' CPU speeds are converted.
 
-**Save states** are Snes9x snapshots compressed with zlib.
+**Save states** are a small header and a Snes9x snapshot, compressed with
+zlib unless the header says it's stored as it is. In-game saves are written
+by the core and gzipped afterwards.
+
+**Zipped ROMs** are read through the zip's central directory: the first
+file with a ROM's extension, or else the biggest, stored or deflated, and
+checked against its CRC (`frontend/romzip.cpp`).
+
+**Settings in the program file:** an 8 KB area after the program (Ndless
+loads the whole file; the Zehn loader only uses its own part) with a
+footer, `PSNESCFG`, the text's length and the area's size. The first save
+adds it, later ones write over it in place, so the program's own bytes
+aren't written again (`frontend/selfstore.cpp`). File associations that
+name a PocketSNES are pointed at the name it runs under.
 
 ### The CPU cores
 
