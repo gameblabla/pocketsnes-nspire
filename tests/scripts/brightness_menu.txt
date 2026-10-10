@@ -1,0 +1,33 @@
+# In-game menu, Graphics & speed (entry 3), Brightness (its fifth line):
+# three steps right (calculator's, 1, 2, 3), back to the game, then quit.
+wait 30
+press esc
+wait 5
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press enter
+wait 5
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press right
+wait 3
+press right
+wait 3
+press right
+wait 3
+shot brightness_menu.png
+press esc
+wait 3
+press esc
+wait 30
+quit

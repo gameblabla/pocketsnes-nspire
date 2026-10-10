@@ -20,8 +20,9 @@
  *
  * For the tests, --log FILE appends a line to FILE for every CPU clock
  * change asked for and every message shown in the game, --stuck-clock acts
- * like a calculator whose clock doesn't change when asked, and
- * --clock-limit N like one that doesn't go past multiplier N (12N MHz). */
+ * like a calculator whose clock doesn't change when asked, --clock-limit N
+ * like one that doesn't go past multiplier N (12N MHz), and --backlight N sets the pretend calculator's own backlight value (0
+ * brightest, 225 darkest; changes are logged as "backlight N"). */
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,6 +62,7 @@ static uint32_t script_keys[4];
 static struct { int key; int polls; } releases[16];
 static char shots_dir[1024] = ".";
 static char log_path[1024];
+static int os_backlight = 112, backlight = 112;   /* see platform_set_backlight */
 static int clock_stuck;
 static int clock_limit = 63;
 
@@ -288,6 +290,8 @@ int platform_init(int *argc, char **argv)
             clock_stuck = 1;
         else if (strcmp(argv[i], "--clock-limit") == 0 && i + 1 < *argc)
             clock_limit = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--backlight") == 0 && i + 1 < *argc)
+            os_backlight = backlight = atoi(argv[++i]);
         else
             argv[out++] = argv[i];
     }
@@ -336,6 +340,7 @@ int platform_init(int *argc, char **argv)
 
 void platform_shutdown(void)
 {
+    platform_set_backlight(-1);
     if (script)
         fclose(script);
 #ifdef HOST_SDL
@@ -472,6 +477,27 @@ uint32_t platform_set_cpu_multiplier(int multiplier)
 uint32_t platform_cpu_normal_mhz(void)
 {
     return 396;
+}
+
+/* A pretend backlight register: the calculator's own value is
+ * --backlight N (112 if not given), and each change goes to the test log
+ * as "backlight N". */
+
+int platform_os_backlight(void)
+{
+    return os_backlight;
+}
+
+void platform_set_backlight(int value)
+{
+    if (value < 0)
+        value = os_backlight;
+    if (value == backlight)
+        return;
+    backlight = value;
+    char line[32];
+    snprintf(line, sizeof(line), "backlight %d", value);
+    platform_log(line);
 }
 
 int platform_cpu_multiplier(void)

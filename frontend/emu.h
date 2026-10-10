@@ -38,6 +38,9 @@ void emu_set_slot(int slot);
 /* The slot a save goes to right now (a new one with auto-increment), or 0
  * when every slot is used. */
 int  emu_save_target(void);
+/* The slot 'delta' steps from 'slot', round 001-999 and the auto slot
+ * (before 001) when Saving > Auto save slot is on or it has a state. */
+int  emu_step_slot(int slot, int delta);
 int  emu_save_state(int slot);    /* 1 on success */
 int  emu_load_state(int slot);    /* 1 ok, 0 empty slot, -1 unreadable */
 void emu_reset_game(void);
@@ -46,7 +49,7 @@ void emu_show_message(const char *text);
 /* The CPU clock in MHz the game last ran at (measured on the calculator),
  * or 0 if not known yet. */
 uint32_t emu_game_mhz(void);
-/* Runs the game from the current point in a few speed modes for about 35
+/* Runs the game from the current point in a few speed modes for about 40
  * seconds, then shows the results and writes them to
  * pocketsnes_results.txt.tns (replacing the last ones). With close_after_seconds set, the results screen
  * closes by itself. The game is put back where it was. */

@@ -54,13 +54,15 @@ play() {
 }
 
 # play_logged NAME SCRIPT ROM [options]: like play, with the PC build's test
-# log (clock changes and messages) in $OUT/NAME/log.txt
+# log (clock changes, backlight changes and messages) in $OUT/NAME/log.txt;
+# ROM - starts in the game list
 play_logged() {
-    local dir=$OUT/$1 script rom=$3
+    local dir=$OUT/$1 script rom=$3 rom_arg=()
     script=$(realpath "$2")
     shift 3
+    [ "$rom" = - ] || rom_arg=("roms/$rom.tns")
     (cd "$dir" && "$HOST" --script "$script" --shots shots --exe-dir ndless --log log.txt "$@" \
-        "roms/$rom.tns" >/dev/null 2>&1)
+        "${rom_arg[@]}" >/dev/null 2>&1)
 }
 # The clock changes and CPU messages in a test log, on one line.
 clock_log() { grep -e '^clock' -e '^message: CPU' "$1" | tr '\n' '|'; }
@@ -107,6 +109,51 @@ play old tests/scripts/wait_quit.txt MonsterFarmJump.sfc
 cfg=$OUT/old/ndless/pocketsnes.cfg.tns
 check "$(grep -c -e '^config_version=3$' -e '^auto_increment=1$' -e '^save_on_exit=1$' -e '^load_on_start=1$' \
     -e '^show_fps=1$' -e '^key_a=6$' "$cfg")" 6 "an old settings file is brought up to date and keeps its choices"
+
+echo "== Where saving when leaving goes"
+# The auto save slot: three saves go to slots 1-3, quitting to the auto slot.
+setup autoslot MonsterFarmJump.sfc config_version=3 auto_increment=1 save_on_exit=1 auto_slot=1 load_on_start=1
+play autoslot tests/scripts/save3_quit.txt MonsterFarmJump.sfc
+s=$OUT/autoslot/roms/.pocketsnes/MonsterFarmJump.sfc
+check "$(exists "$s.sv003.tns")$(exists "$s.sv004.tns")$(exists "$s.svauto.tns")" yesnoyes \
+    "with Auto save slot on, quitting saved to the auto slot, not to slot 4"
+play_logged autoslot tests/scripts/wait_quit.txt MonsterFarmJump.sfc
+check "$(grep -c '^message: Resumed from the auto slot$' "$OUT/autoslot/log.txt")$(exists "$s.sv004.tns")" 1no \
+    "... the next start resumed from the auto slot, and saved there again"
+
+# New save on quit off: quitting saves over the newest state.
+counter() { od -An -t u4 -j 8 -N 4 "$1" | tr -d ' '; }
+setup overnewest MonsterFarmJump.sfc config_version=3 auto_increment=1 save_on_exit=1 quit_new_save=0 load_on_start=0
+play overnewest tests/scripts/save3_quit.txt MonsterFarmJump.sfc
+s=$OUT/overnewest/roms/.pocketsnes/MonsterFarmJump.sfc
+check "$(exists "$s.sv004.tns") $(counter "$s.sv003.tns")" "no 4" \
+    "with New save on quit off, quitting saved over the newest state (slot 3, now the 4th save)"
+
+# Settings files from before New save on quit: it follows auto-increment, so
+# with auto-increment off, quitting saves over the newest, as it did.
+setup quitold MonsterFarmJump.sfc config_version=3 auto_increment=0 save_on_exit=1 load_on_start=0
+play quitold tests/scripts/save3_quit.txt MonsterFarmJump.sfc
+s=$OUT/quitold/roms/.pocketsnes/MonsterFarmJump.sfc
+check "$(exists "$s.sv001.tns")$(exists "$s.sv002.tns")$(grep -c '^quit_new_save=0$' "$OUT/quitold/ndless/pocketsnes.cfg.tns")" \
+    yesno1 "an older settings file with auto-increment off gets New save on quit off"
+
+echo "== Brightness"
+# The pretend calculator's own backlight is 112 (level 6); levels 7, 8, 3
+# are 75, 50 and 175 (0 brightest, 225 darkest).
+backlight_log() { grep -e '^backlight' -e '^message: Brightness' "$1" | tr '\n' '|'; }
+setup bright MonsterFarmJump.sfc
+play_logged bright tests/scripts/brightness_keys.txt MonsterFarmJump.sfc
+check "$(backlight_log "$OUT/bright/log.txt")" \
+    "backlight 75|message: Brightness 7/10|backlight 50|message: Brightness 8/10|backlight 75|message: Brightness 7/10|backlight 112|" \
+    "+ and (-) in a game step the brightness from the calculator's own, and quitting puts it back"
+check "$(grep -c '^brightness=7$' "$OUT/bright/ndless/pocketsnes.cfg.tns")" 1 "... and the level is saved"
+setup brightmenu MonsterFarmJump.sfc
+play_logged brightmenu tests/scripts/brightness_menu.txt MonsterFarmJump.sfc
+check "$(backlight_log "$OUT/brightmenu/log.txt")" "backlight 225|backlight 200|backlight 175|backlight 112|" \
+    "Brightness in Graphics & speed sets the backlight as it changes (1, 2, 3), and quitting puts it back"
+setup brightlist MonsterFarmJump.sfc
+play_logged brightlist tests/scripts/brightness_list.txt -
+check "$(backlight_log "$OUT/brightlist/log.txt")" "backlight 75|backlight 112|" "+ works in the game list too"
 
 echo "== Keys"
 # S alone is Next slot, shift+S (second key of Save state) saves.

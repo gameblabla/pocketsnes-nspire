@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "brightness.h"
 #include "config.h"
 #include "draw.h"
 #include "emu.h"
@@ -74,10 +75,23 @@ static int waiting_for_keys;      /* a key slot is being set */
 static int in_game;               /* the in-game menu, not the game list's */
 static const char *list_rom;      /* the game list's menu: the game, or NULL for all games */
 
-static void set_status(const char *format, int slot)
+static void set_status(const char *text)
 {
-    snprintf(status, sizeof(status), format, slot);
+    snprintf(status, sizeof(status), "%s", text);
     status_until = platform_ticks() + platform_tick_hz() * 3;
+}
+
+/* 'format' has a %s for the slot ("slot 012", "the auto slot"; with a
+ * capital when 'cap' is set). */
+static void set_slot_status(const char *format, int slot, bool cap = false)
+{
+    char name[32], text[64];
+    if (cap)
+        states_slot_name_cap(slot, name, sizeof(name));
+    else
+        states_slot_name(slot, name, sizeof(name));
+    snprintf(text, sizeof(text), format, name);
+    set_status(text);
 }
 
 /* ---- Actions ---- */
@@ -88,12 +102,15 @@ static enum Step load_state(void)
     int result = emu_load_state(slot);
     if (result == 1)
     {
-        char text[40];
-        snprintf(text, sizeof(text), "Loaded slot %03d", slot);
+        char name[32], text[48];
+        snprintf(text, sizeof(text), "Loaded %s", states_slot_name(slot, name, sizeof(name)));
         emu_show_message(text);
         return STEP_RESUME;
     }
-    set_status(result == 0 ? "Slot %03d is empty." : "Couldn't load slot %03d.", slot);
+    if (result == 0)
+        set_slot_status("%s is empty.", slot, true);
+    else
+        set_slot_status("Couldn't load %s.", slot);
     return STEP_STAY;
 }
 
@@ -101,11 +118,11 @@ static enum Step save_state(void)
 {
     int slot = emu_save_target();
     if (!slot)
-        set_status("All 999 slots are used.", 0);
+        set_status("All 999 slots are used.");
     else if (emu_save_state(slot))
-        set_status("Saved to slot %03d.", slot);
+        set_slot_status("Saved to %s.", slot);
     else
-        set_status("Couldn't save slot %03d. Out of space?", slot);
+        set_slot_status("Couldn't save %s. Out of space?", slot);
     return STEP_STAY;
 }
 
@@ -123,14 +140,14 @@ static void reset_actions(int first, int last)
 static enum Step reset_buttons(void)
 {
     reset_actions(0, FIRST_HOTKEY - 1);
-    set_status("SNES buttons are back to the default keys.", 0);
+    set_status("SNES buttons are back to the default keys.");
     return STEP_STAY;
 }
 
 static enum Step reset_hotkeys(void)
 {
     reset_actions(FIRST_HOTKEY, NUM_ACTIONS - 1);
-    set_status("Hotkeys are back to the defaults.", 0);
+    set_status("Hotkeys are back to the defaults.");
     return STEP_STAY;
 }
 
@@ -193,6 +210,13 @@ static_assert(sizeof(cpu_speeds) / sizeof(cpu_speeds[0]) == NUM_CPU_SPEEDS, "a n
 static const char *const cpu_cores[] = { "ARM (fast)", "C" };
 static_assert(sizeof(cpu_cores) / sizeof(cpu_cores[0]) == NUM_CPU_CORES, "a name for each CPU core");
 
+static const char *const brightness_levels[] =
+{
+    "calculator's", "1 (dimmest)", "2", "3", "4", "5", "6", "7", "8", "9", "10 (brightest)"
+};
+static_assert(sizeof(brightness_levels) / sizeof(brightness_levels[0]) == BRIGHTNESS_LEVELS + 1,
+              "a name for each brightness");
+
 static void update_speed_names(void)
 {
     if (platform_cpu_normal_mhz())
@@ -233,22 +257,25 @@ static void update_speed_names(void)
     CHOICE("Screen output", \
            "No tearing (best): every frame shows whole. DMA: slightly faster, but it can tear.", \
            3, &cfg.screen_dma, screen_outputs, 1, ICON_NONE), \
+    CHOICE("Brightness", \
+           "The screen while PocketSNES runs (CX II); yours comes back after. Keys: + and (-).", \
+           4, &cfg.brightness, brightness_levels, BRIGHTNESS_LEVELS, ICON_NONE), \
     CHOICE("CPU speed", \
            "Overclocks the CX II in games. Highest tested is what the overclock test passed.", \
-           4, &cfg.cpu_speed, cpu_speeds, NUM_CPU_SPEEDS - 1, ICON_NONE), \
+           5, &cfg.cpu_speed, cpu_speeds, NUM_CPU_SPEEDS - 1, ICON_NONE), \
     { OPTION_ACTION, "Overclock test", \
       "Finds this calculator's highest safe speed (408-504 MHz): about 2 minutes.", \
-      5, NULL, NULL, 0, run_overclock_test, NULL, NULL, 0, ICON_SPEED, tested_result }, \
+      6, NULL, NULL, 0, run_overclock_test, NULL, NULL, 0, ICON_SPEED, tested_result }, \
     CHOICE("CPU core", \
            "ARM: the SNES CPU in ARM assembler (faster). C: the old core, if a game acts up.", \
-           6, &cfg.cpu_core, cpu_cores, NUM_CPU_CORES - 1, ICON_NONE)
+           7, &cfg.cpu_core, cpu_cores, NUM_CPU_CORES - 1, ICON_NONE)
 
 static struct Option graphics_options[] =
 {
     GRAPHICS_OPTIONS,
     ACTION("Run speed test",
            "Plays from here for about 40 seconds in six ways, both CPU cores, and shows the frame rates.",
-           7, run_speed_test, ICON_STAR),
+           8, run_speed_test, ICON_STAR),
     BACK_OPTION(9),
 };
 
@@ -267,13 +294,19 @@ static struct Option savestate_options[] =
     CHOICE("Save when leaving",
            "On: quitting, or loading another game, saves a state first to carry on from.",
            1, &cfg.save_on_exit, off_on, 1, ICON_NONE),
+    CHOICE("Auto save slot",
+           "On: that save goes to its own slot, Auto (before 001), and slots 001-999 are left alone.",
+           2, &cfg.auto_slot, off_on, 1, ICON_NONE),
+    CHOICE("New save on quit",
+           "On: that save goes to a new slot. Off: it saves over your newest state. (Not with Auto.)",
+           3, &cfg.quit_new_save, off_on, 1, ICON_NONE),
     CHOICE("Load newest on start",
            "On: games start from their newest state. The game list's menu can skip it once.",
-           2, &cfg.load_on_start, off_on, 1, ICON_NONE),
+           4, &cfg.load_on_start, off_on, 1, ICON_NONE),
     CHOICE("Write in-game saves",
            "When the game's own save goes to the calculator: soon after it saves, or on exit.",
-           3, &cfg.sram_autosave, sram_write_modes, 1, ICON_NONE),
-    BACK_OPTION(5),
+           5, &cfg.sram_autosave, sram_write_modes, 1, ICON_NONE),
+    BACK_OPTION(7),
 };
 
 #define BINDING_HELP "Left/right: key 1 or 2. Enter: set it (hold one key, press another: a combo). Del: clear."
@@ -312,9 +345,11 @@ static struct Option hotkey_options[] =
     BINDING_OPTION(ACTION_PREVIOUS_SLOT, 7),
     BINDING_OPTION(ACTION_SHOW_FPS, 8),
     BINDING_OPTION(ACTION_RESTART, 9),
-    ACTION("Reset to defaults", "Back to esc menu, Q quit, F fast forward, S save, L load; the rest unset.",
-           11, reset_hotkeys, ICON_RESTART),
-    BACK_OPTION(12),
+    BINDING_OPTION(ACTION_BRIGHTER, 10),
+    BINDING_OPTION(ACTION_DIMMER, 11),
+    ACTION("Reset to defaults", "Back to esc menu, Q quit, F fast forward, S save, L load, + and (-) brightness.",
+           13, reset_hotkeys, ICON_RESTART),
+    BACK_OPTION(14),
 };
 
 static struct Option about_options[] =
@@ -341,9 +376,9 @@ MENU(about_menu, about_options, "Controls & about");
       line + 1, &own_keys, scopes, 1, NULL, NULL, own_keys_changed, 0, ICON_KEY }
 
 #define SETTINGS_SUBMENUS(line, graphics) \
-    SUBMENU("Graphics & speed", "Frameskip, the FPS counter, screen output and CPU speed.", \
+    SUBMENU("Graphics & speed", "Frameskip, the FPS counter, screen output, brightness, CPU speed and core.", \
             line, graphics, ICON_SPEED), \
-    SUBMENU("Saving", "Auto-increment, saving when you leave, loading on start, in-game saves.", \
+    SUBMENU("Saving", "Auto-increment, saving when you leave (and where), loading on start, in-game saves.", \
             line + 1, &savestate_menu, ICON_DISK), \
     SUBMENU("SNES buttons", "Which calculator keys press the SNES buttons, two keys each.", \
             line + 2, &button_menu, ICON_PAD), \
@@ -431,14 +466,19 @@ static void option_value(const struct Option *option, char *text, size_t size)
         snprintf(text, size, "%d", (int) *option->value);
         break;
     case OPTION_LOAD_SLOT:
-        snprintf(text, size, "slot %03d  %s", emu_slot(), states_exists(emu_slot()) ? "saved" : "empty");
+        if (emu_slot() == AUTO_SLOT)
+            snprintf(text, size, "auto slot  %s", states_exists(AUTO_SLOT) ? "saved" : "empty");
+        else
+            snprintf(text, size, "slot %03d  %s", emu_slot(), states_exists(emu_slot()) ? "saved" : "empty");
         break;
     case OPTION_ACTION:
         if (option->shown)
             snprintf(text, size, "%s", option->shown);
         break;
     case OPTION_SAVE_SLOT:
-        if (!cfg.auto_increment)
+        if (!cfg.auto_increment && emu_slot() == AUTO_SLOT)
+            snprintf(text, size, "auto slot");
+        else if (!cfg.auto_increment)
             snprintf(text, size, "slot %03d", emu_slot());
         else if (emu_save_target())
             snprintf(text, size, "new slot %03d", emu_save_target());
@@ -521,7 +561,9 @@ static void draw_menu(const struct Menu *menu, int selected, int *scroll)
 
     if (menu == &main_menu)
     {
-        if (states_count())
+        if (states_count() && states_newest() == AUTO_SLOT)
+            snprintf(right, sizeof(right), "%d saved, newest auto", states_count());
+        else if (states_count())
             snprintf(right, sizeof(right), "%d saved, newest %03d", states_count(), states_newest());
         else
             snprintf(right, sizeof(right), "no saved states yet");
@@ -546,7 +588,9 @@ static void draw_menu(const struct Menu *menu, int selected, int *scroll)
     {
         int pos[32];
         int height = layout(menu, pos);
-        int view = UI_HELP_Y - 4 - UI_LIST_Y;
+        /* The key screens have their "Key 1" / "Key 2" heading above the rows. */
+        int top = (menu == &button_menu || menu == &hotkey_menu) ? 8 : 0;
+        int view = UI_HELP_Y - 4 - UI_LIST_Y - top;
         if (pos[selected] < *scroll)
             *scroll = pos[selected];
         if (pos[selected] + UI_ROW_H > *scroll + view)
@@ -562,8 +606,8 @@ static void draw_menu(const struct Menu *menu, int selected, int *scroll)
         for (int i = 0; i < menu->count; i++)
         {
             const struct Option *option = &menu->options[i];
-            int y = UI_LIST_Y + pos[i] - *scroll + ((menu == &button_menu || menu == &hotkey_menu) ? 8 : 0);
-            if (y < UI_LIST_Y - 2 || y + UI_ROW_H > UI_HELP_Y - 2)
+            int y = UI_LIST_Y + top + pos[i] - *scroll;
+            if (y < UI_LIST_Y + top - 2 || y + UI_ROW_H > UI_HELP_Y - 2)
                 continue;
             if (option->type == OPTION_BINDING)
             {
@@ -575,7 +619,7 @@ static void draw_menu(const struct Menu *menu, int selected, int *scroll)
             ui_row(y, option->icon, option->icon == ICON_POWER ? COLOR_SFC_RED : COLOR_TEXT_DIM,
                    option->label, value, option_flags(option, i == selected));
         }
-        ui_scrollbar(*scroll, view, height, UI_LIST_Y, view);
+        ui_scrollbar(*scroll, view, height, UI_LIST_Y + top, view);
     }
 
     /* The help panel, or what just happened. */
@@ -695,6 +739,16 @@ static int badge_width(int action)
            ? 13 : text_width(FONT_SMALL, action_names[action]) + 8;
 }
 
+/* A hotkey's name on the key pages, shortened where the full one is long. */
+static const char *short_action_name(int action)
+{
+    if (action == ACTION_BRIGHTER)
+        return "Brighter";
+    if (action == ACTION_DIMMER)
+        return "Dimmer";
+    return action_names[action];
+}
+
 /* The keys as they are set now, from y down; returns the y below them. */
 static int draw_controls(int y)
 {
@@ -747,9 +801,9 @@ static int draw_controls(int y)
     {
         if (!cfg.keys[i][0].key && !cfg.keys[i][1].key)
             continue;
-        int w = text_width(FONT_SMALL, action_names[i]);
+        int w = text_width(FONT_SMALL, short_action_name(i));
         flow_place(&flow, w + 4 + action_keys_width(i), &x, &cy);
-        draw_string(FONT_SMALL, action_names[i], x, cy + 1, COLOR_TEXT_DIM);
+        draw_string(FONT_SMALL, short_action_name(i), x, cy + 1, COLOR_TEXT_DIM);
         draw_action_keys(i, x + w + 4, cy);
     }
     return flow.y + 16;
@@ -861,9 +915,7 @@ static void change_value(const struct Option *option, int delta)
     else if (option->type == OPTION_LOAD_SLOT || option->type == OPTION_SAVE_SLOT)
     {
         int step = gui_repeat_count() > 20 ? 10 : 1;
-        int slot = emu_slot() - 1 + delta * step;
-        slot = (slot % MAX_STATE_SLOTS + MAX_STATE_SLOTS) % MAX_STATE_SLOTS;
-        emu_set_slot(slot + 1);
+        emu_set_slot(emu_step_slot(emu_slot(), delta * step));
     }
 }
 

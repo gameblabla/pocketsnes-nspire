@@ -1,5 +1,5 @@
 # The game starts at normal speed. In the in-game menu, Graphics & speed (entry 3):
-# CPU speed to 480 MHz (eight steps right: highest tested, 408 ... 480), back
+# CPU speed (its sixth line) to 480 MHz (eight steps right: highest tested, 408 ... 480), back
 # to the game, then the same again with three more steps (492, 504, then it
 # wraps around to normal).
 wait 30
@@ -21,6 +21,8 @@ press down
 wait 3
 press down
 wait 3
+press down
+wait 3
 press right
 wait 3
 press right
@@ -51,6 +53,8 @@ press down
 wait 3
 press enter
 wait 5
+press down
+wait 3
 press down
 wait 3
 press down

@@ -400,6 +400,47 @@ static int lcd_is_cx2_portrait(void)
     return is_cx2 && clocks_per_line == SCREEN_H && lines == SCREEN_W && bpp == 6;
 }
 
+/* The CX II's LCD backlight (Hackspire, "Memory-mapped I/O ports on CX II",
+ * 90130000): the OS writes the brightness to 0x90130014, from 0 (brightest)
+ * to 225 (darkest). Something other than the OS's 0..255 in it means it
+ * isn't what it seems, and the backlight is left alone. */
+#define BACKLIGHT (*(volatile uint32_t *) 0x90130014)
+
+static int os_backlight = -1;
+static int backlight_changed;
+
+static void backlight_init(void)
+{
+    os_backlight = -1;
+    backlight_changed = 0;
+    if (!is_cx2)
+        return;
+    uint32_t value = BACKLIGHT;
+    if (value <= 255)
+        os_backlight = (int) value;
+}
+
+int platform_os_backlight(void)
+{
+    return os_backlight;
+}
+
+void platform_set_backlight(int value)
+{
+    if (os_backlight < 0)
+        return;
+    if (value < 0)
+    {
+        if (!backlight_changed)
+            return;
+        value = os_backlight;
+        backlight_changed = 0;
+    }
+    else
+        backlight_changed = 1;
+    BACKLIGHT = (uint32_t) (value > 255 ? 255 : value);
+}
+
 int platform_init(int *argc, char **argv)
 {
     (void) argc;
@@ -426,6 +467,8 @@ int platform_init(int *argc, char **argv)
     static const char *const rom_types[] = { "sfc", "smc", "fig", "swc" };
     for (size_t i = 0; i < sizeof(rom_types) / sizeof(rom_types[0]); i++)
         cfg_register_fileext(rom_types[i], "pocketsnes");
+
+    backlight_init();
 
     saved_load = *TIMER_LOAD;
     saved_control = *TIMER_CONTROL;
@@ -464,6 +507,7 @@ int platform_init(int *argc, char **argv)
 void platform_shutdown(void)
 {
     platform_set_cpu_multiplier(0);
+    platform_set_backlight(-1);
     if (dma_mapped)
     {
         dma_finish();

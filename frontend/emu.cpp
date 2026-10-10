@@ -13,6 +13,7 @@
 #include "snapshot.h"
 
 #include "config.h"
+#include "brightness.h"
 #include "draw.h"
 #include "emu.h"
 #include "gui.h"
@@ -269,10 +270,16 @@ static void add_message(const char *text)
         emu_show_message(text);
 }
 
-static void show_slot_message(const char *format, int slot)
+/* 'format' has a %s for the slot: "slot 012" or "the auto slot", or with a
+ * capital when 'cap' is set. */
+static void show_slot_message(const char *format, int slot, bool cap = false)
 {
-    char text[64];
-    snprintf(text, sizeof(text), format, slot);
+    char name[32], text[64];
+    if (cap)
+        states_slot_name_cap(slot, name, sizeof(name));
+    else
+        states_slot_name(slot, name, sizeof(name));
+    snprintf(text, sizeof(text), format, name);
     emu_show_message(text);
 }
 
@@ -632,8 +639,8 @@ static void read_joypad(void)
 
 static void change_slot(int delta)
 {
-    current_slot = (current_slot - 1 + delta + MAX_STATE_SLOTS) % MAX_STATE_SLOTS + 1;
-    show_slot_message(states_exists(current_slot) ? "Slot %03d (saved)" : "Slot %03d (empty)", current_slot);
+    current_slot = emu_step_slot(current_slot, delta);
+    show_slot_message(states_exists(current_slot) ? "%s (saved)" : "%s (empty)", current_slot, true);
 }
 
 static void read_hotkeys(void)
@@ -665,6 +672,17 @@ static void read_hotkeys(void)
         fast_forward = !fast_forward;
         emu_show_message(fast_forward ? "Fast forward on" : "Fast forward off");
         reset_timing();
+    }
+    bool brighter = hotkey_pressed(ACTION_BRIGHTER), dimmer = hotkey_pressed(ACTION_DIMMER);
+    if (brighter != dimmer)
+    {
+        int level = brightness_step(brighter ? 1 : -1);
+        char text[32];
+        if (level)
+            snprintf(text, sizeof(text), "Brightness %d/%d", level, BRIGHTNESS_LEVELS);
+        else
+            snprintf(text, sizeof(text), "Brightness: CX II only");
+        emu_show_message(text);
     }
 }
 
@@ -733,6 +751,7 @@ static void pace_frame(void)
 void S9xSyncSpeed (void)
 {
     perf.frames++;
+    brightness_update();   /* a game's own settings can have their own */
     platform_poll_keys();
     if (speed_test_running)
     {
@@ -942,6 +961,29 @@ void emu_set_slot(int slot)
 int emu_save_target(void)
 {
     return cfg.auto_increment ? states_next_new_slot() : current_slot;
+}
+
+int emu_step_slot(int slot, int delta)
+{
+    /* Positions: the auto slot (when it's in use) at 0, then 1-999. */
+    int with_auto = cfg.auto_slot || states_exists(AUTO_SLOT);
+    int count = MAX_STATE_SLOTS + with_auto;
+    int index = slot == AUTO_SLOT ? 0 : slot - 1 + with_auto;
+    index = ((index + delta) % count + count) % count;
+    if (with_auto)
+        return index == 0 ? AUTO_SLOT : index;
+    return index + 1;
+}
+
+/* Where the save made when leaving goes (Saving): the auto slot, a new slot,
+ * or over the newest state. 0 when every slot is used. */
+static int leaving_save_target(void)
+{
+    if (cfg.auto_slot)
+        return AUTO_SLOT;
+    if (!cfg.quit_new_save && states_newest())
+        return states_newest();
+    return states_next_new_slot();
 }
 
 int emu_save_state(int slot)
@@ -1300,9 +1342,9 @@ static void save_state_hotkey(void)
     if (!slot)
         emu_show_message("All 999 slots are used");
     else if (emu_save_state(slot))
-        show_slot_message("Saved slot %03d", slot);
+        show_slot_message("Saved %s", slot);
     else
-        show_slot_message("Couldn't save slot %03d", slot);
+        show_slot_message("Couldn't save %s", slot);
     game_speed();
 }
 
@@ -1310,11 +1352,11 @@ static void load_state_hotkey(void)
 {
     int result = emu_load_state(current_slot);
     if (result == 1)
-        show_slot_message("Loaded slot %03d", current_slot);
+        show_slot_message("Loaded %s", current_slot);
     else if (result == 0)
-        show_slot_message("Slot %03d is empty", current_slot);
+        show_slot_message("%s is empty", current_slot, true);
     else
-        show_slot_message("Couldn't load slot %03d", current_slot);
+        show_slot_message("Couldn't load %s", current_slot);
 }
 
 /* With "save a state when leaving" on, leaving a game (Q, Exit or Load new
@@ -1324,7 +1366,7 @@ static void save_before_leaving(void)
     if (!cfg.save_on_exit)
         return;
 
-    int slot = emu_save_target();
+    int slot = leaving_save_target();
     int rect[4];
     ui_toast("Saving your place...", MESSAGE_Y, rect);
     platform_present();
@@ -1346,9 +1388,9 @@ enum EmuExit emu_run(int may_load_state)
     {
         int slot = states_newest();
         if (emu_load_state(slot) == 1)
-            show_slot_message("Resumed from slot %03d", slot);
+            show_slot_message("Resumed from %s", slot);
         else
-            show_slot_message("Couldn't resume from slot %03d", slot);
+            show_slot_message("Couldn't resume from %s", slot);
     }
 
     gui_wait_release();

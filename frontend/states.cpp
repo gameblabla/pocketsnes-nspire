@@ -31,21 +31,29 @@ struct StateHeader
 
 static char save_dir[512];
 static char base_name[256];   /* ROM file name without its last extension */
-static uint8_t used[MAX_STATE_SLOTS + 1];
-static uint32_t counters[MAX_STATE_SLOTS + 1];
+static uint8_t used[AUTO_SLOT + 1];
+static uint32_t counters[AUTO_SLOT + 1];
 
 static void state_path(int slot, char *path, size_t size)
 {
-    snprintf(path, size, "%s/%s.sv%03d.tns", save_dir, base_name, slot);
+    if (slot == AUTO_SLOT)
+        snprintf(path, size, "%s/%s.svauto.tns", save_dir, base_name);
+    else
+        snprintf(path, size, "%s/%s.sv%03d.tns", save_dir, base_name, slot);
 }
 
-/* Slot number of a file name like "Zelda.sfc.sv012.tns", or 0. */
+/* Slot number of a file name like "Zelda.sfc.sv012.tns" (or ".svauto.tns"),
+ * or 0. */
 static int slot_from_name(const char *name)
 {
     size_t base_len = strlen(base_name);
     const char *p = name + base_len;
 
-    if (strlen(name) != base_len + 10 || strncasecmp(name, base_name, base_len) != 0)
+    if (strncasecmp(name, base_name, base_len) != 0)
+        return 0;
+    if (strcasecmp(p, ".svauto.tns") == 0)
+        return AUTO_SLOT;
+    if (strlen(name) != base_len + 10)
         return 0;
     if (strncasecmp(p, ".sv", 3) != 0 || strcasecmp(p + 6, ".tns") != 0)
         return 0;
@@ -121,13 +129,13 @@ void states_sram_path(char *path, size_t size)
 
 int states_exists(int slot)
 {
-    return slot >= 1 && slot <= MAX_STATE_SLOTS && used[slot];
+    return slot >= 1 && slot <= AUTO_SLOT && used[slot];
 }
 
 int states_count(void)
 {
     int count = 0;
-    for (int slot = 1; slot <= MAX_STATE_SLOTS; slot++)
+    for (int slot = 1; slot <= AUTO_SLOT; slot++)
         count += used[slot];
     return count;
 }
@@ -135,7 +143,7 @@ int states_count(void)
 int states_newest(void)
 {
     int newest = 0;
-    for (int slot = 1; slot <= MAX_STATE_SLOTS; slot++)
+    for (int slot = 1; slot <= AUTO_SLOT; slot++)
         if (used[slot] && (!newest || counters[slot] >= counters[newest]))
             newest = slot;
     return newest;
@@ -164,7 +172,7 @@ int states_save(int slot)
     struct StateHeader header;
     int ok = 0;
 
-    if (slot < 1 || slot > MAX_STATE_SLOTS || !S9xFreezeToMemory(&raw, &raw_size))
+    if (slot < 1 || slot > AUTO_SLOT || !S9xFreezeToMemory(&raw, &raw_size))
         return 0;
 
     packed_size = compressBound(raw_size);
@@ -179,7 +187,7 @@ int states_save(int slot)
     header.packed_size = (uint32_t) packed_size;
     header.rom_crc = Memory.ROMCRC32;
     header.counter = 1;
-    for (int i = 1; i <= MAX_STATE_SLOTS; i++)
+    for (int i = 1; i <= AUTO_SLOT; i++)
         if (used[i] && counters[i] >= header.counter)
             header.counter = counters[i] + 1;
 
@@ -252,4 +260,21 @@ int states_load(int slot)
     free(packed);
     free(raw);
     return result;
+}
+
+const char *states_slot_name(int slot, char *text, size_t size)
+{
+    if (slot == AUTO_SLOT)
+        snprintf(text, size, "the auto slot");
+    else
+        snprintf(text, size, "slot %03d", slot);
+    return text;
+}
+
+const char *states_slot_name_cap(int slot, char *text, size_t size)
+{
+    states_slot_name(slot, text, size);
+    if (text[0] >= 'a' && text[0] <= 'z')
+        text[0] = (char) (text[0] - 'a' + 'A');
+    return text;
 }

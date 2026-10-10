@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 
 #include "config.h"
+#include "brightness.h"
 #include "platform.h"
 
 /* Saved as "name=value" lines so older and newer builds can share the file.
@@ -29,7 +30,8 @@ const char *const action_names[NUM_ACTIONS] =
     "D-pad up", "D-pad down", "D-pad left", "D-pad right",
     "A", "B", "X", "Y", "L", "R", "Start", "Select",
     "Menu", "Quit", "Fast forward", "Save state", "Load state",
-    "Load newest", "Next slot", "Previous slot", "FPS counter", "Restart game"
+    "Load newest", "Next slot", "Previous slot", "FPS counter", "Restart game",
+    "Brightness up", "Brightness down"
 };
 
 /* Short names used in the config file. */
@@ -37,17 +39,19 @@ static const char *const action_ids[NUM_ACTIONS] =
 {
     "up", "down", "left", "right", "a", "b", "x", "y", "l", "r", "start", "select",
     "menu", "quit", "fast_forward", "save_state", "load_state",
-    "load_newest", "next_slot", "previous_slot", "show_fps", "restart"
+    "load_newest", "next_slot", "previous_slot", "show_fps", "restart",
+    "brighter", "dimmer"
 };
 
-/* The PocketSNES button layout (README.md), plus the hotkeys. The new
- * hotkeys start unbound. */
+/* The PocketSNES button layout (README.md), plus the hotkeys. The newer
+ * hotkeys start unbound, except brightness: + and (-) (- is Select). */
 static const uint8_t default_keys[NUM_ACTIONS] =
 {
     KEY_8, KEY_5, KEY_4, KEY_6,
     KEY_CTRL, KEY_SHIFT, KEY_VAR, KEY_DEL, KEY_TAB, KEY_MENU, KEY_ENTER, KEY_MINUS,
     KEY_ESC, KEY_Q, KEY_F, KEY_S, KEY_L,
-    0, 0, 0, 0, 0
+    0, 0, 0, 0, 0,
+    KEY_PLUS, KEY_NEGATIVE
 };
 
 static void config_path(char *path, size_t size)
@@ -74,11 +78,14 @@ static void default_settings_into(struct Config *c)
     c->show_fps = 0;
     c->auto_increment = 1;
     c->save_on_exit = 1;
+    c->auto_slot = 0;
+    c->quit_new_save = 1;
     c->load_on_start = 1;
     c->sram_autosave = 1;
     c->screen_dma = 0;
     c->cpu_speed = CPU_SPEED_NORMAL;
     c->cpu_core = CPU_CORE_ARM;
+    c->brightness = 0;
 }
 
 static void copy_settings(struct Config *to, const struct Config *from)
@@ -88,11 +95,14 @@ static void copy_settings(struct Config *to, const struct Config *from)
     to->show_fps = from->show_fps;
     to->auto_increment = from->auto_increment;
     to->save_on_exit = from->save_on_exit;
+    to->auto_slot = from->auto_slot;
+    to->quit_new_save = from->quit_new_save;
     to->load_on_start = from->load_on_start;
     to->sram_autosave = from->sram_autosave;
     to->screen_dma = from->screen_dma;
     to->cpu_speed = from->cpu_speed;
     to->cpu_core = from->cpu_core;
+    to->brightness = from->brightness;
 }
 
 static uint32_t clamp(long value, uint32_t max)
@@ -142,6 +152,7 @@ struct FileInfo
     int auto_resume;   /* version 1's setting, -1 if absent */
     long cpu_speed;    /* as written, -1 if absent (its meaning depends on the version) */
     long tested_mhz;   /* -1 if absent */
+    int quit_new_save; /* -1 if absent: then it follows auto_increment, as leaving did before */
 };
 
 /* Version 1 and 2 files had normal, 432, 456 and 480 MHz. */
@@ -162,6 +173,7 @@ static void read_file(const char *path, struct Config *c, struct FileInfo *info)
     info->version = 1;
     info->auto_resume = -1;
     info->cpu_speed = info->tested_mhz = -1;
+    info->quit_new_save = -1;
     FILE *f = fopen(path, "r");
     if (!f)
         return;
@@ -204,6 +216,12 @@ static void read_file(const char *path, struct Config *c, struct FileInfo *info)
             info->cpu_speed = number;
         else if (strcmp(line, "cpu_core") == 0)
             c->cpu_core = clamp(number, NUM_CPU_CORES - 1);
+        else if (strcmp(line, "brightness") == 0)
+            c->brightness = clamp(number, BRIGHTNESS_LEVELS);
+        else if (strcmp(line, "auto_slot") == 0)
+            c->auto_slot = clamp(number, 1);
+        else if (strcmp(line, "quit_new_save") == 0)
+            info->quit_new_save = (int) clamp(number, 1);
         else if (strcmp(line, "highest_tested_mhz") == 0)
             info->tested_mhz = number;
         else if (strcmp(line, "rom_dir") == 0)
@@ -222,6 +240,7 @@ static void read_file(const char *path, struct Config *c, struct FileInfo *info)
     fclose(f);
     if (info->cpu_speed >= 0)
         c->cpu_speed = cpu_speed_from_file(info->cpu_speed, info->version);
+    c->quit_new_save = info->quit_new_save >= 0 ? (uint32_t) info->quit_new_save : c->auto_increment;
 }
 
 void config_load(void)
@@ -265,6 +284,9 @@ static void write_settings(FILE *f, const struct Config *c)
     fprintf(f, "screen_dma=%u\n", (unsigned) c->screen_dma);
     fprintf(f, "cpu_speed=%u\n", (unsigned) c->cpu_speed);
     fprintf(f, "cpu_core=%u\n", (unsigned) c->cpu_core);
+    fprintf(f, "brightness=%u\n", (unsigned) c->brightness);
+    fprintf(f, "auto_slot=%u\n", (unsigned) c->auto_slot);
+    fprintf(f, "quit_new_save=%u\n", (unsigned) c->quit_new_save);
 }
 
 static void write_keys(FILE *f, const struct Config *c)

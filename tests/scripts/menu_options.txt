@@ -2,7 +2,8 @@
 wait 30
 press esc
 wait 5
-# Saving (entry 4): auto-increment, save when leaving and load on start off
+# Saving (entry 4): auto-increment, save when leaving and load on start (its
+# fifth line) off
 press down
 wait 3
 press down
@@ -21,12 +22,16 @@ press right
 wait 3
 press down
 wait 3
+press down
+wait 3
+press down
+wait 3
 press right
 wait 3
 press esc
 wait 3
-# Graphics & speed (entry 3): FPS counter on, screen output DMA, CPU speed 432
-# (four steps right: highest tested, 408, 420, 432)
+# Graphics & speed (entry 3): FPS counter on, screen output DMA, CPU speed
+# (past Brightness) 432 (four steps right: highest tested, 408, 420, 432)
 press up
 wait 3
 press enter
@@ -40,6 +45,8 @@ wait 3
 press down
 wait 3
 press right
+wait 3
+press down
 wait 3
 press down
 wait 3

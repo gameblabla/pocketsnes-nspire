@@ -1,3 +1,4 @@
+#include "brightness.h"
 #include "config.h"
 #include "draw.h"
 #include "gui.h"
@@ -11,11 +12,24 @@ static int repeats;
 static uint32_t frame_end;
 static bool digits_move = true;
 
+static bool action_pressed(int action)
+{
+    for (int slot = 0; slot < KEY_SLOTS; slot++)
+        if (binding_pressed(cfg.keys[action][slot]))
+            return true;
+    return false;
+}
+
 enum GuiAction gui_input(void)
 {
     platform_poll_keys();
     if (platform_quit_requested())
         return GUI_QUIT;
+
+    /* The brightness keys work in the menus and the game list too. */
+    bool brighter = action_pressed(ACTION_BRIGHTER), dimmer = action_pressed(ACTION_DIMMER);
+    if (brighter != dimmer)
+        brightness_step(brighter ? 1 : -1);
 
     if (platform_key_pressed(KEY_ENTER) || platform_key_pressed(KEY_CLICK) ||
         platform_key_pressed(KEY_RETURN))
@@ -24,9 +38,8 @@ enum GuiAction gui_input(void)
         return GUI_MENU;
     if (platform_key_pressed(KEY_ESC))
         return GUI_BACK;
-    for (int slot = 0; slot < KEY_SLOTS; slot++)
-        if (binding_pressed(cfg.keys[ACTION_MENU][slot]))
-            return GUI_BACK;
+    if (action_pressed(ACTION_MENU))
+        return GUI_BACK;
     if (platform_key_pressed(KEY_DEL))
         return GUI_CLEAR;
 
@@ -79,6 +92,7 @@ int gui_digit_pressed(void)
 
 void gui_present(void)
 {
+    brightness_update();
     platform_present();
 
     uint32_t now = platform_ticks();

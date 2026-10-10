@@ -174,6 +174,14 @@ int platform_cpu_multiplier(void);
  * results. */
 void platform_clock_report(char *text, size_t size);
 
+/* The screen's backlight on a CX II, in the value the OS writes to its
+ * register: 0 (brightest) to 225 (darkest). platform_os_backlight() is the
+ * value at startup (the calculator's own brightness), or -1 where it can't
+ * be changed (not a CX II). platform_set_backlight(-1) puts the calculator's
+ * own back, as platform_shutdown() does. */
+int platform_os_backlight(void);
+void platform_set_backlight(int value);
+
 /* Game frames (platform_frame_begin) shown by the DMA controller, a little
  * faster but not in step with the LCD (it can tear), instead of turned into
  * the buffer the LCD shows next. Only on the CX II. */

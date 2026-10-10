@@ -1,11 +1,13 @@
 # In the game list (on a folder): menu, Graphics & speed (first entry), then
-# Overclock test (sixth entry). Each speed takes two rounds of 8 s (480
+# Overclock test (seventh entry). Each speed takes two rounds of 8 s (480
 # frames each); five speeds are tried. Then the results, and out.
 wait 5
 press menu
 wait 5
 press enter
 wait 5
+press down
+wait 3
 press down
 wait 3
 press down

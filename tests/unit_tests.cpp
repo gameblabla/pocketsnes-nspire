@@ -15,6 +15,7 @@
 #include "tile.h"
 
 #include "bindings.h"
+#include "brightness.h"
 #include "config.h"
 #include "platform.h"
 #include "rotate.h"
@@ -77,6 +78,15 @@ int platform_key_pressed(int key)
 const char *platform_exe_dir(void)
 {
     return exe_dir;
+}
+
+int platform_os_backlight(void)
+{
+    return 112;
+}
+
+void platform_set_backlight(int)
+{
 }
 
 /* ---- Tile drawing ---- */
@@ -341,6 +351,10 @@ static void test_config(void)
     CHECK(cfg.keys[ACTION_A][0].key == KEY_CTRL && !cfg.keys[ACTION_A][0].with && !cfg.keys[ACTION_A][1].key,
           "defaults: A is ctrl, with no second key");
     CHECK(cfg.keys[ACTION_LOAD_NEWEST][0].key == 0, "defaults: Load newest has no key");
+    CHECK(cfg.auto_slot == 0 && cfg.quit_new_save == 1 && cfg.brightness == 0,
+          "defaults: no auto slot, a new save on quit, the calculator's own brightness");
+    CHECK(cfg.keys[ACTION_BRIGHTER][0].key == KEY_PLUS && cfg.keys[ACTION_DIMMER][0].key == KEY_NEGATIVE,
+          "defaults: brightness on + and (-)");
 
     /* A version 1 file (no config_version): its choices are kept, the three
      * save options come on. */
@@ -372,6 +386,23 @@ static void test_config(void)
     CHECK(!cfg.keys[ACTION_B][0].key, "a key number that doesn't exist is dropped");
     CHECK(!cfg.keys[ACTION_X][0].key, "a touchpad arrow (reserved) is dropped");
     CHECK(!cfg.keys[ACTION_Y][0].key, "a combination of a key with itself is dropped");
+    CHECK(cfg.quit_new_save == 0, "no quit_new_save line: it follows auto-increment (off), as leaving did");
+    CHECK(cfg.keys[ACTION_BRIGHTER][0].key == KEY_PLUS, "a file from before the brightness keys gets them");
+
+    write_file(global_path, "config_version=3\nauto_increment=0\nquit_new_save=1\nauto_slot=1\n"
+                            "brightness=7\nkey_brighter=0\nkey_dimmer=52\n");
+    config_load();
+    CHECK(cfg.quit_new_save == 1 && cfg.auto_slot == 1 && cfg.brightness == 7,
+          "New save on quit, the auto slot and brightness read as written");
+    CHECK(!cfg.keys[ACTION_BRIGHTER][0].key && cfg.keys[ACTION_DIMMER][0].key == KEY_9,
+          "the brightness keys read as written");
+    write_file(global_path, "config_version=3\nbrightness=99\nauto_slot=5\n");
+    config_load();
+    CHECK(cfg.brightness == BRIGHTNESS_LEVELS && cfg.auto_slot == 1, "out of range values are clamped");
+    write_file(global_path, "config_version=2\nauto_increment=0\nsave_on_exit=0\nload_on_start=1\n"
+                            "cpu_speed=3\nscreen_dma=1\nkey_a=6\nkey_a_2=121+20\nkey_save_state_2=121+23\n"
+                            "key_b=999\nkey_x=113\nkey_y=121+121\nkey_next_slot_2=20\n");
+    config_load();
 
     /* Saving and loading again gives the same. */
     struct Config before = cfg;
@@ -432,6 +463,21 @@ static void test_config(void)
           "CPU speed reset in the game's own settings");
     CHECK(config_cpu_multiplier(CPU_SPEED_NORMAL) == 0 && config_cpu_multiplier(CPU_SPEED_480) == 40 &&
           config_cpu_multiplier(CPU_SPEED_432) == 36, "CPU speeds are 12 MHz times 36, 38, 40");
+}
+
+/* ---- Brightness levels ---- */
+
+static void test_brightness(void)
+{
+    CHECK(brightness_value(10) == 0 && brightness_value(1) == 225 && brightness_value(7) == 75,
+          "levels 10, 7 and 1 are the backlight values 0, 75 and 225");
+    CHECK(brightness_value(0) == 225 && brightness_value(11) == 0, "levels out of range are clamped");
+    int ok = 1;
+    for (int level = 1; level <= BRIGHTNESS_LEVELS; level++)
+        ok &= brightness_level(brightness_value(level)) == level;
+    CHECK(ok, "the level of each level's value is that level");
+    CHECK(brightness_level(112) == 6 && brightness_level(255) == 1 && brightness_level(-5) == 10,
+          "the nearest level of other values (the calculator's own)");
 }
 
 /* ---- Key bindings ---- */
@@ -515,6 +561,7 @@ int main(void)
     test_tile_drawing();
     test_rotation();
     test_config();
+    test_brightness();
     test_bindings();
 
     char command[700];

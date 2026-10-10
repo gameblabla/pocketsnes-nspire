@@ -29,6 +29,8 @@ enum Action
     ACTION_PREVIOUS_SLOT,
     ACTION_SHOW_FPS,
     ACTION_RESTART,
+    ACTION_BRIGHTER,
+    ACTION_DIMMER,
     NUM_ACTIONS
 };
 
@@ -102,11 +104,14 @@ struct Config
     uint32_t show_fps;          /* 0 off, 1 on, 2 detailed */
     uint32_t auto_increment;    /* saving goes to a new slot */
     uint32_t save_on_exit;      /* leaving a game saves a state first */
+    uint32_t auto_slot;         /* ... into the auto slot (states.h), not 001-999 */
+    uint32_t quit_new_save;     /* ... into a new slot; 0: over the newest state */
     uint32_t load_on_start;     /* starting a game loads its newest state */
     uint32_t sram_autosave;
     uint32_t screen_dma;        /* game frames by DMA (faster, can tear) */
     uint32_t cpu_speed;         /* enum CpuSpeed */
     uint32_t cpu_core;          /* enum CpuCore */
+    uint32_t brightness;        /* 0 the calculator's own, 1-10 (brightness.h) */
     /* Keys: for all games, or a game's own (config_set_game_keys). */
     struct Binding keys[NUM_ACTIONS][KEY_SLOTS];
     /* For all games only. */
