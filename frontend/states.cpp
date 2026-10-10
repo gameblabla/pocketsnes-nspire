@@ -11,11 +11,14 @@
 #include "snes9x.h"
 #include "memmap.h"
 #include "snapshot.h"
+#include "config.h"
 #include "paths.h"
 #include "romzip.h"
 #include "states.h"
 
-/* A state file is this header followed by the zlib-compressed snapshot. */
+/* A state file is this header followed by the snapshot, zlib-compressed,
+ * or as it is when the header's flags say STATE_STORED (Saving > Compress
+ * saves off, or the save manager). */
 #define STATE_MAGIC     "PSST"
 #define STATE_VERSION   1
 #define MAX_RAW_SIZE    (4 * 1024 * 1024)
@@ -28,8 +31,11 @@ struct StateHeader
     uint32_t raw_size;
     uint32_t packed_size;
     uint32_t rom_crc;
-    uint32_t reserved[2];
+    uint32_t flags;
+    uint32_t reserved;
 };
+
+#define STATE_STORED 1
 
 static char save_dir[512];
 static char base_name[256];   /* ROM file name without its last extension */
@@ -234,12 +240,20 @@ int states_save(int slot)
     if (slot < 1 || slot > AUTO_SLOT || !S9xFreezeToMemory(&raw, &raw_size))
         return 0;
 
-    packed_size = compressBound(raw_size);
-    packed = (uint8 *) malloc(packed_size);
-    if (!packed || compress2(packed, &packed_size, raw, raw_size, Z_BEST_SPEED) != Z_OK)
-        goto done;
-
     memset(&header, 0, sizeof(header));
+    if (cfg.compress_saves)
+    {
+        packed_size = compressBound(raw_size);
+        packed = (uint8 *) malloc(packed_size);
+        if (!packed || compress2(packed, &packed_size, raw, raw_size, Z_BEST_SPEED) != Z_OK)
+            goto done;
+    }
+    else
+    {
+        packed_size = raw_size;
+        header.flags = STATE_STORED;
+    }
+
     memcpy(header.magic, STATE_MAGIC, 4);
     header.version = STATE_VERSION;
     header.raw_size = raw_size;
@@ -259,7 +273,7 @@ int states_save(int slot)
         if (!f)
             goto done;
         int written = fwrite(&header, sizeof(header), 1, f) == 1 &&
-                      fwrite(packed, 1, packed_size, f) == packed_size;
+                      fwrite(packed ? packed : raw, 1, packed_size, f) == packed_size;
         if (fclose(f) != 0 || !written)
         {
             remove(temp_path);
@@ -310,7 +324,9 @@ int states_load(int slot)
         uLongf raw_size = header.raw_size;
 
         if (packed && raw && fread(packed, 1, header.packed_size, f) == header.packed_size &&
-            uncompress(raw, &raw_size, packed, header.packed_size) == Z_OK &&
+            ((header.flags & STATE_STORED) ? header.packed_size == header.raw_size &&
+                                             (memcpy(raw, packed, raw_size), 1)
+                                           : uncompress(raw, &raw_size, packed, header.packed_size) == Z_OK) &&
             raw_size == header.raw_size &&
             S9xUnfreezeFromMemory(raw, header.raw_size))
             result = 1;
@@ -336,4 +352,293 @@ const char *states_slot_name_cap(int slot, char *text, size_t size)
     if (text[0] >= 'a' && text[0] <= 'z')
         text[0] = (char) (text[0] - 'a' + 'A');
     return text;
+}
+
+/* ---- In-game saves ----
+ *
+ * "<ROM name>.srm.tns" as the game wrote it (what PC emulators read, as
+ * "<ROM name without .sfc>.srm"), or "<ROM name>.srm.gz.tns" gzipped when
+ * Compress saves is on (a PC unpacks it like any .gz). */
+
+static void sram_paths(char *plain, char *gz, size_t size)
+{
+    snprintf(plain, size, "%s/%s.srm.tns", save_dir, base_name);
+    snprintf(gz, size, "%s/%s.srm.gz.tns", save_dir, base_name);
+}
+
+static long file_bytes(const char *path, long *mtime)
+{
+    struct stat st;
+    if (stat(path, &st) != 0)
+        return -1;
+    if (mtime)
+        *mtime = (long) st.st_mtime;
+    return (long) st.st_size;
+}
+
+/* A whole small file (in-game saves are 128 KB at most), malloc'd. */
+static uint8_t *read_whole(const char *path, size_t *size, size_t max)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    uint8_t *data = (uint8_t *) malloc(max + 1);
+    size_t got = data ? fread(data, 1, max + 1, f) : 0;
+    fclose(f);
+    if (!data || got > max)
+    {
+        free(data);
+        return NULL;
+    }
+    *size = got;
+    return data;
+}
+
+/* Writes data to path through a temporary file, so a full disk can't
+ * destroy what was there. */
+static int write_whole(const char *path, const void *data, size_t size)
+{
+    char temp[900];
+    snprintf(temp, sizeof(temp), "%s.tmp", path);
+    FILE *f = fopen(temp, "wb");
+    if (!f)
+        return 0;
+    int ok = fwrite(data, 1, size, f) == size;
+    if (fclose(f) != 0)
+        ok = 0;
+    if (ok)
+    {
+        remove(path);
+        ok = rename(temp, path) == 0;
+    }
+    if (!ok)
+        remove(temp);
+    return ok;
+}
+
+/* gzip (windowBits 31) or gunzip (47: gzip or zlib) of a buffer. */
+static uint8_t *gz_convert(const uint8_t *in, size_t in_size, size_t *out_size, int pack)
+{
+    size_t capacity = pack ? in_size + in_size / 1000 + 64 : 0x20000 + 0x400;
+    uint8_t *out = (uint8_t *) malloc(capacity);
+    if (!out)
+        return NULL;
+    z_stream z;
+    memset(&z, 0, sizeof(z));
+    int ok = (pack ? deflateInit2(&z, Z_BEST_COMPRESSION, Z_DEFLATED, 31, 8, Z_DEFAULT_STRATEGY)
+                   : inflateInit2(&z, 47)) == Z_OK;
+    if (ok)
+    {
+        z.next_in = (Bytef *) in;
+        z.avail_in = (uInt) in_size;
+        z.next_out = out;
+        z.avail_out = (uInt) capacity;
+        ok = (pack ? deflate(&z, Z_FINISH) : inflate(&z, Z_FINISH)) == Z_STREAM_END;
+        *out_size = z.total_out;
+        if (pack)
+            deflateEnd(&z);
+        else
+            inflateEnd(&z);
+    }
+    if (!ok)
+    {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
+/* Converts one file to the other form and removes the first. */
+static int gz_file(const char *from, const char *to, int pack)
+{
+    size_t size, out_size;
+    uint8_t *data = read_whole(from, &size, 0x40000);
+    if (!data)
+        return 0;
+    uint8_t *out = gz_convert(data, size, &out_size, pack);
+    int ok = out && write_whole(to, out, out_size);
+    free(out);
+    free(data);
+    if (ok)
+        remove(from);
+    return ok;
+}
+
+void states_load_sram(void)
+{
+    char plain[900], gz[900], temp[900];
+    long plain_time = 0, gz_time = 0;
+    sram_paths(plain, gz, sizeof(plain));
+
+    /* One from a PC emulator, named after the ROM without its extension
+     * ("Game.srm.tns" for "Game.sfc.tns"), is taken when the game has none. */
+    if (file_bytes(plain, NULL) < 0 && file_bytes(gz, NULL) < 0)
+    {
+        char pc_name[300], pc_path[900];
+        snprintf(pc_name, sizeof(pc_name), "%s", base_name);
+        char *dot = strrchr(pc_name, '.');
+        if (dot && dot != pc_name)
+        {
+            *dot = 0;
+            snprintf(pc_path, sizeof(pc_path), "%s/%s.srm.tns", save_dir, pc_name);
+            if (file_bytes(pc_path, NULL) >= 0)
+                rename(pc_path, plain);
+        }
+    }
+
+    int has_plain = file_bytes(plain, &plain_time) >= 0, has_gz = file_bytes(gz, &gz_time) >= 0;
+    /* Both: the newer one (one copied in by hand, say). */
+    if (has_gz && (!has_plain || gz_time > plain_time))
+    {
+        size_t size, out_size;
+        uint8_t *data = read_whole(gz, &size, 0x40000);
+        uint8_t *raw = data ? gz_convert(data, size, &out_size, 0) : NULL;
+        snprintf(temp, sizeof(temp), "%s/%s.srm.load.tns", save_dir, base_name);
+        if (raw && write_whole(temp, raw, out_size))
+        {
+            Memory.LoadSRAM (temp);
+            remove(temp);
+        }
+        else
+            Memory.LoadSRAM (plain);   /* clears it, as for no save */
+        free(raw);
+        free(data);
+    }
+    else
+        Memory.LoadSRAM (plain);
+}
+
+void states_save_sram(void)
+{
+    char plain[900], gz[900];
+    sram_paths(plain, gz, sizeof(plain));
+    states_make_dir();
+    if (!cfg.compress_saves)
+    {
+        if (Memory.SaveSRAM (plain))
+            remove(gz);
+        return;
+    }
+    /* The core writes it plain; then it's packed. */
+    char temp[900];
+    snprintf(temp, sizeof(temp), "%s/%s.srm.save.tns", save_dir, base_name);
+    remove(temp);
+    if (Memory.SaveSRAM (temp) && file_bytes(temp, NULL) >= 0 && gz_file(temp, gz, 1))
+        remove(plain);
+    remove(temp);
+}
+
+/* ---- The save manager ---- */
+
+int states_list(struct SaveFile *files, int max)
+{
+    char plain[900], gz[900], path[900];
+    int count = 0;
+    long bytes;
+
+    sram_paths(plain, gz, sizeof(plain));
+    if ((bytes = file_bytes(gz, NULL)) >= 0 && count < max)
+    {
+        files[count].slot = 0;
+        files[count].bytes = bytes;
+        files[count++].compressed = 1;
+    }
+    else if ((bytes = file_bytes(plain, NULL)) >= 0 && count < max)
+    {
+        files[count].slot = 0;
+        files[count].bytes = bytes;
+        files[count++].compressed = 0;
+    }
+    for (int n = 0; n <= MAX_STATE_SLOTS && count < max; n++)
+    {
+        int slot = n == 0 ? AUTO_SLOT : n;
+        if (!used[slot])
+            continue;
+        struct StateHeader header;
+        state_path(slot, path, sizeof(path));
+        bytes = file_bytes(path, NULL);
+        if (bytes < 0)
+            continue;
+        files[count].slot = slot;
+        files[count].bytes = bytes;
+        files[count++].compressed = read_header(path, &header) && !(header.flags & STATE_STORED);
+    }
+    return count;
+}
+
+int states_set_compressed(int slot, int compress)
+{
+    char path[900];
+    if (slot == 0)
+    {
+        char plain[900], gz[900];
+        sram_paths(plain, gz, sizeof(plain));
+        if (compress)
+            return file_bytes(gz, NULL) >= 0 || gz_file(plain, gz, 1);
+        return file_bytes(plain, NULL) >= 0 && file_bytes(gz, NULL) < 0 ? 1 : gz_file(gz, plain, 0);
+    }
+    if (!states_exists(slot))
+        return 0;
+
+    state_path(slot, path, sizeof(path));
+    size_t size;
+    uint8_t *data = read_whole(path, &size, MAX_RAW_SIZE + sizeof(struct StateHeader));
+    if (!data || size < sizeof(struct StateHeader))
+    {
+        free(data);
+        return 0;
+    }
+    struct StateHeader header;
+    memcpy(&header, data, sizeof(header));
+    const uint8_t *payload = data + sizeof(header);
+    int stored = (header.flags & STATE_STORED) != 0;
+    if (memcmp(header.magic, STATE_MAGIC, 4) != 0 || header.version != STATE_VERSION ||
+        header.packed_size != size - sizeof(header) || header.raw_size > MAX_RAW_SIZE)
+    {
+        free(data);
+        return 0;
+    }
+    if (stored == !compress)
+    {
+        free(data);
+        return 1;   /* already so */
+    }
+
+    uLongf out_size = compress ? compressBound(header.raw_size) : header.raw_size;
+    uint8_t *out = (uint8_t *) malloc(sizeof(header) + out_size);
+    int ok = out != NULL;
+    if (ok && compress)
+        ok = compress2(out + sizeof(header), &out_size, payload, header.raw_size, Z_BEST_SPEED) == Z_OK;
+    else if (ok)
+        ok = uncompress(out + sizeof(header), &out_size, payload, header.packed_size) == Z_OK &&
+             out_size == header.raw_size;
+    if (ok)
+    {
+        header.packed_size = (uint32_t) out_size;
+        header.flags = compress ? header.flags & ~STATE_STORED : header.flags | STATE_STORED;
+        memcpy(out, &header, sizeof(header));
+        ok = write_whole(path, out, sizeof(header) + out_size);
+    }
+    free(out);
+    free(data);
+    return ok;
+}
+
+int states_delete(int slot)
+{
+    char path[900], gz[900];
+    if (slot == 0)
+    {
+        sram_paths(path, gz, sizeof(path));
+        int a = remove(path) == 0, b = remove(gz) == 0;
+        return a || b;
+    }
+    if (!states_exists(slot))
+        return 0;
+    state_path(slot, path, sizeof(path));
+    if (remove(path) != 0)
+        return 0;
+    used[slot] = 0;
+    counters[slot] = 0;
+    return 1;
 }

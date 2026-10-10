@@ -108,6 +108,7 @@ struct Config
     uint32_t quit_new_save;     /* ... into a new slot; 0: over the newest state */
     uint32_t load_on_start;     /* starting a game loads its newest state */
     uint32_t sram_autosave;
+    uint32_t compress_saves;    /* new states and in-game saves are compressed */
     uint32_t screen_dma;        /* game frames by DMA (faster, can tear) */
     uint32_t cpu_speed;         /* enum CpuSpeed */
     uint32_t cpu_core;          /* enum CpuCore */

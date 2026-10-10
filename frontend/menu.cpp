@@ -10,6 +10,7 @@
 #include "menu.h"
 #include "overclock.h"
 #include "platform.h"
+#include "savemanager.h"
 #include "states.h"
 #include "ui.h"
 #include "version.h"
@@ -148,6 +149,25 @@ static enum Step reset_hotkeys(void)
 {
     reset_actions(FIRST_HOTKEY, NUM_ACTIONS - 1);
     set_status("Hotkeys are back to the defaults.");
+    return STEP_STAY;
+}
+
+static void game_name(const char *path, char *name, size_t size);
+
+/* A game's saves: the one running, or the one the game list's menu is on. */
+static enum Step open_save_manager(void)
+{
+    char title[64];
+    const char *rom = in_game ? emu_rom_path() : list_rom;
+    if (!rom)
+    {
+        gui_message("The save manager is for one game: use it", "from the game's menu in the game list, or in a game.");
+        return STEP_STAY;
+    }
+    if (!in_game)
+        states_open_game(rom);
+    game_name(rom, title, sizeof(title));
+    save_manager_run(title);
     return STEP_STAY;
 }
 
@@ -316,7 +336,12 @@ static struct Option savestate_options[] =
     CHOICE("Write in-game saves",
            "When the game's own save goes to the calculator: soon after it saves, or on exit.",
            5, &cfg.sram_autosave, sram_write_modes, 1, ICON_NONE),
-    BACK_OPTION(7),
+    CHOICE("Compress saves",
+           "On: new states and in-game saves take less space. Off: in-game saves copy straight to a PC.",
+           6, &cfg.compress_saves, off_on, 1, ICON_NONE),
+    ACTION("Save manager", "This game's saves and their sizes: compress, uncompress or delete them.",
+           7, open_save_manager, ICON_DISK),
+    BACK_OPTION(9),
 };
 
 #define BINDING_HELP "Left/right: key 1 or 2. Enter: set it (hold one key, press another: a combo). Del: clear."
@@ -428,6 +453,8 @@ static struct Option list_game_options[] =
            3, sort_list, ICON_SORT),
     SETTINGS_SUBMENUS(5, &list_graphics_menu),
     SCOPE_OPTIONS(9),
+    ACTION("Save manager", "This game's saves and their sizes: compress, uncompress or delete them.",
+           11, open_save_manager, ICON_DISK),
     ACTION("Back to the game list", "Close this menu.", 12, back_to_list, ICON_BACK),
 };
 

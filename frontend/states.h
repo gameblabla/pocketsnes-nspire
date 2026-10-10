@@ -19,6 +19,28 @@ const char *states_dir(void);
 void states_make_dir(void);
 /* In-game (battery) save, named the way PocketSNES 3.0 names it. */
 void states_sram_path(char *path, size_t size);
+/* The game's in-game save into the core, and back to its file: plain
+ * ("<ROM name>.srm.tns", what PC emulators read) or, with Compress saves on,
+ * gzipped ("<ROM name>.srm.gz.tns"); the other form is removed. Loading
+ * takes the newer of the two, and a PC emulator's "<ROM name without .sfc>
+ * .srm.tns" when the game has neither. */
+void states_load_sram(void);
+void states_save_sram(void);
+
+/* For the save manager: the game's in-game save (slot 0) and states (the
+ * auto slot first, then 1-999), with their sizes. */
+struct SaveFile
+{
+    int slot;
+    long bytes;
+    int compressed;
+};
+int states_list(struct SaveFile *files, int max);
+/* Compresses or uncompresses one file (slot 0: the in-game save). 1 if it
+ * is that way afterwards. */
+int states_set_compressed(int slot, int compress);
+/* Removes one (slot 0: the in-game save). 1 on success. */
+int states_delete(int slot);
 
 int states_exists(int slot);
 int states_count(void);

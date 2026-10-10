@@ -849,14 +849,10 @@ void emu_deinit(void)
 
 static void write_sram(void)
 {
-    char path[800];
-
     sram_dirty = false;
     if (!Memory.SRAMSize && !Settings.SRTC)
         return;
-    states_make_dir();
-    states_sram_path(path, sizeof(path));
-    Memory.SaveSRAM (path);
+    states_save_sram();
 }
 
 /* Why the last ROM didn't load, for the message. */
@@ -906,8 +902,6 @@ static bool looks_like_rom(const char *path)
 
 int emu_load_game(const char *path)
 {
-    char sram_path[800];
-
     snprintf(rom_path, sizeof(rom_path), "%s", path);
     if (!looks_like_rom(rom_path))
         return 0;
@@ -927,8 +921,7 @@ int emu_load_game(const char *path)
 
     states_open_game(rom_path);
     config_open_game(rom_path);
-    states_sram_path(sram_path, sizeof(sram_path));
-    Memory.LoadSRAM (sram_path);
+    states_load_sram();
     sram_dirty = false;
 
     snprintf(game_title, sizeof(game_title), "%s", Memory.ROMName);

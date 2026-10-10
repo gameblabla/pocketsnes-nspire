@@ -285,8 +285,46 @@ echo "== In-game saves (SRAM)"
 setup sram SramWrite.sfc
 (cd "$OUT/sram" && timeout -s KILL 4 "$HOST" --script "$forever" \
     --shots shots --exe-dir ndless roms/SramWrite.sfc.tns >/dev/null 2>&1)
-srm=$OUT/sram/roms/PocketSNES_saves/SramWrite.sfc.srm.tns
-check "$(xxd -l 2 -p "$srm" 2>/dev/null)" 4299 "the game's save was written without quitting"
+srm=$OUT/sram/roms/PocketSNES_saves/SramWrite.sfc.srm
+check "$(gzip -dc "$srm.gz.tns" 2>/dev/null | xxd -l 2 -p)$(exists "$srm.tns")" 4299no \
+    "the game's save was written without quitting, gzipped (Compress saves is on by default)"
+setup sramplain SramWrite.sfc config_version=3 compress_saves=0
+(cd "$OUT/sramplain" && timeout -s KILL 4 "$HOST" --script "$forever" \
+    --shots shots --exe-dir ndless roms/SramWrite.sfc.tns >/dev/null 2>&1)
+srm=$OUT/sramplain/roms/PocketSNES_saves/SramWrite.sfc.srm
+check "$(xxd -l 2 -p "$srm.tns" 2>/dev/null)$(exists "$srm.gz.tns")" 4299no \
+    "with Compress saves off it's the plain file a PC emulator reads"
+# One from a PC emulator, named after the ROM without .sfc, is taken in,
+# and comes back out gzipped.
+setup srampc SramWrite.sfc config_version=3 save_on_exit=0 load_on_start=0
+mkdir -p "$OUT/srampc/roms/PocketSNES_saves"
+head -c 8192 /dev/zero | tr '\0' '\101' > "$OUT/srampc/roms/PocketSNES_saves/SramWrite.srm.tns"
+play srampc tests/scripts/wait_quit.txt SramWrite.sfc
+s=$OUT/srampc/roms/PocketSNES_saves
+check "$(exists "$s/SramWrite.srm.tns")$(gzip -dc "$s/SramWrite.sfc.srm.gz.tns" 2>/dev/null | xxd -s 2 -l 4 -p)" no41414141 \
+    "an in-game save from a PC emulator (Game.srm.tns) is taken in"
+
+echo "== Save manager"
+# Four compressed states (three saves and the one made when quitting); the
+# game list's menu on the game, Save manager: A marks all, U uncompresses
+# them, then del deletes the selected one after asking.
+setup manager MonsterFarmJump.sfc config_version=3
+play manager tests/scripts/save3_quit.txt MonsterFarmJump.sfc
+s=$OUT/manager/roms/PocketSNES_saves/MonsterFarmJump.sfc
+flags() { xxd -s 24 -l 1 -p "$1" 2>/dev/null; }
+check "$(flags "$s.sv001.tns")$(flags "$s.sv004.tns")" 0000 "new states are compressed by default"
+size_before=$(stat -c %s "$s.sv002.tns")
+echo "rom_dir=$(realpath "$OUT")/manager/roms" >> "$OUT/manager/ndless/PocketSNES_saves/pocketsnes.cfg.tns"
+play manager tests/scripts/save_manager.txt
+check "$(flags "$s.sv002.tns")$(flags "$s.sv003.tns")$(flags "$s.sv004.tns")" 010101 \
+    "the save manager uncompressed all the states"
+check "$([ "$(stat -c %s "$s.sv002.tns")" -gt "$size_before" ] && echo bigger)$(exists "$s.sv001.tns")" biggerno \
+    "... they're bigger now, and del deleted the selected one (slot 001) after asking"
+setup storedrt MonsterFarmJump.sfc config_version=2 compress_saves=0 auto_increment=0 save_on_exit=0 load_on_start=0
+play storedrt tests/scripts/roundtrip.txt MonsterFarmJump.sfc
+d=$OUT/storedrt/shots
+check "$(same "$d/A.png" "$d/B.png")$(flags "$OUT/storedrt/roms/PocketSNES_saves/MonsterFarmJump.sfc.sv001.tns")" same01 \
+    "with Compress saves off a state is stored as it is, and loads back exactly"
 
 echo "== Menu"
 setup menu MonsterFarmJump.sfc config_version=2

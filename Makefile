@@ -41,7 +41,7 @@ CORE_FLAGS     = $(OPT) $(DEFINES) $(INCLUDE) -w
 FRONTEND_FLAGS = $(OPT) $(DEFINES) $(FRONTEND_INCLUDE) $(SDL_FLAGS) -Wall -Wextra -Wno-unused-parameter
 
 CORE_SRC     = $(wildcard pocketsnes/snes9x/*.cpp)
-FRONTEND_SRC = frontend/romzip.cpp frontend/paths.cpp frontend/selfstore.cpp frontend/brightness.cpp frontend/keys.cpp frontend/draw.cpp frontend/ui.cpp frontend/config.cpp frontend/states.cpp \
+FRONTEND_SRC = frontend/savemanager.cpp frontend/romzip.cpp frontend/paths.cpp frontend/selfstore.cpp frontend/brightness.cpp frontend/keys.cpp frontend/draw.cpp frontend/ui.cpp frontend/config.cpp frontend/states.cpp \
                frontend/gui.cpp frontend/browser.cpp frontend/menu.cpp frontend/overclock.cpp frontend/emu.cpp \
                frontend/main.cpp frontend/rotate.cpp frontend/platform_host.cpp
 
