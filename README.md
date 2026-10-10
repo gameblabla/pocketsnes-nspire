@@ -69,6 +69,7 @@ Controls
 | Fast forward | F    | on/off: runs as fast as it can                      |
 | Save state   | S    | saves a state (each save gets a new slot)           |
 | Load state   | L    | loads the selected slot                             |
+| Brightness   | + / (−) | brighter / dimmer (CX II), in menus too          |
 
 More hotkeys (load newest, next/previous slot, FPS counter, restart) are
 there but have no key until you give them one. Every key can be changed in
@@ -135,6 +136,12 @@ them much:
 You can pick a slot in the menu (*Save state* / *Load state*, left/right
 choose the slot). Everything a game saves goes in a `.pocketsnes` folder
 next to the ROM.
+
+Where the save made when you leave goes is up to you (menu → *Saving*):
+a new slot each time (the default), over your newest state (*New save on
+quit* off), or always the same separate **Auto** slot, which keeps it out of
+slots 001–999 (*Auto save slot* on). The Auto slot comes before 001 when you
+pick a slot, and starting a game loads it when it's the newest.
 
 
 Speed and overclocking
@@ -231,6 +238,7 @@ whenever that game runs.
 | Frames to skip | **5** (0–9) | Automatic: the most frames skipped in a row. Manual: N. |
 | FPS counter | **off**, on, detailed | Frames drawn per second over the most there can be: 60/60 is full speed. Detailed adds how long each part of a frame takes and logs it to `pocketsnes_perf.txt.tns`. |
 | Screen output (CX II) | **no tearing**, DMA | No tearing shows every frame whole. DMA is a little faster but can show a split line when the picture scrolls fast. |
+| Brightness (CX II) | **calculator's**, 1 (dimmest) … 10 (brightest) | The screen's backlight while PocketSNES runs; the calculator's own comes back when PocketSNES closes. The + and (−) keys (Hotkeys) change it anywhere, a level at a time. |
 | CPU speed (CX II) | **normal**, highest tested, 408 … 504 MHz | Experimental, not reliable: overclocks while a game runs. See [Overclocking](#overclocking). |
 | Overclock test (CX II) | | Tries 408 to 504 MHz with memory and CPU checks and shows the highest that passed. Not a reliable guide: games can freeze below it. |
 | CPU core | **ARM (fast)**, C | Which emulation of the SNES CPU runs the game: ARM is psnes's, in ARM assembler; C is Snes9x's. They do exactly the same thing (see [The CPU cores](#the-cpu-cores)); try C if a game acts up. Games with an SA-1 chip always use C. |
@@ -242,6 +250,8 @@ whenever that game runs.
 |---|---|---|
 | Auto-increment slot | on | Every save goes to a new slot, so nothing is overwritten. Off: saves go to the selected slot. |
 | Save when leaving | on | Quitting, or going back to the game list, saves a state first. |
+| Auto save slot | off | That save goes to its own slot, Auto (before 001), overwritten each time, so slots 001–999 only hold the saves you make. |
+| New save on quit | on | That save goes to a new slot. Off: it saves over your newest state. (Doesn't matter with Auto save slot on.) |
 | Load newest on start | on | Games start from their newest state. *Play without a state* in the game list skips it once. |
 | Write in-game saves | automatic | When the game's own save is written to the calculator: a couple of seconds after the game saves, or only on exit. |
 
@@ -269,6 +279,7 @@ Next to each ROM, in a `.pocketsnes` folder:
 |---|---|
 | `game.sfc.srm.tns` | the in-game save |
 | `game.sfc.sv001.tns` … `game.sfc.sv999.tns` | save states (compressed) |
+| `game.sfc.svauto.tns` | the Auto slot's state (Saving → Auto save slot) |
 | `game.sfc.cfg.tns` | the game's own settings or keys, if it has any |
 | `game_order.txt.tns` | the order of the folder's games, once you've moved one |
 
@@ -374,7 +385,7 @@ The PC test build needs g++ and zlib (and SDL2's headers for a window):
 
     make                                 # makes ./pocketsnes-host
     ./pocketsnes-host                    # the game list, in a window
-    tests/run.sh                         # the test suite (54 checks)
+    tests/run.sh                         # the test suite (62 checks)
     make unit-tests                      # tile drawing, frame turning, settings
     tests/asm/run.sh                     # the ARM CPU core against the C core, under qemu-arm
 
@@ -419,6 +430,12 @@ at 0xA8000000 instead. Other calculators use Ndless's `lcd_blit`.
 `emu.cpp` paces frames in 16.16 fixed-point ticks and decides for each frame
 whether to draw it. Interrupts stay off while PocketSNES runs.
 
+**Brightness.** On a CX II the OS sets the LCD backlight in 0x90130014,
+from 0 (brightest) to 225 (darkest) (Hackspire). PocketSNES reads it at
+startup, spreads its ten levels over that range (as lr-gpsp-nspire does),
+writes the register only when the setting isn't "calculator's", and puts
+the startup value back when it closes.
+
 **CPU speed.** The CX II's power controller (0x90140000) holds the clock
 multiplier in bits 24–29 of 0x90140030 (12 MHz × 33 = 396 MHz), but writing
 the register does nothing by itself. PocketSNES switches the way the OS does
@@ -439,8 +456,10 @@ while games froze at 480. One guess is that its small loops run from the
 CPU's caches, while a game fetches code from memory all the time.
 
 **Settings file.** `name=value` lines (`config_version=3`, `frameskip_type`,
-`cpu_speed`, `highest_tested_mhz`, … `key_a=122`, `key_a_2=121+20` for
-shift+3). Key numbers are lr-gpsp-nspire's. A game's own file adds
+`cpu_speed`, `cpu_core`, `brightness`, `auto_slot`, `quit_new_save`,
+`highest_tested_mhz`, … `key_a=122`, `key_a_2=121+20` for shift+3). A file
+without `quit_new_save` gets it from `auto_increment`, which is how saving
+when leaving behaved before. Key numbers are lr-gpsp-nspire's. A game's own file adds
 `own_settings=1` / `own_keys=1`. Unknown lines are ignored, so older and
 newer builds can share the file; version 2 files' CPU speeds are converted.
 

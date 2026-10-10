@@ -71,7 +71,12 @@ start, the game list and its menu (number keys starting games, moving a game
 with tab or the menu, the order kept, esc putting it back, sorting A to Z
 again), and the overclock test (with `--clock-limit 37` it must find 444 MHz;
 a freeze marker left by the test is picked up at the next start; "highest
-tested" runs games at the result; old settings files keep their CPU speed).
+tested" runs games at the result; old settings files keep their CPU speed),
+where the save made when leaving goes (the Auto slot, over the newest
+state, older settings files), and brightness (the + and (-) keys in a game
+and in the game list, the menu line, and the calculator's own brightness
+back at the end; `--backlight N` sets the pretend calculator's own value,
+and `--log` records every change as `backlight N`).
 Results and screenshots go to
 `tests/out/`. Every test starts with a settings file (so not on a "first
 start") unless it removes it.
