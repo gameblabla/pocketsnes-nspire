@@ -396,6 +396,13 @@ static void test_config(void)
           "New save on quit, the auto slot and brightness read as written");
     CHECK(!cfg.keys[ACTION_BRIGHTER][0].key && cfg.keys[ACTION_DIMMER][0].key == KEY_9,
           "the brightness keys read as written");
+    /* A file from before the brightness keys, with + as Select: Brightness
+     * up doesn't get + as well; Brightness down gets (-), which is free. */
+    write_file(global_path, "config_version=3\nkey_start=83\nkey_select=99\nkey_start_2=0\nkey_select_2=0\n");
+    config_load();
+    CHECK(cfg.keys[ACTION_SELECT][0].key == KEY_PLUS && !cfg.keys[ACTION_BRIGHTER][0].key &&
+          cfg.keys[ACTION_DIMMER][0].key == KEY_NEGATIVE,
+          "a newer hotkey's default key is left out when the file already uses it");
     write_file(global_path, "config_version=3\nbrightness=99\nauto_slot=5\n");
     config_load();
     CHECK(cfg.brightness == BRIGHTNESS_LEVELS && cfg.auto_slot == 1, "out of range values are clamped");

@@ -153,6 +153,7 @@ struct FileInfo
     long cpu_speed;    /* as written, -1 if absent (its meaning depends on the version) */
     long tested_mhz;   /* -1 if absent */
     int quit_new_save; /* -1 if absent: then it follows auto_increment, as leaving did before */
+    uint8_t key_lines[NUM_ACTIONS];   /* the file set the action's keys */
 };
 
 /* Version 1 and 2 files had normal, 432, 456 and 480 MHz. */
@@ -162,6 +163,34 @@ static uint32_t cpu_speed_from_file(long value, int version)
     if (version < 3)
         return old_speeds[clamp(value, 3)];
     return clamp(value, NUM_CPU_SPEEDS - 1);
+}
+
+static int uses_key(struct Binding b, uint8_t key)
+{
+    return b.key && (b.key == key || b.with == key);
+}
+
+/* An action a file doesn't mention (one newer than the file) keeps its
+ * default keys only where the file's actions don't use them already: e.g.
+ * Brightness up's + when + is someone's Select. */
+static void drop_clashing_defaults(struct Config *c, const struct FileInfo *info)
+{
+    for (int a = 0; a < NUM_ACTIONS; a++)
+    {
+        if (info->key_lines[a])
+            continue;
+        for (int slot = 0; slot < KEY_SLOTS; slot++)
+        {
+            uint8_t key = c->keys[a][slot].key;
+            for (int other = 0; key && other < NUM_ACTIONS; other++)
+                if (info->key_lines[other] &&
+                    (uses_key(c->keys[other][0], key) || uses_key(c->keys[other][1], key)))
+                {
+                    c->keys[a][slot].key = c->keys[a][slot].with = 0;
+                    key = 0;
+                }
+        }
+    }
 }
 
 /* Reads "name=value" lines into c, over whatever it holds. */
@@ -234,12 +263,16 @@ static void read_file(const char *path, struct Config *c, struct FileInfo *info)
             for (int i = 0; i < NUM_ACTIONS; i++)
                 if (strlen(action_ids[i]) == len - (slot ? 2 : 0) &&
                     strncmp(id, action_ids[i], strlen(action_ids[i])) == 0)
+                {
                     c->keys[i][slot] = parse_binding(value);
+                    info->key_lines[i] = 1;
+                }
         }
     }
     fclose(f);
     if (info->cpu_speed >= 0)
         c->cpu_speed = cpu_speed_from_file(info->cpu_speed, info->version);
+    drop_clashing_defaults(c, info);
     c->quit_new_save = info->quit_new_save >= 0 ? (uint32_t) info->quit_new_save : c->auto_increment;
 }
 
