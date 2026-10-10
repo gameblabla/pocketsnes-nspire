@@ -5,8 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "paths.h"
 #include "platform.h"
 #include "rotate.h"
+
+static void register_rom_types(const char *program_path);
 
 /* How frames reach the screen. The CX II's LCD reads 320 lines of 240
  * pixels, and landscape pixel (x, y) belongs at position 239 - y of line x
@@ -460,13 +463,7 @@ int platform_init(int *argc, char **argv)
 
     touchpad = is_touchpad;
 
-    /* ROMs named like game.sfc.tns then open in PocketSNES straight from the
-     * calculator's documents (Ndless keeps file associations in
-     * ndless.cfg.tns, and an existing one is left alone). Ndless finds the
-     * program by this name, so it works while it is called pocketsnes.tns. */
-    static const char *const rom_types[] = { "sfc", "smc", "fig", "swc" };
-    for (size_t i = 0; i < sizeof(rom_types) / sizeof(rom_types[0]); i++)
-        cfg_register_fileext(rom_types[i], "pocketsnes");
+    register_rom_types(argv[0]);
 
     backlight_init();
 
@@ -1343,7 +1340,7 @@ static void write_sram_report(FILE *f)
         for (int i = 0; i < SRAM_SIZE / 4; i++)
             zero_words += copy[i] == 0;
         char dump_path[300];
-        snprintf(dump_path, sizeof(dump_path), "%s/pocketsnes_sram.bin.tns", exe_dir);
+        paths_data_file(dump_path, sizeof(dump_path), "pocketsnes_sram.bin.tns");
         FILE *dump = fopen(dump_path, "wb");
         if (dump)
         {
@@ -1607,6 +1604,79 @@ void platform_wait_until(uint32_t tick)
         return;
     while ((int32_t) (tick - platform_ticks()) > 0)
         ;
+}
+
+/* ROMs named like game.sfc.tns (or game.zip.tns) then open in PocketSNES
+ * straight from the calculator's documents. Ndless keeps file associations
+ * in ndless.cfg.tns as "ext.sfc=<program name without .tns>" and finds the
+ * program by that name anywhere in the documents. Ones naming another
+ * program are left alone; ones naming a PocketSNES (an older name, such as
+ * pocketsnes, or another copy) are pointed at this one, so renaming it
+ * (_PocketSNES.tns sorts first in its folder) keeps them working. */
+static const char *const rom_types[] = { "sfc", "smc", "fig", "swc", "zip" };
+
+static void register_rom_types(const char *program_path)
+{
+    char name[128], path[300];
+    const char *slash = strrchr(program_path, '/');
+    snprintf(name, sizeof(name), "%s", slash ? slash + 1 : program_path);
+    char *dot = strstr(name, ".tns");
+    if (dot)
+        *dot = 0;
+    if (!name[0])
+        return;
+
+    /* The file is short: read it whole, change the lines, write it back. */
+    snprintf(path, sizeof(path), "%sndless/ndless.cfg.tns", get_documents_dir());
+    FILE *f = fopen(path, "rb");
+    if (f)
+    {
+        static char text[8192], out[8192 + 1024];
+        size_t len = fread(text, 1, sizeof(text) - 1, f);
+        int whole = feof(f);
+        fclose(f);
+        text[len] = 0;
+        size_t out_len = 0;
+        int changed = 0;
+        for (char *line = text; whole && *line; )
+        {
+            char *end = strchr(line, '\n');
+            size_t line_len = end ? (size_t) (end - line + 1) : strlen(line);
+            const char *value = NULL;
+            for (size_t i = 0; i < sizeof(rom_types) / sizeof(rom_types[0]); i++)
+            {
+                char key[16];
+                snprintf(key, sizeof(key), "ext.%s=", rom_types[i]);
+                if (strncmp(line, key, strlen(key)) == 0)
+                    value = line + strlen(key);
+            }
+            size_t value_len = value ? strcspn(value, "\r\n") : 0;
+            int ours = value && value_len < 64 &&
+                       (strncasecmp(value, "pocketsnes", 10) == 0 || strncasecmp(value, "_pocketsnes", 11) == 0) &&
+                       !(value_len == strlen(name) && strncmp(value, name, value_len) == 0);
+            if (ours && out_len + (value - line) + strlen(name) + 1 < sizeof(out))
+            {
+                memcpy(out + out_len, line, value - line);
+                out_len += value - line;
+                out_len += snprintf(out + out_len, sizeof(out) - out_len, "%s\n", name);
+                changed = 1;
+            }
+            else if (out_len + line_len < sizeof(out))
+            {
+                memcpy(out + out_len, line, line_len);
+                out_len += line_len;
+            }
+            line += line_len;
+        }
+        if (changed && (f = fopen(path, "wb")) != NULL)
+        {
+            fwrite(out, 1, out_len, f);
+            fclose(f);
+        }
+    }
+    /* The types that have no program yet. */
+    for (size_t i = 0; i < sizeof(rom_types) / sizeof(rom_types[0]); i++)
+        cfg_register_fileext(rom_types[i], name);
 }
 
 const char *platform_exe_dir(void)

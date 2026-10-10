@@ -8,6 +8,7 @@
 #include "gui.h"
 #include "menu.h"
 #include "overclock.h"
+#include "paths.h"
 #include "platform.h"
 #include "states.h"
 
@@ -40,6 +41,8 @@ int main(int argc, char **argv)
 
     if (!platform_init(&argc, argv))
         return 0;
+    /* Files from older versions into PocketSNES_saves (paths.h). */
+    paths_move_old_files(platform_exe_dir(), 1);
     config_load();
 
     if (!emu_init())

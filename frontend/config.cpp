@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "brightness.h"
+#include "paths.h"
 #include "platform.h"
 
 /* Saved as "name=value" lines so older and newer builds can share the file.
@@ -57,7 +58,7 @@ static const uint8_t default_keys[NUM_ACTIONS] =
 
 static void config_path(char *path, size_t size)
 {
-    snprintf(path, size, "%s/%s", platform_exe_dir(), CONFIG_FILE);
+    paths_data_file(path, size, CONFIG_FILE);
 }
 
 static void default_keys_into(struct Config *c)
@@ -388,8 +389,8 @@ void config_save(void)
 
 void config_open_game(const char *rom_path)
 {
-    /* "<ROM folder>/.pocketsnes/<ROM name without its last extension>.cfg.tns",
-     * next to the game's saves (states.cpp). */
+    /* "<ROM folder>/PocketSNES_saves/<ROM name without its last
+     * extension>.cfg.tns", next to the game's saves (states.cpp). */
     const char *slash = strrchr(rom_path, '/');
     const char *file = slash ? slash + 1 : rom_path;
     char base[256];
@@ -397,11 +398,9 @@ void config_open_game(const char *rom_path)
     char *dot = strrchr(base, '.');
     if (dot && dot != base)
         *dot = 0;
-    if (slash)
-        snprintf(game_file, sizeof(game_file), "%.*s/.pocketsnes/%s.cfg.tns",
-                 (int) (slash - rom_path), rom_path, base);
-    else
-        snprintf(game_file, sizeof(game_file), "./.pocketsnes/%s.cfg.tns", base);
+    char name[300];
+    snprintf(name, sizeof(name), "%s.cfg.tns", base);
+    paths_save_file_for(game_file, sizeof(game_file), rom_path, name);
 
     char rom_dir[512];
     snprintf(rom_dir, sizeof(rom_dir), "%s", cfg.rom_dir);

@@ -1,4 +1,4 @@
-# Calculator build: produces pocketsnes.tns for Ndless.
+# Calculator build: produces _PocketSNES.tns for Ndless (the _ puts it first in its folder).
 #   . ~/nspire/build/env.sh && make -f Makefile.nspire
 # Variants need their own BUILD folder, because make doesn't notice changed flags:
 #   OPT_LEVEL=-O2      optimization level (-O3 measured fastest on a CX II)
@@ -8,7 +8,7 @@
 #   ARM_CPU=0          without the ARM assembler CPU core (C core only)
 # e.g. make -f Makefile.nspire BENCH=1 BUILD_NAME=O3 BUILD=build/bench-O3 TARGET=pocketsnes_speedtest_O3
 
-TARGET  = pocketsnes
+TARGET  = _PocketSNES
 BUILD   = build/nspire
 
 CC      = nspire-gcc
@@ -49,7 +49,7 @@ ZEHNFLAGS = --name "PocketSNES" --author "gameblabla (port), nspire QoL frontend
             --ndless-min 31 --ndless-rev-min 2001
 
 CORE_SRC     = $(wildcard pocketsnes/snes9x/*.cpp)
-FRONTEND_SRC = frontend/brightness.cpp frontend/keys.cpp frontend/draw.cpp frontend/ui.cpp frontend/config.cpp frontend/states.cpp \
+FRONTEND_SRC = frontend/paths.cpp frontend/brightness.cpp frontend/keys.cpp frontend/draw.cpp frontend/ui.cpp frontend/config.cpp frontend/states.cpp \
                frontend/gui.cpp frontend/browser.cpp frontend/menu.cpp frontend/overclock.cpp frontend/emu.cpp \
                frontend/main.cpp frontend/rotate.cpp frontend/platform_nspire.cpp
 

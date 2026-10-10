@@ -11,6 +11,7 @@
 #include "draw.h"
 #include "gui.h"
 #include "menu.h"
+#include "paths.h"
 #include "ui.h"
 
 #define LIST_ROWS ((UI_FOOTER_Y - 4 - UI_LIST_Y) / UI_ROW_H)
@@ -19,7 +20,7 @@ struct Entry
 {
     char name[256];
     int is_dir;
-    int saves;    /* save states in the folder's .pocketsnes */
+    int saves;    /* save states in the folder's PocketSNES_saves */
     int rank;     /* place in the folder's game order, INT_MAX if not in it */
 };
 
@@ -40,8 +41,7 @@ static int is_rom_name(const char *name)
 {
     size_t len = strlen(name);
 
-    if (ends_with(name, ".srm.tns") || ends_with(name, ".cfg.tns") ||
-        strncasecmp(name, "pocketsnes", 10) == 0)
+    if (ends_with(name, ".srm.tns") || ends_with(name, ".cfg.tns") || paths_is_pocketsnes_name(name))
         return 0;
     if (len > 10 && strncasecmp(name + len - 10, ".sv", 3) == 0 && ends_with(name, ".tns"))
         return 0;
@@ -86,15 +86,14 @@ static void add_entry(const char *name, int is_dir)
     entry_count++;
 }
 
-/* "<folder>/.pocketsnes/<name>". */
+/* "<folder>/PocketSNES_saves/<name>". */
 static void folder_file(char *path, size_t size, const char *name)
 {
-    snprintf(path, size, "%s/.pocketsnes%s%s", strcmp(current_dir, "/") == 0 ? "" : current_dir,
-             name[0] ? "/" : "", name);
+    paths_save_file(path, size, current_dir, name);
 }
 
 /* The order of the games in a folder, when it has been changed (Move): one
- * ROM file name per line in "<folder>/.pocketsnes/game_order.txt.tns". */
+ * ROM file name per line in "<folder>/PocketSNES_saves/game_order.txt.tns". */
 #define ORDER_FILE "game_order.txt.tns"
 
 static void read_order(void)
@@ -142,11 +141,11 @@ static int nth_game(int n)
 }
 
 /* How many save states each game has: "<ROM name without .tns>.svNNN.tns"
- * in the folder's .pocketsnes (states.cpp). */
+ * in the folder's PocketSNES_saves (states.cpp). */
 static void count_saves(void)
 {
     char path[800];
-    snprintf(path, sizeof(path), "%s/.pocketsnes", strcmp(current_dir, "/") == 0 ? "" : current_dir);
+    folder_file(path, sizeof(path), "");
     DIR *dir = opendir(path);
     if (!dir)
         return;
@@ -175,6 +174,7 @@ static void count_saves(void)
 
 static void read_dir(void)
 {
+    paths_move_old_files(current_dir, 0);
     entry_count = 0;
     has_parent = strcmp(current_dir, "/") != 0;
     if (has_parent)
@@ -190,7 +190,7 @@ static void read_dir(void)
         char path[800];
         struct stat st;
 
-        if (entry->d_name[0] == '.')
+        if (entry->d_name[0] == '.' || strcasecmp(entry->d_name, SAVE_FOLDER) == 0)
             continue;
         snprintf(path, sizeof(path), "%s/%s", strcmp(current_dir, "/") == 0 ? "" : current_dir,
                  entry->d_name);

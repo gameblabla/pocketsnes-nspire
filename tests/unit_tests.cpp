@@ -338,9 +338,9 @@ static int file_exists(const char *path)
 static void test_config(void)
 {
     char global_path[600], rom[600], game_path[700];
-    snprintf(global_path, sizeof(global_path), "%s/pocketsnes.cfg.tns", exe_dir);
+    snprintf(global_path, sizeof(global_path), "%s/PocketSNES_saves/pocketsnes.cfg.tns", exe_dir);
     snprintf(rom, sizeof(rom), "%s/Game (USA).sfc.tns", exe_dir);
-    snprintf(game_path, sizeof(game_path), "%s/.pocketsnes/Game (USA).sfc.cfg.tns", exe_dir);
+    snprintf(game_path, sizeof(game_path), "%s/PocketSNES_saves/Game (USA).sfc.cfg.tns", exe_dir);
     remove(global_path);
 
     /* Defaults with no file. */

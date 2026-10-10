@@ -19,6 +19,7 @@
 #include "gui.h"
 #include "bindings.h"
 #include "menu.h"
+#include "paths.h"
 #include "platform.h"
 #include "states.h"
 #include "ui.h"
@@ -184,7 +185,7 @@ static void perf_log_flush(void)
 
     if (!perf_log_count)
         return;
-    snprintf(path, sizeof(path), "%s/pocketsnes_perf.txt.tns", platform_exe_dir());
+    paths_data_file(path, sizeof(path), "pocketsnes_perf.txt.tns");
     FILE *f = fopen(path, "a");
     if (f)
     {
@@ -1130,7 +1131,7 @@ void emu_speed_test(int close_after_seconds)
     /* A new file each run: appending to the old one has left it garbled on
      * the calculator now and then. */
     char path[600];
-    snprintf(path, sizeof(path), "%s/pocketsnes_results.txt.tns", platform_exe_dir());
+    paths_data_file(path, sizeof(path), "pocketsnes_results.txt.tns");
     FILE *f = fopen(path, "w");
     if (f)
     {
@@ -1209,7 +1210,7 @@ void emu_benchmark(void)
         S9xMainLoop ();
 
     char path[600];
-    snprintf(path, sizeof(path), "%s/pocketsnes_diag.txt.tns", platform_exe_dir());
+    paths_data_file(path, sizeof(path), "pocketsnes_diag.txt.tns");
     platform_write_diagnostics(path);
 
     pending = 0;
@@ -1339,7 +1340,7 @@ static bool clock_reached(uint32_t mhz, int multiplier)
 
 static void clock_marker_path(char *path, size_t size)
 {
-    snprintf(path, size, "%s/%s", platform_exe_dir(), CLOCK_MARKER);
+    paths_data_file(path, size, CLOCK_MARKER);
 }
 
 static void game_speed(void)

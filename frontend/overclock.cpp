@@ -7,6 +7,7 @@
 #include "emu.h"
 #include "gui.h"
 #include "overclock.h"
+#include "paths.h"
 #include "platform.h"
 #include "ui.h"
 
@@ -53,7 +54,7 @@ static int reached(uint32_t mhz, int multiplier)
 
 static void file_path(char *path, size_t size, const char *name)
 {
-    snprintf(path, size, "%s/%s", platform_exe_dir(), name);
+    paths_data_file(path, size, name);
 }
 
 /* ---- The checks ----

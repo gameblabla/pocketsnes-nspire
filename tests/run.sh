@@ -38,10 +38,10 @@ done
 setup() {
     local dir=$OUT/$1 rom=$2
     shift 2
-    mkdir -p "$dir/ndless" "$dir/roms" "$dir/shots"
+    mkdir -p "$dir/ndless/PocketSNES_saves" "$dir/roms" "$dir/shots"
     cp "$ROMS/$rom" "$dir/roms/$rom.tns"
     [ $# -gt 0 ] || set -- config_version=2
-    for line in "$@"; do echo "$line" >> "$dir/ndless/pocketsnes.cfg.tns"; done
+    for line in "$@"; do echo "$line" >> "$dir/ndless/PocketSNES_saves/pocketsnes.cfg.tns"; done
 }
 
 # play NAME SCRIPT [ROM]: runs a script in $OUT/NAME (ROM omitted: start in the browser)
@@ -91,22 +91,34 @@ check "$(same "$d/A.png" "$d/C.png")" different "Monster Farm Jump: the picture 
 echo "== Auto-increment, saving when leaving, loading on start"
 setup auto MonsterFarmJump.sfc config_version=2 auto_increment=1 save_on_exit=1 load_on_start=1
 play auto tests/scripts/save3_quit.txt MonsterFarmJump.sfc
-s=$OUT/auto/roms/.pocketsnes/MonsterFarmJump.sfc
+s=$OUT/auto/roms/PocketSNES_saves/MonsterFarmJump.sfc
 check "$(exists "$s.sv001.tns")$(exists "$s.sv002.tns")$(exists "$s.sv003.tns")" yesyesyes "three saves went to slots 1, 2 and 3"
 check "$(exists "$s.sv004.tns")" yes "quitting with Q saved slot 4 (save when leaving)"
 play auto tests/scripts/wait_quit.txt MonsterFarmJump.sfc
 check "$(exists "$s.sv005.tns")" yes "the next run loaded the newest and saved slot 5 when it closed"
 
+# Files where older versions kept them: the settings next to the program,
+# states in a hidden .pocketsnes folder. They move into PocketSNES_saves.
+setup oldfolders MonsterFarmJump.sfc
+rm -r "$OUT/oldfolders/ndless/PocketSNES_saves"
+printf 'config_version=3\nshow_fps=1\nsave_on_exit=0\n' > "$OUT/oldfolders/ndless/pocketsnes.cfg.tns"
+mkdir -p "$OUT/oldfolders/roms/.pocketsnes"
+cp "$s.sv001.tns" "$OUT/oldfolders/roms/.pocketsnes/"
+play oldfolders tests/scripts/wait_quit.txt MonsterFarmJump.sfc
+d=$OUT/oldfolders
+check "$(exists "$d/roms/PocketSNES_saves/MonsterFarmJump.sfc.sv001.tns")$(exists "$d/roms/.pocketsnes")$(grep -c '^show_fps=1$' "$d/ndless/PocketSNES_saves/pocketsnes.cfg.tns")$(exists "$d/ndless/pocketsnes.cfg.tns")" \
+    yesno1no "older files move into PocketSNES_saves: the states, and the settings with their values"
+
 setup noinc MonsterFarmJump.sfc config_version=2 auto_increment=0 save_on_exit=0 load_on_start=0
 play noinc tests/scripts/save3_quit.txt MonsterFarmJump.sfc
-s=$OUT/noinc/roms/.pocketsnes/MonsterFarmJump.sfc
+s=$OUT/noinc/roms/PocketSNES_saves/MonsterFarmJump.sfc
 check "$(exists "$s.sv001.tns")$(exists "$s.sv002.tns")" yesno "without auto-increment, saves overwrite slot 1"
 
 # Old (version 1) settings files: auto-increment, saving when leaving and
 # loading on start come on; the rest is kept.
 setup old MonsterFarmJump.sfc auto_increment=0 auto_resume=0 show_fps=1 key_a=6
 play old tests/scripts/wait_quit.txt MonsterFarmJump.sfc
-cfg=$OUT/old/ndless/pocketsnes.cfg.tns
+cfg=$OUT/old/ndless/PocketSNES_saves/pocketsnes.cfg.tns
 check "$(grep -c -e '^config_version=3$' -e '^auto_increment=1$' -e '^save_on_exit=1$' -e '^load_on_start=1$' \
     -e '^show_fps=1$' -e '^key_a=6$' "$cfg")" 6 "an old settings file is brought up to date and keeps its choices"
 
@@ -114,7 +126,7 @@ echo "== Where saving when leaving goes"
 # The auto save slot: three saves go to slots 1-3, quitting to the auto slot.
 setup autoslot MonsterFarmJump.sfc config_version=3 auto_increment=1 save_on_exit=1 auto_slot=1 load_on_start=1
 play autoslot tests/scripts/save3_quit.txt MonsterFarmJump.sfc
-s=$OUT/autoslot/roms/.pocketsnes/MonsterFarmJump.sfc
+s=$OUT/autoslot/roms/PocketSNES_saves/MonsterFarmJump.sfc
 check "$(exists "$s.sv003.tns")$(exists "$s.sv004.tns")$(exists "$s.svauto.tns")" yesnoyes \
     "with Auto save slot on, quitting saved to the auto slot, not to slot 4"
 play_logged autoslot tests/scripts/wait_quit.txt MonsterFarmJump.sfc
@@ -125,7 +137,7 @@ check "$(grep -c '^message: Resumed from the auto slot$' "$OUT/autoslot/log.txt"
 counter() { od -An -t u4 -j 8 -N 4 "$1" | tr -d ' '; }
 setup overnewest MonsterFarmJump.sfc config_version=3 auto_increment=1 save_on_exit=1 quit_new_save=0 load_on_start=0
 play overnewest tests/scripts/save3_quit.txt MonsterFarmJump.sfc
-s=$OUT/overnewest/roms/.pocketsnes/MonsterFarmJump.sfc
+s=$OUT/overnewest/roms/PocketSNES_saves/MonsterFarmJump.sfc
 check "$(exists "$s.sv004.tns") $(counter "$s.sv003.tns")" "no 4" \
     "with New save on quit off, quitting saved over the newest state (slot 3, now the 4th save)"
 
@@ -133,8 +145,8 @@ check "$(exists "$s.sv004.tns") $(counter "$s.sv003.tns")" "no 4" \
 # with auto-increment off, quitting saves over the newest, as it did.
 setup quitold MonsterFarmJump.sfc config_version=3 auto_increment=0 save_on_exit=1 load_on_start=0
 play quitold tests/scripts/save3_quit.txt MonsterFarmJump.sfc
-s=$OUT/quitold/roms/.pocketsnes/MonsterFarmJump.sfc
-check "$(exists "$s.sv001.tns")$(exists "$s.sv002.tns")$(grep -c '^quit_new_save=0$' "$OUT/quitold/ndless/pocketsnes.cfg.tns")" \
+s=$OUT/quitold/roms/PocketSNES_saves/MonsterFarmJump.sfc
+check "$(exists "$s.sv001.tns")$(exists "$s.sv002.tns")$(grep -c '^quit_new_save=0$' "$OUT/quitold/ndless/PocketSNES_saves/pocketsnes.cfg.tns")" \
     yesno1 "an older settings file with auto-increment off gets New save on quit off"
 
 echo "== Brightness"
@@ -146,7 +158,7 @@ play_logged bright tests/scripts/brightness_keys.txt MonsterFarmJump.sfc
 check "$(backlight_log "$OUT/bright/log.txt")" \
     "backlight 75|message: Brightness 7/10|backlight 50|message: Brightness 8/10|backlight 75|message: Brightness 7/10|backlight 112|" \
     "+ and - in a game step the brightness from the calculator's own, and quitting puts it back"
-check "$(grep -c '^brightness=7$' "$OUT/bright/ndless/pocketsnes.cfg.tns")" 1 "... and the level is saved"
+check "$(grep -c '^brightness=7$' "$OUT/bright/ndless/PocketSNES_saves/pocketsnes.cfg.tns")" 1 "... and the level is saved"
 setup brightmenu MonsterFarmJump.sfc
 play_logged brightmenu tests/scripts/brightness_menu.txt MonsterFarmJump.sfc
 check "$(backlight_log "$OUT/brightmenu/log.txt")" "backlight 225|backlight 200|backlight 175|backlight 112|" \
@@ -160,39 +172,39 @@ echo "== Keys"
 setup combo MonsterFarmJump.sfc config_version=2 auto_increment=0 save_on_exit=0 load_on_start=0 \
     key_save_state=0 key_save_state_2=121+23 key_next_slot=23
 play combo tests/scripts/combo_hotkey.txt MonsterFarmJump.sfc
-s=$OUT/combo/roms/.pocketsnes/MonsterFarmJump.sfc
+s=$OUT/combo/roms/PocketSNES_saves/MonsterFarmJump.sfc
 check "$(exists "$s.sv001.tns")$(exists "$s.sv002.tns")$(exists "$s.sv003.tns")" noyesno \
     "S moved to slot 2, shift+S saved there and didn't also move the slot"
 
 echo "== Settings for one game"
 setup pergame MonsterFarmJump.sfc config_version=2 auto_increment=1 save_on_exit=0 load_on_start=0
-mkdir -p "$OUT/pergame/roms/.pocketsnes"
+mkdir -p "$OUT/pergame/roms/PocketSNES_saves"
 printf 'config_version=2\nown_settings=1\nauto_increment=0\nsave_on_exit=0\nload_on_start=0\n' \
-    > "$OUT/pergame/roms/.pocketsnes/MonsterFarmJump.sfc.cfg.tns"
+    > "$OUT/pergame/roms/PocketSNES_saves/MonsterFarmJump.sfc.cfg.tns"
 play pergame tests/scripts/save3_quit.txt MonsterFarmJump.sfc
-s=$OUT/pergame/roms/.pocketsnes/MonsterFarmJump.sfc
+s=$OUT/pergame/roms/PocketSNES_saves/MonsterFarmJump.sfc
 check "$(exists "$s.sv001.tns")$(exists "$s.sv002.tns")" yesno "the game's own setting (auto-increment off) won over the one for all games"
-check "$(grep -c '^auto_increment=1$' "$OUT/pergame/ndless/pocketsnes.cfg.tns")" 1 "the setting for all games was kept"
+check "$(grep -c '^auto_increment=1$' "$OUT/pergame/ndless/PocketSNES_saves/pocketsnes.cfg.tns")" 1 "the setting for all games was kept"
 
 echo "== CPU speed"
 forever=$(realpath tests/scripts/forever.txt)
 setup clock MonsterFarmJump.sfc config_version=2 cpu_speed=3 save_on_exit=0 load_on_start=0
 play clock tests/scripts/wait_quit.txt MonsterFarmJump.sfc
-marker=$OUT/clock/ndless/pocketsnes_clock.tns
-check "$(exists "$marker")$(grep -c '^cpu_speed=8$' "$OUT/clock/ndless/pocketsnes.cfg.tns")" no1 \
+marker=$OUT/clock/ndless/PocketSNES_saves/pocketsnes_clock.tns
+check "$(exists "$marker")$(grep -c '^cpu_speed=8$' "$OUT/clock/ndless/PocketSNES_saves/pocketsnes.cfg.tns")" no1 \
     "leaving a game normally removes the raised-speed marker and keeps the setting (480 MHz, renumbered)"
 # A freeze while playing at a raised speed: the run is killed.
 (cd "$OUT/clock" && timeout -s KILL 3 "$HOST" --script "$forever" \
     --shots shots --exe-dir ndless roms/MonsterFarmJump.sfc.tns >/dev/null 2>&1)
 check "$(exists "$marker")" yes "a freeze at a raised speed leaves the marker"
 play clock tests/scripts/after_crash.txt MonsterFarmJump.sfc
-check "$(exists "$marker")$(grep -c '^cpu_speed=0$' "$OUT/clock/ndless/pocketsnes.cfg.tns")" no1 \
+check "$(exists "$marker")$(grep -c '^cpu_speed=0$' "$OUT/clock/ndless/PocketSNES_saves/pocketsnes.cfg.tns")" no1 \
     "the next start puts the CPU speed back to normal"
 
 # The same with the raised speed in the game's own settings.
 setup clockgame MonsterFarmJump.sfc config_version=2 cpu_speed=0 save_on_exit=0 load_on_start=0
-mkdir -p "$OUT/clockgame/roms/.pocketsnes"
-game_cfg=$OUT/clockgame/roms/.pocketsnes/MonsterFarmJump.sfc.cfg.tns
+mkdir -p "$OUT/clockgame/roms/PocketSNES_saves"
+game_cfg=$OUT/clockgame/roms/PocketSNES_saves/MonsterFarmJump.sfc.cfg.tns
 printf 'config_version=2\nown_settings=1\ncpu_speed=3\nsave_on_exit=0\nload_on_start=0\n' > "$game_cfg"
 (cd "$OUT/clockgame" && timeout -s KILL 3 "$HOST" --script "$forever" \
     --shots shots --exe-dir ndless roms/MonsterFarmJump.sfc.tns >/dev/null 2>&1)
@@ -213,7 +225,7 @@ play_logged clockstuck tests/scripts/wait_quit.txt MonsterFarmJump.sfc --stuck-c
 check "$(clock_log "$OUT/clockstuck/log.txt")" \
     "clock x40|clock x0|message: CPU speed not raised (still 396 MHz)|" \
     "a clock that doesn't reach the speed goes back to normal and says so"
-check "$(exists "$OUT/clockstuck/ndless/pocketsnes_clock.tns")" no "... and leaves no freeze marker"
+check "$(exists "$OUT/clockstuck/ndless/PocketSNES_saves/pocketsnes_clock.tns")" no "... and leaves no freeze marker"
 
 echo "== Overclock test"
 # In a game, on a PC acting like a calculator that doesn't go past 444 MHz:
@@ -221,10 +233,10 @@ echo "== Overclock test"
 setup octest MonsterFarmJump.sfc config_version=3 save_on_exit=0 load_on_start=0
 play_logged octest tests/scripts/overclock_test.txt MonsterFarmJump.sfc --clock-limit 37
 d=$OUT/octest/ndless
-check "$(grep -c '^highest_tested_mhz=444$' "$d/pocketsnes.cfg.tns")" 1 "the overclock test finds 444 MHz"
-check "$(grep -c -e '^456 MHz: didn.t switch' -e '^Highest tested speed: 444 MHz$' "$d/pocketsnes_overclock.txt.tns")" 2 \
+check "$(grep -c '^highest_tested_mhz=444$' "$d/PocketSNES_saves/pocketsnes.cfg.tns")" 1 "the overclock test finds 444 MHz"
+check "$(grep -c -e '^456 MHz: didn.t switch' -e '^Highest tested speed: 444 MHz$' "$d/PocketSNES_saves/pocketsnes_overclock.txt.tns")" 2 \
     "... and writes what happened at each speed"
-check "$(exists "$d/pocketsnes_octest.tns")" no "... and leaves no marker"
+check "$(exists "$d/PocketSNES_saves/pocketsnes_octest.tns")" no "... and leaves no marker"
 check "$(grep -c '^message: Overclock test: 444 MHz, 2 of 2' "$OUT/octest/log.txt")" 1 \
     "... and played the game again at each speed (the game ran the same at normal speed and raised)"
 # A calculator that runs the game wrongly above 420 MHz: the game check
@@ -232,18 +244,18 @@ check "$(grep -c '^message: Overclock test: 444 MHz, 2 of 2' "$OUT/octest/log.tx
 setup ocglitch MonsterFarmJump.sfc config_version=3 save_on_exit=0 load_on_start=0
 play_logged ocglitch tests/scripts/overclock_test.txt MonsterFarmJump.sfc --glitch-above 35
 d=$OUT/ocglitch/ndless
-check "$(grep -c -e '^432 MHz: game went wrong' -e '^Highest tested speed: 420 MHz$' "$d/pocketsnes_overclock.txt.tns")$(grep -c '^highest_tested_mhz=420$' "$d/pocketsnes.cfg.tns")" 21 \
+check "$(grep -c -e '^432 MHz: game went wrong' -e '^Highest tested speed: 420 MHz$' "$d/PocketSNES_saves/pocketsnes_overclock.txt.tns")$(grep -c '^highest_tested_mhz=420$' "$d/PocketSNES_saves/pocketsnes.cfg.tns")" 21 \
     "a game that runs differently at 432 MHz stops the test there: 420 MHz is the highest"
 # The game list has no game to play: the test only says to open one.
 setup oclist MonsterFarmJump.sfc config_version=3 highest_tested_mhz=444
 play oclist tests/scripts/overclock_list.txt
-check "$(grep -c '^highest_tested_mhz=444$' "$OUT/oclist/ndless/pocketsnes.cfg.tns")$(exists "$OUT/oclist/ndless/pocketsnes_overclock.txt.tns")" 1no \
+check "$(grep -c '^highest_tested_mhz=444$' "$OUT/oclist/ndless/PocketSNES_saves/pocketsnes.cfg.tns")$(exists "$OUT/oclist/ndless/PocketSNES_saves/pocketsnes_overclock.txt.tns")" 1no \
     "from the game list the overclock test asks for a game and changes nothing"
 # The test froze the calculator at 456 MHz: the next start keeps 444.
 setup ocfreeze MonsterFarmJump.sfc config_version=3 highest_tested_mhz=0
-printf 'testing=456\npassed=444\n' > "$OUT/ocfreeze/ndless/pocketsnes_octest.tns"
+printf 'testing=456\npassed=444\n' > "$OUT/ocfreeze/ndless/PocketSNES_saves/pocketsnes_octest.tns"
 play ocfreeze tests/scripts/after_crash.txt
-check "$(grep -c '^highest_tested_mhz=444$' "$OUT/ocfreeze/ndless/pocketsnes.cfg.tns")$(exists "$OUT/ocfreeze/ndless/pocketsnes_octest.tns")" 1no \
+check "$(grep -c '^highest_tested_mhz=444$' "$OUT/ocfreeze/ndless/PocketSNES_saves/pocketsnes.cfg.tns")$(exists "$OUT/ocfreeze/ndless/PocketSNES_saves/pocketsnes_octest.tns")" 1no \
     "after a freeze in the overclock test, the next start keeps the highest speed that passed"
 # "highest tested" as the CPU speed uses the test's result.
 setup octested MonsterFarmJump.sfc config_version=3 cpu_speed=1 highest_tested_mhz=444 save_on_exit=0 load_on_start=0
@@ -253,27 +265,27 @@ check "$(clock_log "$OUT/octested/log.txt")" "clock x37|message: CPU 444 MHz|clo
 # Old settings files: 456 MHz was cpu_speed=2.
 setup ocold MonsterFarmJump.sfc config_version=2 cpu_speed=2 save_on_exit=0 load_on_start=0
 play ocold tests/scripts/wait_quit.txt MonsterFarmJump.sfc
-check "$(grep -c -e '^config_version=3$' -e '^cpu_speed=6$' "$OUT/ocold/ndless/pocketsnes.cfg.tns")" 2 \
+check "$(grep -c -e '^config_version=3$' -e '^cpu_speed=6$' "$OUT/ocold/ndless/PocketSNES_saves/pocketsnes.cfg.tns")" 2 \
     "an older settings file keeps its CPU speed (456 MHz) under the new numbering"
 
 echo "== In-game saves (SRAM)"
 setup sram SramWrite.sfc
 (cd "$OUT/sram" && timeout -s KILL 4 "$HOST" --script "$forever" \
     --shots shots --exe-dir ndless roms/SramWrite.sfc.tns >/dev/null 2>&1)
-srm=$OUT/sram/roms/.pocketsnes/SramWrite.sfc.srm.tns
+srm=$OUT/sram/roms/PocketSNES_saves/SramWrite.sfc.srm.tns
 check "$(xxd -l 2 -p "$srm" 2>/dev/null)" 4299 "the game's save was written without quitting"
 
 echo "== Menu"
 setup menu MonsterFarmJump.sfc config_version=2
 play menu tests/scripts/menu_options.txt MonsterFarmJump.sfc
-cfg=$OUT/menu/ndless/pocketsnes.cfg.tns
+cfg=$OUT/menu/ndless/PocketSNES_saves/pocketsnes.cfg.tns
 check "$(grep -c -e '^auto_increment=0$' -e '^save_on_exit=0$' -e '^load_on_start=0$' -e '^show_fps=1$' "$cfg")" 4 \
     "menu turned off auto-increment, saving when leaving and loading on start, and the FPS counter on"
 check "$(grep -c -e '^screen_dma=1$' -e '^cpu_speed=4$' "$cfg")" 2 "menu set the screen output to DMA and the CPU speed to 432 MHz"
 check "$(grep -c -e '^key_a=6$' -e '^key_a_2=121+20$' -e '^key_save_state_2=121+23$' "$cfg")" 3 \
     "menu set A to Z and shift+3, and shift+S as a second key for Save state"
 play menu tests/scripts/menu_game_settings.txt MonsterFarmJump.sfc
-game_cfg=$OUT/menu/roms/.pocketsnes/MonsterFarmJump.sfc.cfg.tns
+game_cfg=$OUT/menu/roms/PocketSNES_saves/MonsterFarmJump.sfc.cfg.tns
 check "$(grep -c -e '^own_settings=1$' -e '^auto_increment=1$' "$game_cfg" 2>/dev/null)" 2 \
     "settings for this game only: auto-increment went back on for the game"
 check "$(grep -c '^auto_increment=0$' "$cfg")" 1 "... and stayed off for all games"
@@ -295,11 +307,11 @@ echo "== First start"
 # No settings file yet: a welcome screen first, then the game list; the next
 # start goes straight to the game list.
 setup first MonsterFarmJump.sfc
-rm "$OUT/first/ndless/pocketsnes.cfg.tns"
+rm "$OUT/first/ndless/PocketSNES_saves/pocketsnes.cfg.tns"
 play first tests/scripts/first_start.txt
 d=$OUT/first/shots
 check "$(same "$d/start.png" "$d/list.png")" different "the first start shows a welcome screen, a key goes on to the game list"
-check "$(exists "$OUT/first/ndless/pocketsnes.cfg.tns")" yes "... and the settings file is written then"
+check "$(exists "$OUT/first/ndless/PocketSNES_saves/pocketsnes.cfg.tns")" yes "... and the settings file is written then"
 mv "$d/list.png" "$d/list_first.png"
 play first tests/scripts/first_start.txt
 check "$(same "$d/start.png" "$d/list_first.png")" same "the next start goes straight to the game list"
@@ -309,7 +321,7 @@ setup browser MonsterFarmJump.sfc
 play browser tests/scripts/browser.txt
 d=$OUT/browser/shots
 check "$(same "$d/browser.png" "$d/game.png")" different "picking a ROM in the browser starts it"
-check "$(grep -c '^rom_dir=.*/browser/roms$' "$OUT/browser/ndless/pocketsnes.cfg.tns")" 1 "the ROM folder is remembered"
+check "$(grep -c '^rom_dir=.*/browser/roms$' "$OUT/browser/ndless/PocketSNES_saves/pocketsnes.cfg.tns")" 1 "the ROM folder is remembered"
 
 # With a saved state and loading on start on, the game list's menu can still
 # start the game without it: the picture matches a game that has no states.
@@ -339,13 +351,13 @@ order() { tr '\n' ' ' < "$1" 2>/dev/null; }
 
 setup_list number
 play number tests/scripts/list_number.txt
-s=$OUT/number/roms/.pocketsnes
+s=$OUT/number/roms/PocketSNES_saves
 check "$(exists "$s/Rings.sfc.sv001.tns")$(exists "$s/MonsterFarmJump.sfc.sv001.tns")" yesno \
     "the 2 key in the game list starts the second game"
 
 setup_list move
 play move tests/scripts/list_move.txt
-s=$OUT/move/roms/.pocketsnes
+s=$OUT/move/roms/PocketSNES_saves
 check "$(order "$s/game_order.txt.tns")" "Rings.sfc.tns RotZoom.sfc.tns MonsterFarmJump.sfc.tns " \
     "tab, down, down, enter moved the first game to third place, and the order was saved"
 check "$(exists "$s/MonsterFarmJump.sfc.sv001.tns")" yes "... then the 3 key started it there"
@@ -356,11 +368,11 @@ check "$(exists "$s/game_order.txt.tns")" no "Sort the list A to Z (game list me
 
 setup_list cancel
 play cancel tests/scripts/list_move_cancel.txt
-check "$(exists "$OUT/cancel/roms/.pocketsnes/game_order.txt.tns")" no "esc while moving puts the game back and saves nothing"
+check "$(exists "$OUT/cancel/roms/PocketSNES_saves/game_order.txt.tns")" no "esc while moving puts the game back and saves nothing"
 
 setup_list menumove
 play menumove tests/scripts/list_menu_move.txt
-check "$(order "$OUT/menumove/roms/.pocketsnes/game_order.txt.tns")" \
+check "$(order "$OUT/menumove/roms/PocketSNES_saves/game_order.txt.tns")" \
     "Rings.sfc.tns MonsterFarmJump.sfc.tns RotZoom.sfc.tns " "Move in the list (game list menu) moves the game"
 
 echo

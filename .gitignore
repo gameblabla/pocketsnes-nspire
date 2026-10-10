@@ -16,6 +16,7 @@ pocketsnes-asan
 pocketsnes-cov
 pocketsnes-pg
 pocketsnes.tns
+_PocketSNES.tns
 pocketsnes_*.tns
 build-*.log
 tests/roms/

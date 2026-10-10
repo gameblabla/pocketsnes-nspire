@@ -11,6 +11,7 @@
 #include "snes9x.h"
 #include "memmap.h"
 #include "snapshot.h"
+#include "paths.h"
 #include "states.h"
 
 /* A state file is this header followed by the zlib-compressed snapshot. */
@@ -79,10 +80,13 @@ void states_open_game(const char *rom_path)
     const char *slash = strrchr(rom_path, '/');
     const char *file = slash ? slash + 1 : rom_path;
 
+    paths_save_file_for(save_dir, sizeof(save_dir), rom_path, "");
     if (slash)
-        snprintf(save_dir, sizeof(save_dir), "%.*s/.pocketsnes", (int) (slash - rom_path), rom_path);
-    else
-        snprintf(save_dir, sizeof(save_dir), "./.pocketsnes");
+    {
+        char dir[512];
+        snprintf(dir, sizeof(dir), "%.*s", (int) (slash - rom_path), rom_path);
+        paths_move_old_files(dir[0] ? dir : "/", 0);
+    }
 
     snprintf(base_name, sizeof(base_name), "%s", file);
     char *dot = strrchr(base_name, '.');
