@@ -44,14 +44,15 @@ static const char *const action_ids[NUM_ACTIONS] =
 };
 
 /* The PocketSNES button layout (README.md), plus the hotkeys. The newer
- * hotkeys start unbound, except brightness: + and (-) (- is Select). */
+ * hotkeys start unbound, except brightness: + and -, as in gpSP (and the OS,
+ * with ctrl), so Select is (-) rather than PocketSNES's -. */
 static const uint8_t default_keys[NUM_ACTIONS] =
 {
     KEY_8, KEY_5, KEY_4, KEY_6,
-    KEY_CTRL, KEY_SHIFT, KEY_VAR, KEY_DEL, KEY_TAB, KEY_MENU, KEY_ENTER, KEY_MINUS,
+    KEY_CTRL, KEY_SHIFT, KEY_VAR, KEY_DEL, KEY_TAB, KEY_MENU, KEY_ENTER, KEY_NEGATIVE,
     KEY_ESC, KEY_Q, KEY_F, KEY_S, KEY_L,
     0, 0, 0, 0, 0,
-    KEY_PLUS, KEY_NEGATIVE
+    KEY_PLUS, KEY_MINUS
 };
 
 static void config_path(char *path, size_t size)

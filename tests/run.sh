@@ -145,7 +145,7 @@ setup bright MonsterFarmJump.sfc
 play_logged bright tests/scripts/brightness_keys.txt MonsterFarmJump.sfc
 check "$(backlight_log "$OUT/bright/log.txt")" \
     "backlight 75|message: Brightness 7/10|backlight 50|message: Brightness 8/10|backlight 75|message: Brightness 7/10|backlight 112|" \
-    "+ and (-) in a game step the brightness from the calculator's own, and quitting puts it back"
+    "+ and - in a game step the brightness from the calculator's own, and quitting puts it back"
 check "$(grep -c '^brightness=7$' "$OUT/bright/ndless/pocketsnes.cfg.tns")" 1 "... and the level is saved"
 setup brightmenu MonsterFarmJump.sfc
 play_logged brightmenu tests/scripts/brightness_menu.txt MonsterFarmJump.sfc

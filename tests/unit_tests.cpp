@@ -353,8 +353,10 @@ static void test_config(void)
     CHECK(cfg.keys[ACTION_LOAD_NEWEST][0].key == 0, "defaults: Load newest has no key");
     CHECK(cfg.auto_slot == 0 && cfg.quit_new_save == 1 && cfg.brightness == 0,
           "defaults: no auto slot, a new save on quit, the calculator's own brightness");
-    CHECK(cfg.keys[ACTION_BRIGHTER][0].key == KEY_PLUS && cfg.keys[ACTION_DIMMER][0].key == KEY_NEGATIVE,
-          "defaults: brightness on + and (-)");
+    CHECK(cfg.keys[ACTION_BRIGHTER][0].key == KEY_PLUS && cfg.keys[ACTION_DIMMER][0].key == KEY_MINUS,
+          "defaults: brightness on + and -");
+    CHECK(cfg.keys[ACTION_START][0].key == KEY_ENTER && cfg.keys[ACTION_SELECT][0].key == KEY_NEGATIVE,
+          "defaults: Start on enter, Select on (-)");
 
     /* A version 1 file (no config_version): its choices are kept, the three
      * save options come on. */
@@ -387,7 +389,8 @@ static void test_config(void)
     CHECK(!cfg.keys[ACTION_X][0].key, "a touchpad arrow (reserved) is dropped");
     CHECK(!cfg.keys[ACTION_Y][0].key, "a combination of a key with itself is dropped");
     CHECK(cfg.quit_new_save == 0, "no quit_new_save line: it follows auto-increment (off), as leaving did");
-    CHECK(cfg.keys[ACTION_BRIGHTER][0].key == KEY_PLUS, "a file from before the brightness keys gets them");
+    CHECK(cfg.keys[ACTION_BRIGHTER][0].key == KEY_PLUS && cfg.keys[ACTION_DIMMER][0].key == KEY_MINUS,
+          "a file from before the brightness keys gets them");
 
     write_file(global_path, "config_version=3\nauto_increment=0\nquit_new_save=1\nauto_slot=1\n"
                             "brightness=7\nkey_brighter=0\nkey_dimmer=52\n");
@@ -396,13 +399,20 @@ static void test_config(void)
           "New save on quit, the auto slot and brightness read as written");
     CHECK(!cfg.keys[ACTION_BRIGHTER][0].key && cfg.keys[ACTION_DIMMER][0].key == KEY_9,
           "the brightness keys read as written");
-    /* A file from before the brightness keys, with + as Select: Brightness
-     * up doesn't get + as well; Brightness down gets (-), which is free. */
+    /* Files from before the brightness keys: a key the file already uses
+     * for something else isn't given to them as well. With PocketSNES's
+     * Select on -, Brightness down has no key; up gets +, which is free. */
+    write_file(global_path, "config_version=3\nkey_start=2\nkey_select=83\nkey_start_2=0\nkey_select_2=0\n");
+    config_load();
+    CHECK(cfg.keys[ACTION_SELECT][0].key == KEY_MINUS && cfg.keys[ACTION_BRIGHTER][0].key == KEY_PLUS &&
+          !cfg.keys[ACTION_DIMMER][0].key,
+          "a newer hotkey's default key is left out when the file already uses it");
+    /* With - as Start and + as Select, neither gets one. */
     write_file(global_path, "config_version=3\nkey_start=83\nkey_select=99\nkey_start_2=0\nkey_select_2=0\n");
     config_load();
-    CHECK(cfg.keys[ACTION_SELECT][0].key == KEY_PLUS && !cfg.keys[ACTION_BRIGHTER][0].key &&
-          cfg.keys[ACTION_DIMMER][0].key == KEY_NEGATIVE,
-          "a newer hotkey's default key is left out when the file already uses it");
+    CHECK(cfg.keys[ACTION_START][0].key == KEY_MINUS && cfg.keys[ACTION_SELECT][0].key == KEY_PLUS &&
+          !cfg.keys[ACTION_BRIGHTER][0].key && !cfg.keys[ACTION_DIMMER][0].key,
+          "... both, when the file uses + and -");
     write_file(global_path, "config_version=3\nbrightness=99\nauto_slot=5\n");
     config_load();
     CHECK(cfg.brightness == BRIGHTNESS_LEVELS && cfg.auto_slot == 1, "out of range values are clamped");

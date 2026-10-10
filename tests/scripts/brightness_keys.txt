@@ -1,9 +1,9 @@
-# In a game: + twice, then (-) (the brightness hotkeys), then quit.
+# In a game: + twice, then - (the brightness hotkeys), then quit.
 wait 30
 press +
 wait 10
 press +
 wait 10
-press (-)
+press -
 wait 10
 quit

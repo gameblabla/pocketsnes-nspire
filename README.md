@@ -60,7 +60,7 @@ Controls
 | A / B          | ctrl / shift                                |
 | X / Y          | var / del                                   |
 | L / R          | tab / menu                                  |
-| Start / Select | enter / minus (−)                           |
+| Start / Select | enter / (−)                                 |
 
 | Hotkey       | Key  | What it does                                        |
 |--------------|------|-----------------------------------------------------|
@@ -69,13 +69,15 @@ Controls
 | Fast forward | F    | on/off: runs as fast as it can                      |
 | Save state   | S    | saves a state (each save gets a new slot)           |
 | Load state   | L    | loads the selected slot                             |
-| Brightness   | + / (−) | brighter / dimmer (CX II), in menus too          |
+| Brightness   | + / − | brighter / dimmer (CX II), in menus too            |
 
-More hotkeys (load newest, next/previous slot, FPS counter, restart) are
-there but have no key until you give them one. Every key can be changed in
-the menu under *SNES buttons* and *Hotkeys*. Each action takes two keys, and
-a key can be a combination (hold one key and press another). *Controls &
-about* in the menu always shows your keys as they are now.
+Brightness is on + and −, as in gpSP, so Select is on (−) rather than on −
+as in earlier PocketSNES. More hotkeys (load newest, next/previous slot, FPS
+counter, restart) are there but have no key until you give them one. Every
+key can be changed in the menu under *SNES buttons* and *Hotkeys*. Each
+action takes two keys, and a key can be a combination (hold one key and press
+another). *Controls & about* in the menu always shows your keys as they are
+now.
 
 ### In menus
 
@@ -238,7 +240,7 @@ whenever that game runs.
 | Frames to skip | **5** (0–9) | Automatic: the most frames skipped in a row. Manual: N. |
 | FPS counter | **off**, on, detailed | Frames drawn per second over the most there can be: 60/60 is full speed. Detailed adds how long each part of a frame takes and logs it to `pocketsnes_perf.txt.tns`. |
 | Screen output (CX II) | **no tearing**, DMA | No tearing shows every frame whole. DMA is a little faster but can show a split line when the picture scrolls fast. |
-| Brightness (CX II) | **calculator's**, 1 (dimmest) … 10 (brightest) | The screen's backlight while PocketSNES runs; the calculator's own comes back when PocketSNES closes. The + and (−) keys (Hotkeys) change it anywhere, a level at a time. |
+| Brightness (CX II) | **calculator's**, 1 (dimmest) … 10 (brightest) | The screen's backlight while PocketSNES runs; the calculator's own comes back when PocketSNES closes. The + and − keys (Hotkeys) change it anywhere, a level at a time. |
 | CPU speed (CX II) | **normal**, highest tested, 408 … 504 MHz | Experimental, not reliable: overclocks while a game runs. See [Overclocking](#overclocking). |
 | Overclock test (CX II) | | Tries 408 to 504 MHz with memory and CPU checks and shows the highest that passed. Not a reliable guide: games can freeze below it. |
 | CPU core | **ARM (fast)**, C | Which emulation of the SNES CPU runs the game: ARM is psnes's, in ARM assembler; C is Snes9x's. They do exactly the same thing (see [The CPU cores](#the-cpu-cores)); try C if a game acts up. Games with an SA-1 chip always use C. |

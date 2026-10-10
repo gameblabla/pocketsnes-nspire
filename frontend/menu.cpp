@@ -258,7 +258,7 @@ static void update_speed_names(void)
            "No tearing (best): every frame shows whole. DMA: slightly faster, but it can tear.", \
            3, &cfg.screen_dma, screen_outputs, 1, ICON_NONE), \
     CHOICE("Brightness", \
-           "The screen while PocketSNES runs (CX II); yours comes back after. Keys: + and (-).", \
+           "The screen while PocketSNES runs (CX II); yours comes back after. Keys: + and -.", \
            4, &cfg.brightness, brightness_levels, BRIGHTNESS_LEVELS, ICON_NONE), \
     CHOICE("CPU speed", \
            "Overclocks the CX II in games. Highest tested is what the overclock test passed.", \
@@ -347,7 +347,7 @@ static struct Option hotkey_options[] =
     BINDING_OPTION(ACTION_RESTART, 9),
     BINDING_OPTION(ACTION_BRIGHTER, 10),
     BINDING_OPTION(ACTION_DIMMER, 11),
-    ACTION("Reset to defaults", "Back to esc menu, Q quit, F fast forward, S save, L load, + and (-) brightness.",
+    ACTION("Reset to defaults", "Back to esc menu, Q quit, F fast forward, S save, L load, + and - brightness.",
            13, reset_hotkeys, ICON_RESTART),
     BACK_OPTION(14),
 };
