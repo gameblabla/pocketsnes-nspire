@@ -50,7 +50,10 @@ You need a TI-Nspire with a colour screen (CX or CX II) and
    calculator's documents.
 
 **Updating:** copy the new `_PocketSNES.tns` over the old one. Your
-settings and saves stay (see [Files](#files)).
+settings and saves stay (see [Files](#files)). Coming from a version called
+`pocketsnes.tns`: put `_PocketSNES.tns` in the same folder, open it once,
+then delete `pocketsnes.tns`; your settings and saves move over by
+themselves.
 
 When you leave a game with **Q** (or *Exit PocketSNES* in the menu),
 PocketSNES saves where you were, and the game carries on from there next

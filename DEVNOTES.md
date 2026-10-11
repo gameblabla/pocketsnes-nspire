@@ -54,11 +54,14 @@ on-chip SRAM at 0xA4000000.
 **Remotes.** `origin` = gameblabla/pocketsnes-nspire (upstream; no push
 rights), `fork` = jadenmcdaniels/pocketsnes-nspire. PR
 [gameblabla/pocketsnes-nspire#10](https://github.com/gameblabla/pocketsnes-nspire/pull/10)
-is `fork/nspire-frontend-speed`; it was last pushed at 6c74b1a. Release
+is `fork/nspire-frontend-speed`, pushed from `asm-cpu` (last on
+2026-10-11). Release
 [v4.0](https://github.com/jadenmcdaniels/pocketsnes-nspire/releases/tag/v4.0)
-on the fork is that build. Everything after 6c74b1a is local only, waiting
-for a check on the calculator. Pushes and releases only happen when the
-owner says so.
+on the fork was first published on 2026-10-10 from 6c74b1a (asset
+`pocketsnes.tns`, archived in `tests/calc/versions/`), then updated in
+place on 2026-10-11: tag moved to the branch head, asset `_PocketSNES.tns`
+built from 3eb26f2 (md5 2102a026…; the later commits are docs only).
+Pushes and releases only happen when the owner says so.
 
 **Environment.** `. ~/nspire/build/env.sh` puts the Ndless toolchain (GCC
 14.2) on PATH and unsets the `~/deps` paths that `~/.bashrc` adds with a
@@ -205,8 +208,8 @@ Keys and settings:
   tab, R menu, Start cat, Select frac; N load newest, ) and ( next and
   previous slot, R restart, + and - brightness (as in gpSP); frameskip off,
   FPS counter on. *Reset all settings* (game list → menu on a folder) goes
-  back to these. The owner's own file differs (Start enter, Select (-),
-  CPU 480, brightness 8).
+  back to these. The owner's own settings keep a few personal choices on
+  top (brightness 8).
 * **A newer hotkey's default key isn't given when the file already uses
   that key**, so an update never steals a key someone bound.
 * **Settings for all games live inside the program file** (an 8 KB
@@ -349,6 +352,7 @@ History
 | 2026-10-10 | 5144665 | Docs for all of the above |
 | 2026-10-11 | 3eb26f2 | Saves in My Documents/`PocketSNES_saves`, so `_PocketSNES.tns` is first in its folder |
 | 2026-10-11 | | These notes |
+| 2026-10-11 | | Pushed to PR #10; release v4.0 updated in place with all of the above |
 
 `git log` has the details; every commit message says what changed and why.
 
@@ -358,10 +362,9 @@ Open items and ideas
 
 Waiting on the owner:
 
-* Run the current `_PocketSNES.tns` on the calculator: settings, keys and
-  saves still there; `_PocketSNES` first in `snes`; how far the overclock
-  test gets in SMW.
-* Then: push `asm-cpu` to the PR and make a release (only on their go).
+* Run v4.0's `_PocketSNES.tns` on the calculator (uploaded 2026-10-11):
+  settings, keys and saves still there; `_PocketSNES` first in `snes`; how
+  far the overclock test gets in SMW.
 
 Ideas, most promising first (see README → Future steps):
 
