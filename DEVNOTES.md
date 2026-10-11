@@ -220,7 +220,9 @@ Saving:
 * **Every save goes to a new slot** by default; *New save on quit* off
   writes the leaving save over the newest state; *Auto save slot* keeps it
   in its own slot. Load on start and save on exit are on by default.
-* **Compression on by default** (a state: about 7 KB instead of 356 KB).
+* **Compression on by default** (a state: about 35-60 KB instead of 356 KB;
+  measured on the calculator: Chrono Trigger 35 KB, SMW and Yoshi's Island
+  57-61 KB).
   In-game saves are gzip, so a PC can unpack them.
 
 Files and launching:
@@ -282,23 +284,37 @@ Seen on the calculator:
   MHz works, 456 sometimes, 480 freezes.
 * The menus, save states and the speed test, used since the 2026-10-05
   builds.
+* The 6018db6 build's file move (2026-10-10/11): `.pocketsnes` and the
+  files next to the program moved into `snes/PocketSNES_saves` and the old
+  folder was removed, so `rename()` across folders and `rmdir()` work on
+  the calculator.
+* Settings inside the program file: the calculator's `_PocketSNES.tns` grew
+  by exactly 8,208 bytes, and its stored text matched
+  `pocketsnes.cfg.tns` byte for byte.
+* Compressed saves: states of 35-61 KB and gzipped in-game saves
+  (`.srm.gz.tns`) written on the calculator.
 
 PC only, waiting for a run on the calculator (all built after 6c74b1a):
 
-* The saves moving from `/snes/.pocketsnes` and `/snes/pocketsnes.cfg.tns`
-  into My Documents/`PocketSNES_saves`, and `_PocketSNES.tns` then being
-  first in `snes`. `rename()` across folders hasn't been tried on the
-  calculator; if it fails, the files stay where they were and the old
-  folder isn't removed. Check with `nspire-link ls` after the first start.
-* Settings kept inside the program file.
-* Zipped ROMs, compressed saves, the save manager.
+* 3eb26f2 (uploaded 2026-10-11, md5 2102a026…): the move from
+  `snes/PocketSNES_saves` to My Documents/`PocketSNES_saves`, and
+  `_PocketSNES.tns` then being first in `snes`. The calculator's copy of the
+  program it replaced (with the settings inside) is in
+  `tests/calc/versions/`.
+* Zipped ROMs, the save manager.
 * The reworked overclock test (game replay). Whether it catches the 480
   MHz freezes is unknown.
 * Auto save slot.
 
 To check after the next calculator run: `ls /snes` (no folders, no
 `pocketsnes*.tns` files except the old `pocketsnes_asm.tns`), `ls
-/PocketSNES_saves`, the old states load, the game order is kept.
+/PocketSNES_saves` (20 files, `game_order_snes.txt.tns` among them), the
+old states load, the game order is kept, `_PocketSNES.tns` grows by 8,208
+bytes again once a setting is saved.
+
+Not PocketSNES's: `..cfg.tns` (64 bytes) in My Documents and in `/gba` are
+per-game settings in the older gpSP build's format (`change_ext` of an
+empty game name); the gpSP QoL build doesn't write them.
 `pocketsnes_asm.tns` (an older build) still uses `.pocketsnes`: running it
 again recreates that folder in `snes`, so it should be deleted once the new
 build is confirmed.

@@ -144,7 +144,7 @@ them much:
 * **Save states** freeze the whole game at any moment. **S** saves one, **L**
   loads one, and leaving a game saves one so you can carry on next time.
   Each game has 999 slots. Every save goes to a new slot, so an old save is
-  never overwritten. A state takes about 5–30 KB compressed.
+  never overwritten. A state takes about 35–60 KB compressed.
 
 You can pick a slot in the menu (*Save state* / *Load state*, left/right
 choose the slot). Everything a game saves goes in the `PocketSNES_saves`
@@ -157,7 +157,7 @@ slots 001–999 (*Auto save slot* on). The Auto slot comes before 001 when you
 pick a slot, and starting a game loads it when it's the newest.
 
 **Compression.** States and in-game saves are compressed (*Saving →
-Compress saves*, on by default): a state is about 7 KB instead of 356 KB.
+Compress saves*, on by default): a state is about 35–60 KB instead of 356 KB.
 Switched off, new saves are written as they are.
 
 **The save manager** (*Saving → Save manager* in a game, or **menu** on a
@@ -297,7 +297,7 @@ whenever that game runs.
 | New save on quit | on | That save goes to a new slot. Off: it saves over your newest state. (Doesn't matter with Auto save slot on.) |
 | Load newest on start | on | Games start from their newest state. *Play without a state* in the game list skips it once. |
 | Write in-game saves | automatic | When the game's own save is written to the calculator: a couple of seconds after the game saves, or only on exit. |
-| Compress saves | on | New states and in-game saves are compressed (a state: about 7 KB instead of 356 KB). Off: in-game saves are the plain `.srm` PC emulators read. |
+| Compress saves | on | New states and in-game saves are compressed (a state: about 35–60 KB instead of 356 KB). Off: in-game saves are the plain `.srm` PC emulators read. |
 | Save manager | | This game's saves and their sizes; compress, uncompress or delete them. See [Saving](#saving). |
 
 ### SNES buttons and Hotkeys
