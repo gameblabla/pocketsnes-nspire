@@ -20,7 +20,7 @@ struct Entry
 {
     char name[256];
     int is_dir;
-    int saves;    /* save states in the folder's PocketSNES_saves */
+    int saves;    /* save states in PocketSNES_saves */
     int rank;     /* place in the folder's game order, INT_MAX if not in it */
 };
 
@@ -86,20 +86,13 @@ static void add_entry(const char *name, int is_dir)
     entry_count++;
 }
 
-/* "<folder>/PocketSNES_saves/<name>". */
-static void folder_file(char *path, size_t size, const char *name)
-{
-    paths_save_file(path, size, current_dir, name);
-}
-
 /* The order of the games in a folder, when it has been changed (Move): one
- * ROM file name per line in "<folder>/PocketSNES_saves/game_order.txt.tns". */
-#define ORDER_FILE "game_order.txt.tns"
-
+ * ROM file name per line in the folder's order file in PocketSNES_saves
+ * (paths_order_file). */
 static void read_order(void)
 {
     char path[800], line[300];
-    folder_file(path, sizeof(path), ORDER_FILE);
+    paths_order_file(path, sizeof(path), current_dir);
     FILE *f = fopen(path, "r");
     if (!f)
         return;
@@ -121,9 +114,8 @@ static void read_order(void)
 static int write_order(void)
 {
     char path[800];
-    folder_file(path, sizeof(path), "");
-    mkdir(path, 0755);
-    folder_file(path, sizeof(path), ORDER_FILE);
+    paths_save_dir_make();
+    paths_order_file(path, sizeof(path), current_dir);
     FILE *f = fopen(path, "w");
     if (!f)
         return 0;
@@ -141,11 +133,11 @@ static int nth_game(int n)
 }
 
 /* How many save states each game has: "<ROM name without .tns>.svNNN.tns"
- * in the folder's PocketSNES_saves (states.cpp). */
+ * in PocketSNES_saves (states.cpp). */
 static void count_saves(void)
 {
     char path[800];
-    folder_file(path, sizeof(path), "");
+    paths_save_file(path, sizeof(path), "");
     DIR *dir = opendir(path);
     if (!dir)
         return;
@@ -448,7 +440,7 @@ enum BrowserResult browser_run(char *path, size_t size)
             {
                 char order[800], keep[256];
                 snprintf(keep, sizeof(keep), "%s", entries[selected].name);
-                folder_file(order, sizeof(order), ORDER_FILE);
+                paths_order_file(order, sizeof(order), current_dir);
                 remove(order);
                 read_dir();
                 for (int i = 0; i < entry_count; i++)

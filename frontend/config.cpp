@@ -465,8 +465,8 @@ void config_save(void)
 
 void config_open_game(const char *rom_path)
 {
-    /* "<ROM folder>/PocketSNES_saves/<ROM name without its last
-     * extension>.cfg.tns", next to the game's saves (states.cpp). */
+    /* "PocketSNES_saves/<ROM name without its last extension>.cfg.tns",
+     * next to the game's saves (states.cpp). */
     const char *slash = strrchr(rom_path, '/');
     const char *file = slash ? slash + 1 : rom_path;
     char base[256];
@@ -476,7 +476,7 @@ void config_open_game(const char *rom_path)
         *dot = 0;
     char name[300];
     snprintf(name, sizeof(name), "%s.cfg.tns", base);
-    paths_save_file_for(game_file, sizeof(game_file), rom_path, name);
+    paths_save_file(game_file, sizeof(game_file), name);
 
     char rom_dir[512];
     snprintf(rom_dir, sizeof(rom_dir), "%s", cfg.rom_dir);

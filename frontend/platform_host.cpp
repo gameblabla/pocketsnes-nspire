@@ -54,6 +54,7 @@ static int current_screen, copy_mode;
 static uint16_t shown[SCREEN_W * SCREEN_H];
 static uint32_t keys_now[4], keys_old[4];
 static char exe_dir[PATH_MAX] = ".";
+static char documents_dir[PATH_MAX];   /* "" until platform_init: the folder above exe_dir */
 static int headless;
 static int quit_requested;
 
@@ -289,6 +290,8 @@ int platform_init(int *argc, char **argv)
             snprintf(shots_dir, sizeof(shots_dir), "%s", argv[++i]);
         else if (strcmp(argv[i], "--exe-dir") == 0 && i + 1 < *argc)
             snprintf(exe_dir, sizeof(exe_dir), "%s", argv[++i]);
+        else if (strcmp(argv[i], "--documents") == 0 && i + 1 < *argc)
+            snprintf(documents_dir, sizeof(documents_dir), "%s", argv[++i]);
         else if (strcmp(argv[i], "--scale") == 0 && i + 1 < *argc)
             scale = atoi(argv[++i]);
         else if (strcmp(argv[i], "--log") == 0 && i + 1 < *argc)
@@ -313,6 +316,16 @@ int platform_init(int *argc, char **argv)
     char absolute[PATH_MAX];
     if (realpath(exe_dir, absolute))
         snprintf(exe_dir, sizeof(exe_dir), "%s", absolute);
+    /* Like the calculator, where the program is in a folder of My Documents. */
+    if (!documents_dir[0])
+    {
+        snprintf(documents_dir, sizeof(documents_dir), "%s", exe_dir);
+        char *up = strrchr(documents_dir, '/');
+        if (up)
+            up[up == documents_dir ? 1 : 0] = 0;
+    }
+    if (realpath(documents_dir, absolute))
+        snprintf(documents_dir, sizeof(documents_dir), "%s", absolute);
 
     if (script_path)
     {
@@ -666,6 +679,11 @@ void platform_wait_until(uint32_t tick)
 const char *platform_exe_dir(void)
 {
     return exe_dir;
+}
+
+const char *platform_documents_dir(void)
+{
+    return documents_dir;
 }
 
 int platform_quit_requested(void)

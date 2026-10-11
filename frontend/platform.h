@@ -223,6 +223,10 @@ void platform_wait_until(uint32_t tick);
 
 /* Directory holding the program, for the config file. No trailing slash. */
 const char *platform_exe_dir(void);
+/* The calculator's My Documents ("/documents"), where the saves folder goes
+ * (paths.h). The PC build uses the folder above the program's (or
+ * --documents DIR). No trailing slash. */
+const char *platform_documents_dir(void);
 
 /* PC build only: the window was closed. Always 0 on the calculator. */
 int platform_quit_requested(void);

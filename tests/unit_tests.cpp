@@ -46,7 +46,8 @@ static unsigned rnd(unsigned n)
 /* ---- A stand-in for the calculator: keys and the program's folder ---- */
 
 static uint32_t keys_down[4], keys_before[4];
-static char exe_dir[512];
+static char exe_dir[512];        /* "<temp>/snes", like the calculator's My Documents/snes */
+static char documents_dir[512];  /* "<temp>" */
 
 static void set_key(int key, int down)
 {
@@ -79,6 +80,11 @@ int platform_key_pressed(int key)
 const char *platform_exe_dir(void)
 {
     return exe_dir;
+}
+
+const char *platform_documents_dir(void)
+{
+    return documents_dir;
 }
 
 static char program_file[600];   /* "" until test_selfstore */
@@ -346,9 +352,9 @@ static int file_exists(const char *path)
 static void test_config(void)
 {
     char global_path[600], rom[600], game_path[700];
-    snprintf(global_path, sizeof(global_path), "%s/PocketSNES_saves/pocketsnes.cfg.tns", exe_dir);
+    snprintf(global_path, sizeof(global_path), "%s/PocketSNES_saves/pocketsnes.cfg.tns", documents_dir);
     snprintf(rom, sizeof(rom), "%s/Game (USA).sfc.tns", exe_dir);
-    snprintf(game_path, sizeof(game_path), "%s/PocketSNES_saves/Game (USA).sfc.cfg.tns", exe_dir);
+    snprintf(game_path, sizeof(game_path), "%s/PocketSNES_saves/Game (USA).sfc.cfg.tns", documents_dir);
     remove(global_path);
 
     /* Defaults with no file. */
@@ -514,7 +520,7 @@ static void test_selfstore(void)
     for (size_t i = 0; i < sizeof(program); i++)
         program[i] = (unsigned char) (i * 7 + 1);
     snprintf(program_file, sizeof(program_file), "%s/_PocketSNES.tns", exe_dir);
-    snprintf(backup, sizeof(backup), "%s/PocketSNES_saves/pocketsnes.cfg.tns", exe_dir);
+    snprintf(backup, sizeof(backup), "%s/PocketSNES_saves/pocketsnes.cfg.tns", documents_dir);
     FILE *f = fopen(program_file, "wb");
     fwrite(program, 1, sizeof(program), f);
     fclose(f);
@@ -657,7 +663,9 @@ int main(void)
         perror("mkdtemp");
         return 1;
     }
-    snprintf(exe_dir, sizeof(exe_dir), "%s", dir);
+    snprintf(documents_dir, sizeof(documents_dir), "%s", dir);
+    snprintf(exe_dir, sizeof(exe_dir), "%s/snes", dir);
+    mkdir(exe_dir, 0755);
 
     test_tile_drawing();
     test_rotation();

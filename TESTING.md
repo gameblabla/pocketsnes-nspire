@@ -14,7 +14,9 @@ Playing it in a window
     ./pocketsnes-host path/to/game.sfc     # or straight into a game
 
 Settings and the game list start from the program's folder (`--exe-dir DIR`
-picks another one). Plain `.sfc`/`.smc` files work as well as `.tns` ones.
+picks another one). Saves go in `PocketSNES_saves` in the folder above it,
+which stands for the calculator's My Documents (`--documents DIR` picks
+another one). Plain `.sfc`/`.smc` files work as well as `.tns` ones.
 Calculator keys on the PC keyboard:
 
 | PC key                 | Calculator key  | Default use           |

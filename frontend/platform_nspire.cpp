@@ -1691,6 +1691,19 @@ const char *platform_exe_dir(void)
     return exe_dir;
 }
 
+const char *platform_documents_dir(void)
+{
+    static char dir[256];
+    if (!dir[0])
+    {
+        snprintf(dir, sizeof(dir), "%s", get_documents_dir());
+        size_t len = strlen(dir);
+        while (len > 1 && dir[len - 1] == '/')
+            dir[--len] = 0;
+    }
+    return dir;
+}
+
 int platform_quit_requested(void)
 {
     return 0;

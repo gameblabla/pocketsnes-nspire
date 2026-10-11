@@ -35,7 +35,9 @@ You need a TI-Nspire with a colour screen (CX or CX II) and
 2. **Copy `_PocketSNES.tns` to the calculator**, into any folder (a folder
    called `snes` works well). Use TI-Nspire Computer Link, the Student
    Software, TiLP, or any other transfer tool. The `_` keeps it at the top
-   of the folder, above your games.
+   of the folder, above your games, and PocketSNES keeps its saves out of
+   that folder (in My Documents), so opening the folder and pressing
+   **enter** starts it.
 3. **Copy your ROMs over and add `.tns` to their names.** The calculator only
    accepts `.tns` files. A zipped ROM works as it is, so you can download a
    ROM and just rename it: `Super Mario World.zip` becomes
@@ -145,8 +147,8 @@ them much:
   never overwritten. A state takes about 5–30 KB compressed.
 
 You can pick a slot in the menu (*Save state* / *Load state*, left/right
-choose the slot). Everything a game saves goes in a `PocketSNES_saves`
-folder next to the ROM (the game list doesn't show it).
+choose the slot). Everything a game saves goes in the `PocketSNES_saves`
+folder in My Documents (the game list doesn't show it).
 
 Where the save made when you leave goes is up to you (menu → *Saving*):
 a new slot each time (the default), over your newest state (*New save on
@@ -174,8 +176,8 @@ none is marked. Deleting asks first.
   compressed one (`.srm.gz.tns`) works too: rename it to `.srm.gz` and
   unpack it with 7-Zip or any gzip tool.
 * **From a PC:** rename `Super Mario World.srm` to
-  `Super Mario World.srm.tns` and put it in `PocketSNES_saves` next to the
-  ROM. PocketSNES takes it the next time the game starts, if the game has
+  `Super Mario World.srm.tns` and put it in `PocketSNES_saves` (in My
+  Documents). PocketSNES takes it the next time the game starts, if the game has
   no in-game save of its own yet (otherwise it keeps the newer file).
 * **Save states** don't move to PC emulators: they're Snes9x 1.43's format
   for this port (without the sound chip), which today's emulators can't
@@ -316,9 +318,13 @@ at the bottom. The arrows always work as the d-pad.
 Files
 -----
 
-Next to each ROM, in a `PocketSNES_saves` folder (named so you can tell
-it from other emulators' saves; older versions used a hidden `.pocketsnes`
-folder, which moves over by itself):
+In one `PocketSNES_saves` folder in My Documents, for every game wherever
+its ROM is (named so you can tell it from other emulators' saves). It
+isn't in the ROM folder, so `_PocketSNES.tns` is the first thing there (a
+folder would be listed above it). Older versions kept a hidden
+`.pocketsnes` folder (or a `PocketSNES_saves` folder) in each ROM folder,
+and their own files next to the program: those move over by themselves.
+Two ROMs with the same file name in different folders share their saves.
 
 | File | What |
 |---|---|
@@ -327,15 +333,15 @@ folder, which moves over by itself):
 | `game.sfc.sv001.tns` … `game.sfc.sv999.tns` | save states (compressed unless switched off) |
 | `game.sfc.svauto.tns` | the Auto slot's state (Saving → Auto save slot) |
 | `game.sfc.cfg.tns` | the game's own settings or keys, if it has any |
-| `game_order.txt.tns` | the order of the folder's games, once you've moved one |
+| `game_order_snes.txt.tns` | the order of the games in the `snes` folder, once you've moved one (`game_order.txt.tns` for My Documents itself) |
 
 A zipped ROM's files are named after the zip (`game.zip.sv001.tns`); a zip
 that replaces the unzipped ROM takes over its files.
 
 **Settings for all games are kept inside `_PocketSNES.tns` itself**, in a
 small area after the program, so they go wherever the program goes. A copy
-is kept in the `PocketSNES_saves` folder next to the program, so a new
-version copied over the old one picks them up. That folder also has:
+is kept in `PocketSNES_saves`, so a new version copied over the old one
+picks them up. That folder also has:
 
 | File | What |
 |---|---|

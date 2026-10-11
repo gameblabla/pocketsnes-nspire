@@ -9,39 +9,61 @@
 #include "paths.h"
 #include "platform.h"
 
+#define ORDER_FILE "game_order.txt.tns"
+
 /* "/" is the top folder: paths under it start with "/" alone. */
 static const char *folder_prefix(const char *dir)
 {
     return strcmp(dir, "/") == 0 ? "" : dir;
 }
 
-void paths_save_file(char *path, size_t size, const char *dir, const char *name)
+void paths_save_file(char *path, size_t size, const char *name)
 {
-    snprintf(path, size, "%s/%s%s%s", folder_prefix(dir), SAVE_FOLDER, name[0] ? "/" : "", name);
+    snprintf(path, size, "%s/%s%s%s", folder_prefix(platform_documents_dir()), SAVE_FOLDER,
+             name[0] ? "/" : "", name);
 }
 
-void paths_save_file_for(char *path, size_t size, const char *file_path, const char *name)
-{
-    const char *slash = strrchr(file_path, '/');
-    char dir[600];
-    if (slash)
-        snprintf(dir, sizeof(dir), "%.*s", (int) (slash - file_path), file_path);
-    else
-        snprintf(dir, sizeof(dir), ".");
-    paths_save_file(path, size, dir[0] ? dir : "/", name);
-}
-
-void paths_data_dir_make(void)
+void paths_save_dir_make(void)
 {
     char path[600];
-    paths_save_file(path, sizeof(path), platform_exe_dir(), "");
+    paths_save_file(path, sizeof(path), "");
     mkdir(path, 0755);
 }
 
 void paths_data_file(char *path, size_t size, const char *name)
 {
-    paths_data_dir_make();
-    paths_save_file(path, size, platform_exe_dir(), name);
+    paths_save_dir_make();
+    paths_save_file(path, size, name);
+}
+
+/* The order file's name for dir, without the folder. */
+static void order_name(char *name, size_t size, const char *dir)
+{
+    const char *documents = platform_documents_dir();
+    size_t len = strlen(documents);
+    const char *rel = dir;
+    if (strncmp(dir, documents, len) == 0 && (dir[len] == '/' || dir[len] == 0))
+        rel = dir + len;
+    while (*rel == '/')
+        rel++;
+    if (!*rel)
+    {
+        snprintf(name, size, "%s", ORDER_FILE);
+        return;
+    }
+    int written = snprintf(name, size, "game_order_%s", rel);
+    for (char *c = name + 11; *c; c++)
+        if (*c == '/')
+            *c = '_';
+    if (written >= 0 && (size_t) written + 8 < size)
+        strcat(name, ".txt.tns");
+}
+
+void paths_order_file(char *path, size_t size, const char *dir)
+{
+    char name[300];
+    order_name(name, sizeof(name), dir);
+    paths_save_file(path, size, name);
 }
 
 static int file_exists(const char *path)
@@ -65,28 +87,15 @@ static const char *const program_files[] =
     "pocketsnes_octest.tns", "pocketsnes_sram.bin.tns"
 };
 
-void paths_move_old_files(const char *dir, int with_program_files)
+/* Everything in old_dir into the saves folder, then old_dir goes. Its game
+ * order was for dir. */
+static void move_folder(const char *old_dir, const char *dir)
 {
-    char old_dir[600], from[900], to[900], new_dir[600];
-
-    snprintf(old_dir, sizeof(old_dir), "%s/.pocketsnes", folder_prefix(dir));
-    paths_save_file(new_dir, sizeof(new_dir), dir, "");
-
-    if (with_program_files)
-        for (size_t i = 0; i < sizeof(program_files) / sizeof(program_files[0]); i++)
-        {
-            snprintf(from, sizeof(from), "%s/%s", folder_prefix(dir), program_files[i]);
-            if (!file_exists(from))
-                continue;
-            mkdir(new_dir, 0755);
-            paths_save_file(to, sizeof(to), dir, program_files[i]);
-            move_file(from, to);
-        }
-
+    char from[900], to[900];
     DIR *old = opendir(old_dir);
     if (!old)
         return;
-    mkdir(new_dir, 0755);
+    paths_save_dir_make();
     /* The names first, then the moves: renaming while the folder is read
      * can skip files. */
     char *names = NULL;
@@ -113,11 +122,38 @@ void paths_move_old_files(const char *dir, int with_program_files)
     for (size_t at = 0; at < used; at += strlen(names + at) + 1)
     {
         snprintf(from, sizeof(from), "%s/%s", old_dir, names + at);
-        paths_save_file(to, sizeof(to), dir, names + at);
+        if (strcmp(names + at, ORDER_FILE) == 0)
+            paths_order_file(to, sizeof(to), dir);
+        else
+            paths_save_file(to, sizeof(to), names + at);
         move_file(from, to);
     }
     free(names);
     rmdir(old_dir);   /* only goes if everything moved */
+}
+
+void paths_move_old_files(const char *dir, int with_program_files)
+{
+    char old_dir[600], from[900], to[900], saves[600];
+
+    if (with_program_files)
+        for (size_t i = 0; i < sizeof(program_files) / sizeof(program_files[0]); i++)
+        {
+            snprintf(from, sizeof(from), "%s/%s", folder_prefix(dir), program_files[i]);
+            if (!file_exists(from))
+                continue;
+            paths_data_file(to, sizeof(to), program_files[i]);
+            move_file(from, to);
+        }
+
+    snprintf(old_dir, sizeof(old_dir), "%s/.pocketsnes", folder_prefix(dir));
+    move_folder(old_dir, dir);
+    /* The saves folder in the ROM folder, unless that's My Documents, where
+     * it is the saves folder. */
+    snprintf(old_dir, sizeof(old_dir), "%s/%s", folder_prefix(dir), SAVE_FOLDER);
+    paths_save_file(saves, sizeof(saves), "");
+    if (strcmp(old_dir, saves) != 0)
+        move_folder(old_dir, dir);
 }
 
 int paths_is_pocketsnes_name(const char *name)

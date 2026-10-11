@@ -139,7 +139,7 @@ void states_open_game(const char *rom_path)
     const char *slash = strrchr(rom_path, '/');
     const char *file = slash ? slash + 1 : rom_path;
 
-    paths_save_file_for(save_dir, sizeof(save_dir), rom_path, "");
+    paths_save_file(save_dir, sizeof(save_dir), "");
     if (slash)
     {
         char dir[512];
