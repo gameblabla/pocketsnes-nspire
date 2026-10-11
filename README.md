@@ -443,7 +443,7 @@ The PC test build needs g++ and zlib (and SDL2's headers for a window):
 
     make                                 # makes ./pocketsnes-host
     ./pocketsnes-host                    # the game list, in a window
-    tests/run.sh                         # the test suite (62 checks)
+    tests/run.sh                         # the test suite (80 checks)
     make unit-tests                      # tile drawing, frame turning, settings
     tests/asm/run.sh                     # the ARM CPU core against the C core, under qemu-arm
 

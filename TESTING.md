@@ -90,7 +90,9 @@ and stored zips play exactly like the ROM, a zip takes over the unzipped
 ROM's saves, a zip without a ROM says so), saves (gzipped and plain in-game
 saves, one from a PC emulator taken in, stored states loading back exactly,
 the save manager uncompressing and deleting), and files from older versions
-moving into `PocketSNES_saves`. `make unit-tests` also checks the settings
+moving into `PocketSNES_saves` in My Documents (the `snesfolder` test sets
+out the calculator's layout, program and ROMs in one folder, and checks the
+folder has no folder left in it). `make unit-tests` also checks the settings
 kept inside the program file and *Reset all settings*.
 Results and screenshots go to
 `tests/out/`. Every test starts with a settings file (so not on a "first
