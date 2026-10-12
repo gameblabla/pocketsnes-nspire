@@ -885,7 +885,8 @@ static bool looks_like_rom(const char *path)
     {
         if (romzip_rom_name(path, inner, sizeof(inner)))
             return true;
-        load_error = "It's a zip with no SNES ROM in it.";
+        load_error = romzip_holds_gba(path) ? "It's a GBA game: start it in gpSP."
+                                            : "It's a zip with no SNES ROM in it.";
     }
     else if (got >= 6 && memcmp(head, "*TIMLP", 6) == 0)
         load_error = "It's a TI-Nspire document, not a SNES ROM.";

@@ -521,6 +521,9 @@ void platform_shutdown(void)
     *TIMER_CLOCK = saved_clock;
     *TIMER_LOAD = saved_load;
     *TIMER_CONTROL = saved_control;
+    /* The OS's file list doesn't see files a program moves or writes (the
+     * saves folder, states): it showed folders that were gone until this. */
+    refresh_osscr();
 }
 
 uint16_t *platform_screen(void)

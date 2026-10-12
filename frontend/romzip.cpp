@@ -33,10 +33,26 @@ static int has_rom_extension(const char *name)
                    strcasecmp(dot, ".swc") == 0 || strcasecmp(dot, ".fig") == 0);
 }
 
+/* Another console's ROM (a GBA zip opened from My Documents comes here, as
+ * PocketSNES has the .zip files): never taken as the biggest file. */
+static int is_gba_name(const char *name)
+{
+    const char *dot = strrchr(name, '.');
+    return dot && (strcasecmp(dot, ".gba") == 0 || strcasecmp(dot, ".agb") == 0);
+}
+
+static int is_other_console_name(const char *name)
+{
+    const char *dot = strrchr(name, '.');
+    return is_gba_name(name) ||
+           (dot && (strcasecmp(dot, ".gb") == 0 || strcasecmp(dot, ".gbc") == 0 ||
+                    strcasecmp(dot, ".nes") == 0 || strcasecmp(dot, ".nds") == 0));
+}
+
 /* Finds the ROM's entry through the central directory at the end of the
  * zip (sizes are always right there, even when the file's own header
  * leaves them out). */
-static int find_rom(FILE *f, struct ZipEntry *rom)
+static int find_rom(FILE *f, struct ZipEntry *rom, int *gba)
 {
     unsigned char tail[22 + 0xFFFF];
     if (fseek(f, 0, SEEK_END) != 0)
@@ -60,6 +76,8 @@ static int find_rom(FILE *f, struct ZipEntry *rom)
     uint32_t count = get16(tail + end + 10), offset = get32(tail + end + 16);
 
     int found = 0, by_extension = 0;
+    if (gba)
+        *gba = 0;
     if (fseek(f, offset, SEEK_SET) != 0)
         return 0;
     for (uint32_t i = 0; i < count; i++)
@@ -82,8 +100,11 @@ static int find_rom(FILE *f, struct ZipEntry *rom)
             break;
 
         size_t len = strlen(entry.name);
+        if (gba && is_gba_name(entry.name))
+            *gba = 1;
         /* The core can't take files under 32 KB: no SNES ROM is that small. */
-        if (!len || entry.name[len - 1] == '/' || (entry.method != 0 && entry.method != 8) || entry.size < 0x8000)
+        if (!len || entry.name[len - 1] == '/' || (entry.method != 0 && entry.method != 8) || entry.size < 0x8000 ||
+            is_other_console_name(entry.name))
             continue;
         /* The first ROM by its extension, or else the biggest file. */
         int take = has_rom_extension(entry.name) ? !by_extension : !by_extension && (!found || entry.size > rom->size);
@@ -103,7 +124,7 @@ int romzip_rom_name(const char *path, char *name, size_t size)
     if (!f)
         return 0;
     struct ZipEntry rom;
-    int found = find_rom(f, &rom);
+    int found = find_rom(f, &rom, NULL);
     fclose(f);
     if (!found)
         return 0;
@@ -122,7 +143,7 @@ uint32_t romzip_read(const char *path, uint8_t *buffer, uint32_t max)
     uint32_t result = 0;
     unsigned char local[30];
 
-    if (!find_rom(f, &rom) || rom.size > max || fseek(f, rom.header_offset, SEEK_SET) != 0 ||
+    if (!find_rom(f, &rom, NULL) || rom.size > max || fseek(f, rom.header_offset, SEEK_SET) != 0 ||
         fread(local, 1, 30, f) != 30 || get32(local) != 0x04034B50 ||
         fseek(f, (long) (get16(local + 26) + get16(local + 28)), SEEK_CUR) != 0)
     {
@@ -169,4 +190,16 @@ uint32_t romzip_read(const char *path, uint8_t *buffer, uint32_t max)
     if (result && crc32(crc32(0, NULL, 0), buffer, result) != rom.crc)
         result = 0;
     return result;
+}
+
+int romzip_holds_gba(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return 0;
+    struct ZipEntry rom;
+    int gba = 0;
+    find_rom(f, &rom, &gba);
+    fclose(f);
+    return gba;
 }

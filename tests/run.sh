@@ -430,6 +430,14 @@ python3 tests/make_zip.py "$OUT/zipnorom/roms/Empty.zip.tns" deflate tests/make_
 (cd "$OUT/zipnorom" && timeout 20 "$HOST" --script "$message_script" --shots shots --exe-dir ndless \
     "roms/Empty.zip.tns" >/dev/null 2>&1)
 check "$?" 0 "a zip without a ROM shows a message instead of crashing"
+# A GBA game's zip (PocketSNES has the .zip files, so one opened from My
+# Documents comes here): a message, not the GBA ROM run as a SNES game.
+setup zipgba MonsterFarmJump.sfc config_version=3 save_on_exit=1
+python3 tests/make_zip.py "$OUT/zipgba/roms/Advance.zip.tns" deflate "$ROMS/Rings.sfc=Advance Wars.gba"
+(cd "$OUT/zipgba" && timeout 20 "$HOST" --script "$message_script" --shots shots --exe-dir ndless \
+    "roms/Advance.zip.tns" >/dev/null 2>&1)
+check "$?$(ls "$OUT/zipgba/zPocketSNES_saves" | grep -c '^Advance')" 00 \
+    "a zip with a GBA game says to start it from gpSP, and saves nothing for it"
 
 echo "== First start"
 # No settings file yet: a welcome screen first, then the game list; the next
