@@ -85,7 +85,7 @@ README.md → Building has the full list.
 
 ### Test (before every calculator build)
 
-    tests/run.sh          # 82 checks: scripted runs of the PC build, screenshots in tests/out/
+    tests/run.sh          # 83 checks: scripted runs of the PC build, screenshots in tests/out/
     make unit-tests       # 75 checks: tile drawing, frame turning, settings, program-file settings
     tests/asm/run.sh      # ARM core vs C core under qemu-arm: every opcode, 12 games x 3600 frames, replays
     tests/render_compare.sh   # pixel compare against ./pocketsnes-host-ref (old renderer)
@@ -255,6 +255,19 @@ Files and launching:
   letters there; whether `~` would sort last or first is unknown, and a
   leading z is last either way. gpSP's saves folder became `zgpSP_saves`
   at the same time (agreed between the two work sessions).
+* **The OS's file list is a cached copy.** It never re-reads a folder after
+  a program renames, moves or deletes files, and a USB rename doesn't
+  update it either (USB puts and deletes only add or drop that one file,
+  with a "Document Received/Deleted" box on the calculator). After the
+  saves-folder moves the owner still saw `PocketSNES_saves`, `..cfg` and
+  old saves in `/gba`, all gone. `platform_shutdown` calls Ndless's
+  `refresh_osscr()` last (gpSP too, in `nspire_restore`). Its syscalls are
+  in Ndless's table for OS 6.4.0.74; whether it redraws the list there is
+  waiting on the first quit with 7834655.
+* **GBA zips:** PocketSNES owns `.zip`, so a GBA zip opened from My
+  Documents starts PocketSNES. Other consoles' ROMs inside a zip never
+  count as the ROM; a GBA one says "It's a GBA game: start it in gpSP."
+  (Before 7834655 the .gba ran as a SNES game and saved junk states.)
 * **File associations:** PocketSNES registers sfc, smc, fig, swc and zip
   with Ndless, and points existing PocketSNES associations at its current
   name, so opening a ROM in My Documents starts that game.
@@ -331,6 +344,11 @@ PC only, waiting for a run on the calculator (all built after 6c74b1a):
   `PocketSNES_saves` hasn't run on the calculator (PC test `docsfolder`).
   The replaced program and every file of the old folder are in
   `tests/calc/versions/2026-10-11-before-zsaves/`.
+* 7834655 (uploaded 2026-10-11 ~19:52, 446,837 bytes with the owner's
+  settings area, md5 383ac6c4…): `refresh_osscr()` at exit, the GBA zip
+  message. The program it replaced is in
+  `tests/calc/versions/2026-10-11-before-refresh/` with the 3 junk
+  Advance Wars states it had saved (deleted from the calculator).
 * Zipped ROMs, the save manager.
 * The reworked overclock test (game replay). Whether it catches the 480
   MHz freezes is unknown.
@@ -379,6 +397,7 @@ History
 | 2026-10-11 | | These notes |
 | 2026-10-11 | | Pushed to PR #10; release v4.0 updated in place with all of the above |
 | 2026-10-11 | 19a516b | Saves folder `zPocketSNES_saves`, below the game folders in My Documents (not pushed) |
+| 2026-10-11 | 7834655 | OS file list refreshed at exit; GBA zips refused (not pushed) |
 
 `git log` has the details; every commit message says what changed and why.
 
