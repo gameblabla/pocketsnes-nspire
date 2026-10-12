@@ -150,8 +150,9 @@ them much:
   never overwritten. A state takes about 35–60 KB compressed.
 
 You can pick a slot in the menu (*Save state* / *Load state*, left/right
-choose the slot). Everything a game saves goes in the `PocketSNES_saves`
-folder in My Documents (the game list doesn't show it).
+choose the slot). Everything a game saves goes in the `zPocketSNES_saves`
+folder in My Documents (the z keeps it below your game folders; the game
+list doesn't show it).
 
 Where the save made when you leave goes is up to you (menu → *Saving*):
 a new slot each time (the default), over your newest state (*New save on
@@ -174,12 +175,12 @@ none is marked. Deleting asks first.
 * **In-game saves** work in PC emulators (Snes9x, bsnes, RetroArch and
   others), which read a plain `.srm` named like the ROM. Uncompress it in
   the save manager (or switch *Compress saves* off), copy
-  `Super Mario World.sfc.srm.tns` from `PocketSNES_saves` to the PC, and
+  `Super Mario World.sfc.srm.tns` from `zPocketSNES_saves` to the PC, and
   rename it `Super Mario World.srm`, next to `Super Mario World.sfc`. A
   compressed one (`.srm.gz.tns`) works too: rename it to `.srm.gz` and
   unpack it with 7-Zip or any gzip tool.
 * **From a PC:** rename `Super Mario World.srm` to
-  `Super Mario World.srm.tns` and put it in `PocketSNES_saves` (in My
+  `Super Mario World.srm.tns` and put it in `zPocketSNES_saves` (in My
   Documents). PocketSNES takes it the next time the game starts, if the game has
   no in-game save of its own yet (otherwise it keeps the newer file).
 * **Save states** don't move to PC emulators: they're Snes9x 1.43's format
@@ -321,12 +322,14 @@ at the bottom. The arrows always work as the d-pad.
 Files
 -----
 
-In one `PocketSNES_saves` folder in My Documents, for every game wherever
-its ROM is (named so you can tell it from other emulators' saves). It
-isn't in the ROM folder, so `_PocketSNES.tns` is the first thing there (a
+In one `zPocketSNES_saves` folder in My Documents, for every game wherever
+its ROM is (named so you can tell it from other emulators' saves). The
+calculator lists folders A to Z, so the z puts it below your game folders.
+It isn't in the ROM folder, so `_PocketSNES.tns` is the first thing there (a
 folder would be listed above it). Older versions kept a hidden
 `.pocketsnes` folder (or a `PocketSNES_saves` folder) in each ROM folder,
-and their own files next to the program: those move over by themselves.
+then a `PocketSNES_saves` folder in My Documents, and their own files next
+to the program: those move over by themselves.
 Two ROMs with the same file name in different folders share their saves.
 
 | File | What |
@@ -343,7 +346,7 @@ that replaces the unzipped ROM takes over its files.
 
 **Settings for all games are kept inside `_PocketSNES.tns` itself**, in a
 small area after the program, so they go wherever the program goes. A copy
-is kept in `PocketSNES_saves`, so a new version copied over the old one
+is kept in `zPocketSNES_saves`, so a new version copied over the old one
 picks them up. That folder also has:
 
 | File | What |
@@ -446,7 +449,7 @@ The PC test build needs g++ and zlib (and SDL2's headers for a window):
 
     make                                 # makes ./pocketsnes-host
     ./pocketsnes-host                    # the game list, in a window
-    tests/run.sh                         # the test suite (80 checks)
+    tests/run.sh                         # the test suite (82 checks)
     make unit-tests                      # tile drawing, frame turning, settings
     tests/asm/run.sh                     # the ARM CPU core against the C core, under qemu-arm
 
@@ -467,7 +470,7 @@ tests.
 | `frontend/config.cpp` | settings and keys: the file for all games and each game's own |
 | `frontend/states.cpp` | save state slots and file names, in-game saves (plain or gzipped), what the save manager does |
 | `frontend/savemanager.cpp` | the save manager screen |
-| `frontend/paths.cpp` | where files go (`PocketSNES_saves`), moving older versions' files over |
+| `frontend/paths.cpp` | where files go (`zPocketSNES_saves`), moving older versions' files over |
 | `frontend/selfstore.cpp` | the settings kept inside the program file |
 | `frontend/romzip.cpp` | reading ROMs out of zips |
 | `frontend/ui.cpp`, `gui.cpp`, `draw.cpp`, `fonts.h`, `icons.h`, `keys.cpp` | the look of every screen, menu input, text and icons, key names and bindings |

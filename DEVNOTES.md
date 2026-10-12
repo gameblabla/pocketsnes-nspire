@@ -85,7 +85,7 @@ README.md → Building has the full list.
 
 ### Test (before every calculator build)
 
-    tests/run.sh          # 80 checks: scripted runs of the PC build, screenshots in tests/out/
+    tests/run.sh          # 82 checks: scripted runs of the PC build, screenshots in tests/out/
     make unit-tests       # 75 checks: tile drawing, frame turning, settings, program-file settings
     tests/asm/run.sh      # ARM core vs C core under qemu-arm: every opcode, 12 games x 3600 frames, replays
     tests/render_compare.sh   # pixel compare against ./pocketsnes-host-ref (old renderer)
@@ -104,16 +104,26 @@ than the tests do.
     nspire-link ls /snes
     nspire-link put -f _PocketSNES.tns /snes/_PocketSNES.tns
     nspire-link get /snes/_PocketSNES.tns /tmp/check.tns && md5sum /tmp/check.tns
-    nspire-link mkdir | rm | cp | shot
+    nspire-link mkdir | rm | rmdir | cp | mv | shot
 
 * Paths start at My Documents (`/snes` is My Documents/snes). Every
   uploaded name must end in `.tns`.
+* `mv` renames or moves files and whole folders in one step (it renamed
+  `/PocketSNES_saves` to `/zPocketSNES_saves` with its 21 files);
+  `rmdir` removes an empty folder. Both added 2026-10-11 (the binary before
+  them is `nspire-link.before-mv`).
+* **`ls` quirks:** never pipe it into `head`. A listing stopped partway
+  leaves the calculator's listing open, and the next `ls` of another folder
+  printed that folder's leftover entries after its own (it looked as if
+  `/snes` held every save). It also sometimes prints the first entry twice:
+  compare listings with `sort -u`. The listing order is the calculator's
+  storage order, not the file browser's.
 * **Always read an upload back and compare md5s.** Once a `get` returned
   the right length with 14 stray bytes at the front; a second `get`
   matched. Re-read before assuming the upload is bad.
 * Before replacing `_PocketSNES.tns`, read the calculator's copy first: the
   settings live inside it (below). A fresh build picks them up again from
-  `PocketSNES_saves/pocketsnes.cfg.tns`, so this only matters if that copy
+  `zPocketSNES_saves/pocketsnes.cfg.tns`, so this only matters if that copy
   is missing.
 * Keep the build being replaced: copies go in
   `~/nspire/build/pocketsnes-nspire/tests/calc/versions/` (older ones in
@@ -142,21 +152,21 @@ the calculator; running it a second time is normal.
 Files on the calculator
 -----------------------
 
-Since 2026-10-11 (3eb26f2):
+Since 2026-10-11 (3eb26f2; the z since 19a516b):
 
     My Documents/
+      ndless/ndless.cfg.tns        file associations (ext.sfc=_PocketSNES …)
       snes/
         _PocketSNES.tns            the program, first in the folder; settings for all games inside it
         Super Mario World (USA).sfc.tns
         Game.zip.tns               zipped ROMs work too
-      PocketSNES_saves/            every game's saves, wherever its ROM is
+      zPocketSNES_saves/           every game's saves, wherever its ROM is; last in My Documents
         <rom>.sv001.tns … .sv999.tns, <rom>.svauto.tns    save states
         <rom>.srm.gz.tns / <rom>.srm.tns                  in-game saves
         <rom>.cfg.tns                                     a game's own settings and keys
         game_order_snes.txt.tns                           the snes folder's game order
         pocketsnes.cfg.tns                                copy of the settings for all games
         pocketsnes_overclock.txt.tns, pocketsnes_results.txt.tns, markers
-      ndless/ndless.cfg.tns        file associations (ext.sfc=_PocketSNES …)
 
 `<rom>` is the ROM's file name without `.tns` (`Super Mario World
 (USA).sfc`). `frontend/paths.cpp` decides all of this; nothing else builds
@@ -172,7 +182,8 @@ old folders are removed.
 |---|---|
 | PocketSNES 3.0 and v4.0 | `pocketsnes.cfg.tns` and test files next to the program, saves in a hidden `.pocketsnes` folder in each ROM folder |
 | 6018db6 (never released) | `PocketSNES_saves` in each ROM folder |
-| 3eb26f2 on | one `PocketSNES_saves` in My Documents; `game_order.txt.tns` from a ROM folder becomes `game_order_<folder>.txt.tns` |
+| 3eb26f2 | one `PocketSNES_saves` in My Documents; `game_order.txt.tns` from a ROM folder becomes `game_order_<folder>.txt.tns` |
+| 19a516b on | `zPocketSNES_saves` in My Documents; the old My Documents folder moves in at program start (its game orders already have folder names) |
 
 The PC build treats the folder above the program's as My Documents
 (`--documents DIR` picks another one), which matches the calculator, where
@@ -214,7 +225,7 @@ Keys and settings:
   that key**, so an update never steals a key someone bound.
 * **Settings for all games live inside the program file** (an 8 KB
   `PSNESCFG` trailer), so they travel with it; a copy in
-  `PocketSNES_saves` carries them over to a new version copied on top.
+  `zPocketSNES_saves` carries them over to a new version copied on top.
 * Two key slots per action, key combos (hold+press), one key on several
   buttons, and per-game settings and keys.
 
@@ -236,6 +247,14 @@ Files and launching:
   PocketSNES. (First the saves moved from the hidden `.pocketsnes` to a
   visible `PocketSNES_saves` in the ROM folder; that put a folder above the
   program, so it moved to My Documents.)
+* **The saves folder is `zPocketSNES_saves`** so it's the last folder in
+  My Documents, below the game folders. As `PocketSNES_saves` the owner
+  saw it above `snes`: the browser lists folders A to Z ignoring case
+  (gbc, ndless, PocketSNES_saves, snes on the calculator), folders above
+  files. `_PocketSNES` coming first in `snes` means `_` sorts before
+  letters there; whether `~` would sort last or first is unknown, and a
+  leading z is last either way. gpSP's saves folder became `zgpSP_saves`
+  at the same time (agreed between the two work sessions).
 * **File associations:** PocketSNES registers sfc, smc, fig, swc and zip
   with Ndless, and points existing PocketSNES associations at its current
   name, so opening a ROM in My Documents starts that game.
@@ -297,30 +316,36 @@ Seen on the calculator:
 * Compressed saves: states of 35-61 KB and gzipped in-game saves
   (`.srm.gz.tns`) written on the calculator.
 
+* 3eb26f2's move (seen 2026-10-11 evening): `/snes` held only
+  `_PocketSNES.tns` and the ROMs, My Documents/`PocketSNES_saves` had the
+  21 files (`game_order_snes.txt.tns` among them), and the program had
+  grown by 8,208 bytes again with the same settings as the copy.
+* Renaming a whole folder over USB (`nspire-link mv`), 2026-10-11:
+  `/PocketSNES_saves` became `/zPocketSNES_saves` with the same 21 files.
+
 PC only, waiting for a run on the calculator (all built after 6c74b1a):
 
-* 3eb26f2 (uploaded 2026-10-11, md5 2102a026…): the move from
-  `snes/PocketSNES_saves` to My Documents/`PocketSNES_saves`, and
-  `_PocketSNES.tns` then being first in `snes`. The calculator's copy of the
-  program it replaced (with the settings inside) is in
-  `tests/calc/versions/`.
+* 19a516b (uploaded 2026-10-11 evening, 446,241 bytes = the build plus the
+  owner's settings area from the program it replaced, md5 98976401…): the
+  saves folder was renamed over USB first, so the program's own move from
+  `PocketSNES_saves` hasn't run on the calculator (PC test `docsfolder`).
+  The replaced program and every file of the old folder are in
+  `tests/calc/versions/2026-10-11-before-zsaves/`.
 * Zipped ROMs, the save manager.
 * The reworked overclock test (game replay). Whether it catches the 480
   MHz freezes is unknown.
 * Auto save slot.
 
-To check after the next calculator run: `ls /snes` (no folders, no
-`pocketsnes*.tns` files except the old `pocketsnes_asm.tns`), `ls
-/PocketSNES_saves` (20 files, `game_order_snes.txt.tns` among them), the
-old states load, the game order is kept, `_PocketSNES.tns` grows by 8,208
-bytes again once a setting is saved.
+To check after the next calculator run: `ls /` (`zPocketSNES_saves`, no
+`PocketSNES_saves`), `ls /snes` (the program and the zips only), the old
+states load from `zPocketSNES_saves` (the zips take over the `.sfc` saves on
+each game's first open), the game order is kept.
 
 Not PocketSNES's: `..cfg.tns` (64 bytes) in My Documents and in `/gba` are
 per-game settings in the older gpSP build's format (`change_ext` of an
 empty game name); the gpSP QoL build doesn't write them.
-`pocketsnes_asm.tns` (an older build) still uses `.pocketsnes`: running it
-again recreates that folder in `snes`, so it should be deleted once the new
-build is confirmed.
+`pocketsnes_asm.tns` (an older build that used `.pocketsnes`) is no longer
+on the calculator (gone by 2026-10-11 evening).
 
 
 History
@@ -353,6 +378,7 @@ History
 | 2026-10-11 | 3eb26f2 | Saves in My Documents/`PocketSNES_saves`, so `_PocketSNES.tns` is first in its folder |
 | 2026-10-11 | | These notes |
 | 2026-10-11 | | Pushed to PR #10; release v4.0 updated in place with all of the above |
+| 2026-10-11 | 19a516b | Saves folder `zPocketSNES_saves`, below the game folders in My Documents (not pushed) |
 
 `git log` has the details; every commit message says what changed and why.
 

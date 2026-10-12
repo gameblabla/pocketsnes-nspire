@@ -14,7 +14,7 @@ Playing it in a window
     ./pocketsnes-host path/to/game.sfc     # or straight into a game
 
 Settings and the game list start from the program's folder (`--exe-dir DIR`
-picks another one). Saves go in `PocketSNES_saves` in the folder above it,
+picks another one). Saves go in `zPocketSNES_saves` in the folder above it,
 which stands for the calculator's My Documents (`--documents DIR` picks
 another one). Plain `.sfc`/`.smc` files work as well as `.tns` ones.
 Calculator keys on the PC keyboard:
@@ -90,10 +90,12 @@ and stored zips play exactly like the ROM, a zip takes over the unzipped
 ROM's saves, a zip without a ROM says so), saves (gzipped and plain in-game
 saves, one from a PC emulator taken in, stored states loading back exactly,
 the save manager uncompressing and deleting), and files from older versions
-moving into `PocketSNES_saves` in My Documents (the `snesfolder` test sets
+moving into `zPocketSNES_saves` in My Documents (the `snesfolder` test sets
 out the calculator's layout, program and ROMs in one folder, and checks the
-folder has no folder left in it). `make unit-tests` also checks the settings
-kept inside the program file and *Reset all settings*.
+folder has no folder left in it; `docsfolder` moves the earlier
+My Documents/`PocketSNES_saves` over and checks it's gone).
+`make unit-tests` also checks the settings kept inside the program file
+and *Reset all settings*.
 Results and screenshots go to
 `tests/out/`. Every test starts with a settings file (so not on a "first
 start") unless it removes it.
