@@ -1,5 +1,5 @@
 /* Save state slots. A game's states live next to its in-game save, in
- * "<My Documents>/PocketSNES_saves/<ROM name>.svNNN.tns" for slots 1 to 999,
+ * "<My Documents>/zPocketSNES_saves/<ROM name>.svNNN.tns" for slots 1 to 999,
  * and "<ROM name>.svauto.tns" for the auto slot (paths.h). */
 #ifndef STATES_H
 #define STATES_H
@@ -14,7 +14,7 @@
 /* Points the slot functions at a ROM and scans its existing states. */
 void states_open_game(const char *rom_path);
 
-/* "<My Documents>/PocketSNES_saves", created on first use. */
+/* "<My Documents>/zPocketSNES_saves", created on first use. */
 const char *states_dir(void);
 void states_make_dir(void);
 /* In-game (battery) save, named the way PocketSNES 3.0 names it. */

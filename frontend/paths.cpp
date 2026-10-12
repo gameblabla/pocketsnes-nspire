@@ -134,9 +134,16 @@ static void move_folder(const char *old_dir, const char *dir)
 
 void paths_move_old_files(const char *dir, int with_program_files)
 {
-    char old_dir[600], from[900], to[900], saves[600];
+    char old_dir[600], from[900], to[900];
 
     if (with_program_files)
+    {
+        /* The saves folder before it had the z (its game orders are already
+         * named after their folders). */
+        const char *documents = platform_documents_dir();
+        snprintf(old_dir, sizeof(old_dir), "%s/%s", folder_prefix(documents), OLD_SAVE_FOLDER);
+        move_folder(old_dir, documents);
+
         for (size_t i = 0; i < sizeof(program_files) / sizeof(program_files[0]); i++)
         {
             snprintf(from, sizeof(from), "%s/%s", folder_prefix(dir), program_files[i]);
@@ -145,15 +152,13 @@ void paths_move_old_files(const char *dir, int with_program_files)
             paths_data_file(to, sizeof(to), program_files[i]);
             move_file(from, to);
         }
+    }
 
     snprintf(old_dir, sizeof(old_dir), "%s/.pocketsnes", folder_prefix(dir));
     move_folder(old_dir, dir);
-    /* The saves folder in the ROM folder, unless that's My Documents, where
-     * it is the saves folder. */
-    snprintf(old_dir, sizeof(old_dir), "%s/%s", folder_prefix(dir), SAVE_FOLDER);
-    paths_save_file(saves, sizeof(saves), "");
-    if (strcmp(old_dir, saves) != 0)
-        move_folder(old_dir, dir);
+    /* The saves folder in the ROM folder (or the old one in My Documents). */
+    snprintf(old_dir, sizeof(old_dir), "%s/%s", folder_prefix(dir), OLD_SAVE_FOLDER);
+    move_folder(old_dir, dir);
 }
 
 int paths_is_pocketsnes_name(const char *name)

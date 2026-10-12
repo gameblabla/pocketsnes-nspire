@@ -347,7 +347,7 @@ void config_load(void)
     snprintf(global.rom_dir, sizeof(global.rom_dir), "%s", platform_exe_dir());
 
     /* The settings in the program file (selfstore.h), or else the copy in
-     * PocketSNES_saves: a new version copied over the program has none in
+     * zPocketSNES_saves: a new version copied over the program has none in
      * it yet, and picks them up from there. */
     const char *program = platform_program_path();
     char *text = program ? selfstore_read(program) : NULL;
@@ -465,7 +465,7 @@ void config_save(void)
 
 void config_open_game(const char *rom_path)
 {
-    /* "PocketSNES_saves/<ROM name without its last extension>.cfg.tns",
+    /* "zPocketSNES_saves/<ROM name without its last extension>.cfg.tns",
      * next to the game's saves (states.cpp). */
     const char *slash = strrchr(rom_path, '/');
     const char *file = slash ? slash + 1 : rom_path;

@@ -41,7 +41,7 @@ int main(int argc, char **argv)
 
     if (!platform_init(&argc, argv))
         return 0;
-    /* Files from older versions into PocketSNES_saves (paths.h). */
+    /* Files from older versions into zPocketSNES_saves (paths.h). */
     paths_move_old_files(platform_exe_dir(), 1);
     config_load();
 

@@ -352,9 +352,9 @@ static int file_exists(const char *path)
 static void test_config(void)
 {
     char global_path[600], rom[600], game_path[700];
-    snprintf(global_path, sizeof(global_path), "%s/PocketSNES_saves/pocketsnes.cfg.tns", documents_dir);
+    snprintf(global_path, sizeof(global_path), "%s/zPocketSNES_saves/pocketsnes.cfg.tns", documents_dir);
     snprintf(rom, sizeof(rom), "%s/Game (USA).sfc.tns", exe_dir);
-    snprintf(game_path, sizeof(game_path), "%s/PocketSNES_saves/Game (USA).sfc.cfg.tns", documents_dir);
+    snprintf(game_path, sizeof(game_path), "%s/zPocketSNES_saves/Game (USA).sfc.cfg.tns", documents_dir);
     remove(global_path);
 
     /* Defaults with no file. */
@@ -520,7 +520,7 @@ static void test_selfstore(void)
     for (size_t i = 0; i < sizeof(program); i++)
         program[i] = (unsigned char) (i * 7 + 1);
     snprintf(program_file, sizeof(program_file), "%s/_PocketSNES.tns", exe_dir);
-    snprintf(backup, sizeof(backup), "%s/PocketSNES_saves/pocketsnes.cfg.tns", documents_dir);
+    snprintf(backup, sizeof(backup), "%s/zPocketSNES_saves/pocketsnes.cfg.tns", documents_dir);
     FILE *f = fopen(program_file, "wb");
     fwrite(program, 1, sizeof(program), f);
     fclose(f);
@@ -551,7 +551,7 @@ static void test_selfstore(void)
     fwrite(program, 1, sizeof(program), f);
     fclose(f);
     config_load();
-    CHECK(cfg.show_fps == 2 && cfg.brightness == 9, "a new program file picks up the copy in PocketSNES_saves");
+    CHECK(cfg.show_fps == 2 && cfg.brightness == 9, "a new program file picks up the copy in zPocketSNES_saves");
     config_save();
     char *text = selfstore_read(program_file);
     CHECK(text && strstr(text, "brightness=9\n"), "... and stores it in itself at the next save");

@@ -131,14 +131,14 @@ void config_default_keys(void);
 void config_reset_all(void);
 
 /* Loads the settings for all games from the program file, or else
- * pocketsnes.cfg.tns in PocketSNES_saves (missing settings get their
+ * pocketsnes.cfg.tns in zPocketSNES_saves (missing settings get their
  * defaults). */
 void config_load(void);
 /* There was no settings file to load: PocketSNES runs for the first time. */
 int  config_first_start(void);
 /* Writes the settings for all games to pocketsnes.cfg.tns, and the open
  * game's own settings and keys to its own file, "<ROM name>.cfg.tns" in
- * PocketSNES_saves (removed when it has neither). */
+ * zPocketSNES_saves (removed when it has neither). */
 void config_save(void);
 
 /* Uses a game's own settings and keys where it has them (the menu and the
