@@ -2,6 +2,8 @@
 # The ARM assembler CPU core (pocketsnes/arm) against the C core, on a PC:
 # both are built for ARM and run under qemu-arm.
 #   tests/asm/run.sh [frames]
+# 0. fx_test: the Super FX interpreters (C and ARM assembler) against the
+#    original C loop, on random instructions and programs (tests/fx_test.cpp).
 # 1. opcode_test: every opcode in emulation mode and the four M/X modes, from
 #    random registers and memory; registers, cycles and memory must match.
 # 2. game_test: games run once on each core with the same scripted input;
@@ -29,6 +31,14 @@ result() {
     if [ "$1" = pass ]; then echo "PASS  $2"; PASS=$((PASS + 1))
     else echo "FAIL  $2"; FAIL=$((FAIL + 1)); fi
 }
+
+echo "== Super FX interpreters against the original loop (random instructions and programs)"
+for which in c asm; do
+    "$QEMU" -cpu arm926 $BUILD/fx_test 40 7 $which > "$OUT/fx_$which.txt" 2>&1
+    last=$(tail -1 "$OUT/fx_$which.txt")
+    case "$last" in PASS*) r=pass ;; *) r=fail ;; esac
+    result $r "Super FX, $which: $last"
+done
 
 echo "== Opcodes (both cores, one opcode at a time)"
 for seed in 1 2; do
@@ -82,6 +92,10 @@ game ct_boot ct.sfc - start
 game alttp_boot alttp.sfc - start
 game yi_state yi.sfc yi.sv001 walk
 game yi_boot yi.sfc - start
+# Super FX demos (plotting polygons and lines; the ARM core runs the ARM
+# Super FX interpreter, the C core the C one)
+game gsu_fillpoly GSU4BPP256x192FillPoly.sfc - none
+game gsu_plotline GSU8BPP256x192PlotLine.sfc - none
 
 # The overclock test's game check (emu.cpp): from a snapshot, the same
 # frames twice must leave the same memory, on each core.

@@ -81,9 +81,24 @@ $(UNIT_TESTS): $(UNIT_OBJ) $(BUILD)/libcore.a
 unit-tests: $(UNIT_TESTS)
 	./$(UNIT_TESTS)
 
+# Super FX interpreter test (tests/fx_test.cpp): fx_run against the original
+# loop, fx_run_reference, which this build of fxinst.cpp also has.
+FX_TEST = tests/fx_test
+FX_TEST_OBJ = $(BUILD)/tests/fx_test.o $(BUILD)/fxtest/fxinst.o $(BUILD)/fxtest/fxemu.o
+
+$(BUILD)/fxtest/%.o: pocketsnes/snes9x/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CORE_FLAGS) -DFX_REFERENCE_RUN -MMD -c $< -o $@
+
+$(FX_TEST): $(FX_TEST_OBJ)
+	$(CXX) $^ -o $@
+
+fx-test: $(FX_TEST)
+	./$(FX_TEST)
+
 clean:
-	rm -rf $(BUILD) $(TARGET) $(UNIT_TESTS)
+	rm -rf $(BUILD) $(TARGET) $(UNIT_TESTS) $(FX_TEST)
 
-.PHONY: all clean unit-tests
+.PHONY: all clean unit-tests fx-test
 
--include $(CORE_OBJ:.o=.d) $(FRONTEND_OBJ:.o=.d) $(BUILD)/tests/unit_tests.d
+-include $(CORE_OBJ:.o=.d) $(FRONTEND_OBJ:.o=.d) $(BUILD)/tests/unit_tests.d $(FX_TEST_OBJ:.o=.d)

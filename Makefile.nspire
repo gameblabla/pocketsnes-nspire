@@ -25,11 +25,12 @@ BUILD_NAME ?= dev
 BENCH      ?= 0
 
 DEFINES = -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -DBUILD_NAME=\"$(BUILD_NAME)\"
-# The SNES CPU in ARM assembler (pocketsnes/arm, from psnes), chosen in the
-# menu; ARM_CPU=0 leaves it out.
+# The SNES CPU in ARM assembler (pocketsnes/arm, from psnes) and the Super FX
+# interpreter in ARM assembler (pocketsnes/arm/fx_run_arm.s), both used when
+# the menu's CPU core is ARM; ARM_CPU=0 leaves them out.
 ARM_CPU ?= 1
 ifeq ($(ARM_CPU),1)
-DEFINES += -DARM_ASM_CPU
+DEFINES += -DARM_ASM_CPU -DARM_ASM_FX
 endif
 ifeq ($(BENCH),1)
 DEFINES += -DAUTO_BENCH
@@ -56,7 +57,7 @@ FRONTEND_SRC = frontend/savemanager.cpp frontend/romzip.cpp frontend/paths.cpp f
 # The CPU clock switch, copied into the on-chip SRAM to run (platform_nspire.cpp).
 FRONTEND_ASM = frontend/clock_switch_nspire.S
 
-CORE_ASM     = pocketsnes/arm/os9x_65c816_global.s pocketsnes/arm/os9x_65c816_cpu.s
+CORE_ASM     = pocketsnes/arm/os9x_65c816_global.s pocketsnes/arm/os9x_65c816_cpu.s pocketsnes/arm/fx_run_arm.s
 CORE_OBJ     = $(patsubst %.cpp,$(BUILD)/%.o,$(CORE_SRC))
 ifeq ($(ARM_CPU),1)
 CORE_OBJ    += $(patsubst %.s,$(BUILD)/%.o,$(CORE_ASM))

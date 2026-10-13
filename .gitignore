@@ -31,3 +31,4 @@ gmon.out
 tools/clocktest/*.elf
 tools/clocktest/*.tns
 tools/clocktest/*.zehn
+tests/fx_test
