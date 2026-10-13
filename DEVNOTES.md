@@ -299,6 +299,28 @@ Emulation core:
   where the demo writes the second half of a scroll value at dot 8; the
   old build drew that line with a half-written value) and Chrono Trigger
   (one line of one loading frame that is blanked at dot 34, now blank).
+* **Each line keeps its own fixed colour** ($2132), taken with the line in
+  `RenderLine` (`LineFixedColour`), and the backdrop passes in `DrawLines`
+  use it. A $2132 write then only makes the lines above it be drawn first
+  when a layer has colour maths ($2131 & $1f) or pseudo hi-res ($2133 bit 3,
+  which now also redraws when it changes) is on, because the tile drawers
+  use one fixed colour for everything they draw. Yoshi's Island writes $2132
+  on nearly every line through HDMA (the sky) with colour maths on the
+  backdrop only, and was drawn in about 210 one-line pieces a frame; the
+  pixels are the same as before for every test game.
+* **Two Super FX interpreters.** `fx_run` in C keeps the status register,
+  the source and destination register numbers, the pipe byte and the bank
+  pointers in locals and jumps from one instruction's code to the next
+  through a table of labels (GCC's computed goto). `fx_run_arm`
+  (`pocketsnes/arm/fx_run_arm.s`) keeps them, and R15, in ARM registers. Both
+  run the rare instructions through `fx_apfOpcodeTable` (the original C
+  functions) with the state written back first. The assembler one also
+  sends any instruction that would read R15 by register number or write R14
+  (the ROM buffer) by number there, and while the source is R15 or the
+  destination R14 or R15 it uses a "careful" table that sends everything
+  there; so its own code never needs those checks. It runs with *CPU core:
+  ARM* (the C one with *C*, as a fallback). `tests/fx_test.cpp` checks both
+  against the original loop, byte for byte.
 
 
 Gotchas
@@ -422,7 +444,8 @@ History
 | 2026-10-11 | | Pushed to PR #10; release v4.0 updated in place with all of the above |
 | 2026-10-11 | 19a516b | Saves folder `zPocketSNES_saves`, below the game folders in My Documents (not pushed) |
 | 2026-10-11 | 7834655 | OS file list refreshed at exit; GBA zips refused (not pushed) |
-| 2026-10-13 | (this commit) | Yoshi's Island's top line steady: H-blank at dot 274, lines taken at dot 48 (not pushed) |
+| 2026-10-13 | ee26428 | Yoshi's Island's top line steady: H-blank at dot 274, lines taken at dot 48 (not pushed) |
+| 2026-10-13 | | Per-line fixed colour; Super FX interpreters in C and ARM assembler; `tests/calc_speed.sh` (not pushed) |
 
 `git log` has the details; every commit message says what changed and why.
 
@@ -431,6 +454,10 @@ Open items and ideas
 --------------------
 
 Waiting on the owner:
+
+* A speed test of Yoshi's Island on the calculator with the new build, to
+  check `tests/calc_speed.sh`'s estimate (64.5 fps with no speed limit from
+  the testroms save) and refit it if needed.
 
 * Run v4.0's `_PocketSNES.tns` on the calculator (uploaded 2026-10-11):
   settings, keys and saves still there; `_PocketSNES` first in `snes`; how

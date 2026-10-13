@@ -111,6 +111,69 @@ frame turning for the CX II LCD, the settings files (defaults, old files,
 key combinations, settings for one game, the CPU speed reset after a
 freeze) and the key bindings. tests/run.sh runs them first.
 
+The Super FX interpreters
+-------------------------
+
+    make fx-test                # PC: the C interpreter
+    tests/asm/run.sh            # ARM, under qemu: the C one and the ARM assembler one
+
+`tests/fx_test.cpp` runs every one of the 1024 opcode and ALT mode
+combinations as a single instruction from random GSU states (all registers,
+the B flag, banks, flags, the ROM buffer, junk in the bits above 16), and
+random programs of up to 200 instructions, once on the interpreter being
+tested and once on `fx_run_reference` (the original Snes9x loop, a call
+through `fx_apfOpcodeTable` per instruction, built only for the test), and
+compares the whole GSU struct, its RAM and the register space byte for
+byte. On ARM it tests `fx_run` (the C interpreter) and `fx_run_arm_counted`
+(the assembler one built to stop after a given number of instructions).
+Planting a bug in either interpreter (a flag, an order of reads, the ROM
+buffer, the careful table) makes it fail.
+
+Estimating the speed on the calculator
+--------------------------------------
+
+    . ~/nspire/build/env.sh
+    tests/calc_speed.sh ROM [STATE] [FRAMES] [CORE] [INPUT]
+    tests/calc_speed.sh build/asm-test/roms/yi.sfc build/asm-test/roms/yi.sv001
+
+Builds `tests/asm/game_test` with the calculator build's compiler flags,
+runs it under a qemu-arm with plugin support and `tools/calc_speed/arm926.c`
+(an ARM926EJ-S model: the pipeline's extra cycles, 16 KB / 8 KB caches, the
+write buffer; it also counts the instructions of every frame), and prints
+the ARM instructions per frame by part of the emulator (drawing, Super FX,
+CPU, PPU/DMA) and the estimated milliseconds and fps at 396 MHz. Like the
+calculator's speed test it starts from the state with no keys pressed;
+`game_test`'s `-timing` input draws every frame without printing checksums,
+and `timing_frame_mark` marks the frames.
+
+The milliseconds come from instruction counts with numbers fitted to the
+calculator's own speed tests of Super Mario World (2026-10-10, 396 MHz:
+3.70 ms per frame with nothing drawn on the ARM CPU core, 4.74 ms on the C
+core, 79.2 fps drawn with the no-tearing output): 2.58 cycles per
+instruction running the game, 2.64 drawing it, 0.63 ms more per frame, and
+2.0 ms to show a drawn frame. It reproduces those within 1%, but nothing
+else on the calculator has checked it yet: a speed test of another game
+(Yoshi's Island) would. To refit, run the speed test on the calculator, run
+the same game and state here, and solve for the four numbers (they're
+variables at the top of the script). The plugin's own cycle model didn't fit
+the calculator as well (its memory timings can't make both the C and ARM
+cores come out right), so it's only used to count.
+
+The qemu with plugins (the Ubuntu one has none) is built from source, ARM
+user mode only, without root:
+
+    mkdir -p ~/nspire/build/tools/qemu-plugins && cd ~/nspire/build/tools/qemu-plugins
+    apt-get download meson ninja-build && for f in *.deb; do dpkg-deb -x $f root; done
+    curl -LO https://download.qemu.org/qemu-10.2.1.tar.xz && tar xJf qemu-10.2.1.tar.xz
+    mkdir qemu-10.2.1/build && cd qemu-10.2.1/build
+    export PATH=$HOME/nspire/build/tools/qemu-plugins/root/usr/bin:$PATH
+    export PYTHONPATH=$HOME/nspire/build/tools/qemu-plugins/root/usr/lib/python3/dist-packages
+    ../configure --target-list=arm-linux-user --enable-plugins --disable-system --disable-docs \
+                 --disable-tools --disable-werror
+    ninja qemu-arm
+
+(glib's development files have to be installed; they were.)
+
 Drawing the same pixels as before
 ---------------------------------
 

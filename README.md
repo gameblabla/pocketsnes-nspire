@@ -193,7 +193,8 @@ Speed and overclocking
 
 On a CX II at its normal 396 MHz, Super Mario World runs at a full 60 frames
 per second with every frame drawn. Games with extra chips (Super FX like
-Yoshi's Island and Star Fox, or SA-1) are much heavier.
+Yoshi's Island and Star Fox, or SA-1) are heavier; Yoshi's Island should now
+manage 60 too (estimated on a PC, see *How it got faster*).
 
 To help a slow game:
 
@@ -370,6 +371,8 @@ What runs
 * There's no sound emulation at all, which also saves time.
 * Yoshi's Island's top line no longer flickers (fixed 2026-10-13; the
   original port and v4.0 have the flicker).
+* The Super FX interpreter in ARM assembler goes with *CPU core: ARM*; with
+  *CPU core: C* the Super FX runs on the C interpreter too.
 * ROMs can be up to 8 MB, if the calculator has the memory free.
 * Calculators without a colour screen aren't supported.
 
@@ -390,6 +393,31 @@ Measured on a CX II at 396 MHz with Super Mario World, every frame drawn:
 
 Where a frame's time went, before and now (ms, no speed limit): running the
 game 5.7 → 6.0, drawing 11.9 → 7.2, getting it on screen 2.7 → 1.8.
+
+Yoshi's Island (Super FX), from a save in its first world, estimated with
+`tests/calc_speed.sh` (a PC model of the calculator fitted to the speed
+tests above; not yet measured on the calculator):
+
+| Version | Frames per second (no speed limit) |
+|---|---:|
+| v4.0 | 34 |
+| Each line keeps its own fixed colour (so the sky no longer makes the picture be drawn a line at a time), and the Super FX interpreter rewritten in C | 59.5 |
+| The Super FX interpreter in ARM assembler (with the ARM CPU core) | 64.5 |
+
+* **The sky's colour bands.** Yoshi's Island changes the "fixed colour"
+  register on almost every line (its sky gradient). Each change used to make
+  the renderer draw everything above that line first, so the picture was
+  drawn about 210 times a frame, one line at a time, with all the work of
+  setting up each layer every time. Each line now takes its own fixed
+  colour, like its scroll positions, so the picture is drawn in a few large
+  pieces: drawing went from about 18.5 to 7.5 ms per frame.
+* **The Super FX.** Its interpreter called a function for every GSU
+  instruction and loaded and stored its registers each time. The C version
+  now keeps them in local variables and jumps straight from one
+  instruction's code to the next; the ARM assembler version keeps them in
+  ARM registers and runs the common instructions itself (the rare ones go
+  to their C function). From about 39 ARM instructions per GSU instruction
+  to 25 (C) and 17 (assembler).
 
 * **Drawing straight into the frame.** The original drew into one buffer,
   copied it to another, and then had Ndless's `lcd_blit` copy it again.
