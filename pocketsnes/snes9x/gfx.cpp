@@ -755,6 +755,14 @@ void S9xStartScreenRefresh ()
 int  S9xQueuedRenderLine = -1;
 long S9xRenderLinePos;
 
+// The fixed colour ($2132) of each line, taken with the line like its scroll
+// positions (blue << 10 | green << 5 | red). A $2132 write then needs no
+// redraw of the lines above it when only the backdrop has colour maths: the
+// backdrop passes in DrawLines read each line's own value. Yoshi's Island
+// changes the fixed colour on nearly every line (its sky) and was drawn one
+// line at a time, about 210 times a frame, before.
+uint16 LineFixedColour [240];
+
 void S9xFlushQueuedRenderLine ()
 {
     if (S9xQueuedRenderLine >= 0)
@@ -775,6 +783,8 @@ void RenderLine (uint8 C)
 {
     if (IPPU.RenderThisFrame)
 	{
+		LineFixedColour[C] = PPU.FixedColourRed | (PPU.FixedColourGreen << 5) |
+				     (PPU.FixedColourBlue << 10);
 		LineData[C].BG[0].VOffset = PPU.BG[0].VOffset + 1;
 		LineData[C].BG[0].HOffset = PPU.BG[0].HOffset;
 		LineData[C].BG[1].VOffset = PPU.BG[1].VOffset + 1;
@@ -3685,6 +3695,13 @@ static inline void FillLine16 (uint16 *p, uint16 colour, uint32 count)
 	*(uint16 *) q = colour;
 }
 
+// The fixed colour of the line drawn at row y, as a pixel
+static inline uint32 FixedColourOfLine (uint32 y)
+{
+    uint32 c = LineFixedColour [IPPU.DoubleHeightPixels ? y >> 1 : y];
+    return BUILD_PIXEL (IPPU.XB [c & 0x1f], IPPU.XB [(c >> 5) & 0x1f], IPPU.XB [c >> 10]);
+}
+
 static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 {
     uint32 black = BLACK | (BLACK << 16);
@@ -3771,8 +3788,9 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 								uint16 *q = p + pClip->Right [c][5] * x2;
 								p += pClip->Left [c][5] * x2;
 
+								uint16 fixed = (uint16) FixedColourOfLine (y);
 								while (p < q)
-									*p++ = (uint16) GFX.FixedColour;
+									*p++ = fixed;
 							}
 						}
 					}
@@ -3786,7 +3804,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 					memset (GFX.SubZBuffer + y * GFX.ZPitch, 1, IPPU.RenderedScreenWidth);
 					if (backdrop_from_sub)
 						FillLine16 ((uint16 *) (sub_screen + y * GFX.Pitch2),
-							    (uint16) GFX.FixedColour, 256 * x2);
+							    (uint16) FixedColourOfLine (y), 256 * x2);
 					
 					if (IPPU.Clip [0].Count [5])
 					{
@@ -3795,7 +3813,8 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 						// the main screen that will allow the sub-screen
 						// 'underneath' to show through.
 						
-						uint32 b = GFX.FixedColour | (GFX.FixedColour << 16);
+						uint32 fixed = FixedColourOfLine (y);
+						uint32 b = fixed | (fixed << 16);
 						uint32 *p = (uint32 *) (GFX.SubScreen + y * GFX.Pitch2);
 						uint32 *q = (uint32 *) ((uint16 *) p + IPPU.RenderedScreenWidth);
 						
@@ -3881,7 +3900,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 								register uint8 *d = GFX.ZBuffer + y * GFX.ZPitch;
 								register uint8 *s = GFX.SubZBuffer + y * GFX.ZPitch + Left;
 								register uint8 *e = d + Right;
-								uint16 back_fixed = COLOR_SUB (back, GFX.FixedColour);
+								uint16 back_fixed = COLOR_SUB (back, FixedColourOfLine (y));
 
 								d += Left;
 								while (d < e)
@@ -3910,7 +3929,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 								register uint8 *s = GFX.SubZBuffer + y * GFX.ZPitch + Left;
 								register uint8 *d = GFX.ZBuffer + y * GFX.ZPitch;
 								register uint8 *e = d + Right;
-								uint16 back_fixed = COLOR_SUB (back, GFX.FixedColour);
+								uint16 back_fixed = COLOR_SUB (back, FixedColourOfLine (y));
 								
 								d += Left;
 								while (d < e)
@@ -3939,7 +3958,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 							register uint8 *d = GFX.ZBuffer + y * GFX.ZPitch;
 							register uint8 *s = GFX.SubZBuffer + y * GFX.ZPitch + Left;
 							register uint8 *e = d + Right;
-							uint16 back_fixed = COLOR_ADD (back, GFX.FixedColour);
+							uint16 back_fixed = COLOR_ADD (back, FixedColourOfLine (y));
 							d += Left;
 							while (d < e)
 							{
@@ -3966,7 +3985,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 							register uint8 *d = GFX.ZBuffer + y * GFX.ZPitch;
 							register uint8 *s = GFX.SubZBuffer + y * GFX.ZPitch + Left;
 							register uint8 *e = d + Right;
-							uint16 back_fixed = COLOR_ADD (back, GFX.FixedColour);
+							uint16 back_fixed = COLOR_ADD (back, FixedColourOfLine (y));
 							d += Left;
 							while (d < e)
 							{
@@ -3999,6 +4018,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 								register uint8 *d = GFX.ZBuffer + y * GFX.ZPitch;
 								register uint8 *s = GFX.SubZBuffer + y * GFX.ZPitch + Left;
 								register uint8 *e = d + Right;
+								uint16 fixed = (uint16) FixedColourOfLine (y);
 								d += Left;
 								while (d < e)
 								{
@@ -4009,7 +4029,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 											if (*s != 1)
 												*p = *(p + GFX.Delta);
 											else	
-												*p = GFX.FixedColour;
+												*p = fixed;
 										}
 										else
 											*p = (uint16) back;

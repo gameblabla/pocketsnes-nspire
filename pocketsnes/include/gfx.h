@@ -104,6 +104,7 @@ void S9xQueueRenderLine (uint8 line);
 void S9xFlushQueuedRenderLine ();
 extern int  S9xQueuedRenderLine;   // the line waiting for RenderLine, or -1
 extern long S9xRenderLinePos;      // where in a line it's taken (dot 48)
+extern uint16 LineFixedColour [240];   // each line's fixed colour (BGR555)
 void S9xBuildDirectColourMaps ();
 
 // External port interface which must be implemented or initialised for each

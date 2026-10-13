@@ -797,7 +797,13 @@ void S9xSetPPU (uint8 Byte, uint16 Address)
 		  case 0x2132:
 			if (Byte != Memory.FillRAM [0x2132])
 			{
-				FLUSH_REDRAW ();
+				// Each line takes its fixed colour (RenderLine), and the
+				// backdrop passes use that. The tile drawers use one fixed
+				// colour for all the lines they draw, so the lines above
+				// must be drawn first when any layer has colour maths
+				// ($2131) or pseudo hi-res ($2133 bit 3) turns it on for all.
+				if ((Memory.FillRAM [0x2131] & 0x1f) || (Memory.FillRAM [0x2133] & 0x08))
+					FLUSH_REDRAW ();
 				// Colour data for fixed colour addition/subtraction
 				if (Byte & 0x80)
 					PPU.FixedColourBlue = Byte & 0x1f;
@@ -839,7 +845,8 @@ void S9xSetPPU (uint8 Byte, uint16 Address)
 #endif
 				//if((Byte & 1)&&(PPU.BGMode==5||PPU.BGMode==6))
 				//IPPU.Interlace=1;
-				if((Memory.FillRAM [0x2133] ^ Byte)&3)
+				// (Bit 3, pseudo hi-res, decides whether $2132 writes redraw)
+				if((Memory.FillRAM [0x2133] ^ Byte)&0x0b)
 				{
 					FLUSH_REDRAW ();
 					if((Memory.FillRAM [0x2133] ^ Byte)&2)
