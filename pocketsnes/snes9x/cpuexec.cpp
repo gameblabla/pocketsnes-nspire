@@ -464,6 +464,7 @@ void S9xDoHBlankProcessing_SFX ()
     switch (CPU.WhichEvent)
     {
 		case HBLANK_START_EVENT:
+		S9xFlushQueuedRenderLine ();
 		if (IPPU.HDMA && CPU.V_Counter <= PPU.ScreenHeight)
 			IPPU.HDMA = S9xDoHDMA (IPPU.HDMA);
 
@@ -568,7 +569,7 @@ void S9xDoHBlankProcessing_SFX ()
 		if (CPU.V_Counter >= FIRST_VISIBLE_LINE &&
 			CPU.V_Counter < PPU.ScreenHeight + FIRST_VISIBLE_LINE)
 		{
-			RenderLine (CPU.V_Counter - FIRST_VISIBLE_LINE);
+			S9xQueueRenderLine (CPU.V_Counter - FIRST_VISIBLE_LINE);
 		}
 	// Use TimerErrorCounter to skip update of SPC700 timers once
 	// every 128 updates. Needed because this section of code is called
@@ -644,6 +645,7 @@ void S9xDoHBlankProcessing_NoSFX ()
     switch (CPU.WhichEvent)
     {
 		case HBLANK_START_EVENT:
+		S9xFlushQueuedRenderLine ();
 		if (IPPU.HDMA && CPU.V_Counter <= PPU.ScreenHeight)
 			IPPU.HDMA = S9xDoHDMA (IPPU.HDMA);
 
@@ -747,7 +749,7 @@ void S9xDoHBlankProcessing_NoSFX ()
 		if (CPU.V_Counter >= FIRST_VISIBLE_LINE &&
 			CPU.V_Counter < PPU.ScreenHeight + FIRST_VISIBLE_LINE)
 		{
-			RenderLine (CPU.V_Counter - FIRST_VISIBLE_LINE);
+			S9xQueueRenderLine (CPU.V_Counter - FIRST_VISIBLE_LINE);
 		}
 	// Use TimerErrorCounter to skip update of SPC700 timers once
 	// every 128 updates. Needed because this section of code is called

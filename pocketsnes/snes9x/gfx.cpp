@@ -660,6 +660,7 @@ void S9xStartScreenRefresh ()
 
 		IPPU.RenderedFramesCount++;
 		IPPU.PreviousLine = IPPU.CurrentLine = 0;
+		S9xQueuedRenderLine = -1;
 		IPPU.MaxBrightness = PPU.Brightness;
 		IPPU.LatchedBlanking = PPU.ForcedBlanking;
 
@@ -741,6 +742,35 @@ void S9xStartScreenRefresh ()
     }
 }
 
+// RenderLine() takes a line's scroll positions and lets the line be drawn,
+// so register writes after it only change the lines below. The console
+// starts a line's pixels about 22 dots in, though: a write at the very start
+// of a line still changes it. Yoshi's Island turns the screen on at the end
+// of line 8's H-blank, and when an HDMA pushed that write a few dots into
+// line 9, line 9 stayed dark here and the top line of the picture flickered.
+// So the end of H-blank only queues the line, and it is taken at the first
+// PPU register write or redraw (VRAM and CG-RAM DMA) from dot 48 on, where
+// Snes9x 1.52 and later take each line, or at the next H-blank before HDMA
+// if nothing comes first.
+int  S9xQueuedRenderLine = -1;
+long S9xRenderLinePos;
+
+void S9xFlushQueuedRenderLine ()
+{
+    if (S9xQueuedRenderLine >= 0)
+    {
+	uint8 C = (uint8) S9xQueuedRenderLine;
+	S9xQueuedRenderLine = -1;
+	RenderLine (C);
+    }
+}
+
+void S9xQueueRenderLine (uint8 C)
+{
+    S9xFlushQueuedRenderLine ();
+    S9xQueuedRenderLine = C;
+}
+
 void RenderLine (uint8 C)
 {
     if (IPPU.RenderThisFrame)
@@ -787,6 +817,7 @@ void RenderLine (uint8 C)
 
 void S9xEndScreenRefresh ()
 {
+    S9xFlushQueuedRenderLine ();
     IPPU.HDMAStarted = FALSE;
     if (IPPU.RenderThisFrame)
 	{

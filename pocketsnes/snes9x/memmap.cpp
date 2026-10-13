@@ -3700,7 +3700,15 @@ void CMemory::ApplyROMFixes ()
 	    Settings.DaffyDuck = (strcmp (ROMName, "DAFFY DUCK: MARV MISS") == 0) ||
 		(strcmp (ROMName, "ROBOCOP VS THE TERMIN") == 0) ||
 		(strcmp (ROMName, "ROBOCOP VS TERMINATOR") == 0); //ROBOCOP VS THE TERMIN
-    Settings.HBlankStart = (256 * Settings.H_Max) / SNES_HCOUNTER_MAX;
+    // H-blank starts at dot 274 (as in Snes9x 1.52 and later), not at dot
+    // 256 where the picture ends: HDMA and the $4212 H-blank flag come
+    // there on the console. Yoshi's Island's line 8 IRQ reads $4212 at
+    // about dot 260 to wait for the next H-blank before turning the screen
+    // on; with 256, the HDMA could run first (when the IRQ came a few
+    // cycles late), the read then saw H-blank and the game waited a whole
+    // line more, so the top line of the picture flickered.
+    Settings.HBlankStart = (274 * Settings.H_Max) / SNES_HCOUNTER_MAX;
+    S9xRenderLinePos = (48 * Settings.H_Max) / SNES_HCOUNTER_MAX;
 	
 	//OAM hacks because we don't fully understand the
 	//behavior of the SNES.

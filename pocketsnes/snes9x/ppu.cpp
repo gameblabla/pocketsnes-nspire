@@ -227,6 +227,8 @@ void S9xFixColourBrightness ()
 /******************************************************************************/
 void S9xSetPPU (uint8 Byte, uint16 Address)
 {
+	if (S9xQueuedRenderLine >= 0 && CPU.Cycles >= S9xRenderLinePos)
+		S9xFlushQueuedRenderLine ();
 //    fprintf(stderr, "%03d: %02x to %04x\n", CPU.V_Counter, Byte, Address);
 	if (Address <= 0x2183)
 	{
@@ -2439,6 +2441,7 @@ static void CommonPPUReset ()
 		IPPU.ScreenColors [c] = c;
 	S9xFixColourBrightness ();
 	IPPU.PreviousLine = IPPU.CurrentLine = 0;
+	S9xQueuedRenderLine = -1;
 
 	if (Settings.ControllerOption == 0)
 		IPPU.Controller = SNES_MAX_CONTROLLER_OPTIONS - 1;
@@ -3050,6 +3053,9 @@ uint8 REGISTER_4212()
 
 void FLUSH_REDRAW ()
 {
+    // (DMA to VRAM and CG-RAM comes here without S9xSetPPU.)
+    if (S9xQueuedRenderLine >= 0 && CPU.Cycles >= S9xRenderLinePos)
+	S9xFlushQueuedRenderLine ();
     if (IPPU.PreviousLine != IPPU.CurrentLine)
     S9xUpdateScreen ();
 }

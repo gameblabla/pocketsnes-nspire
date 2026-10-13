@@ -295,6 +295,8 @@ Ideas not tried yet
   all.
 * Seen (user): Yoshi's Island (Super FX) glitches in the top rows of the
   picture, in the old build too, so it comes from the emulator core.
+  Fixed 2026-10-13 (core timing, not Super FX): see DEVNOTES.md, "Emulation
+  core".
 
 * Done 2026-10-05: only the 256x224 picture is turned; 8-word DMA bursts;
   DrawTile16 in faster C (ARM assembly could still go further).

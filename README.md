@@ -368,8 +368,8 @@ What runs
 * **S-DD1 and SPC7110 games don't run**: Star Ocean and Street Fighter Alpha
   2 (S-DD1), Far East of Eden Zero and Momotarou Dentetsu Happy (SPC7110).
 * There's no sound emulation at all, which also saves time.
-* Yoshi's Island shows glitches in the top rows of the picture. That comes
-  from the emulator core; the original port has them too.
+* Yoshi's Island's top line no longer flickers (fixed 2026-10-13; the
+  original port and v4.0 have the flicker).
 * ROMs can be up to 8 MB, if the calculator has the memory free.
 * Calculators without a colour screen aren't supported.
 
@@ -608,7 +608,6 @@ Ideas that haven't been done yet, roughly from most to least promising:
   registers so the memory can be given slower timings at higher speeds.
 * **S-DD1 and SPC7110 support** (Star Ocean, Street Fighter Alpha 2, Far East
   of Eden Zero).
-* **Yoshi's Island's top-row glitches** in the core's Super FX code.
 
 
 Credits and license

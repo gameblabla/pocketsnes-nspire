@@ -276,6 +276,30 @@ Files and launching:
 * **Number keys 1-9, 0 start the first ten games** in the game list; tab
   (or *Move in the list*) reorders; the order is kept per folder.
 
+Emulation core:
+
+* **H-blank starts at dot 274 and each line is taken at dot 48**, as in
+  Snes9x 1.52 and later (Snes9x 1.43 had H-blank, its HDMA and the $4212
+  flag at dot 256, and took a line's settings at its first cycle). This
+  fixed Yoshi's Island's top line (2026-10-13). Its IRQs at lines 6 and 8
+  wait for the next H-blank on $4212 and then switch HDMA on and the
+  screen to full brightness. Their first poll lands close to dot 256, so
+  with the old timing the IRQ's few cycles of jitter decided whether they
+  caught this line's H-blank or the next. The brightness write also
+  slipped to dot 7-10 of line 9 when the line's HDMA ran first, which the
+  console still shows on line 9 (pixels start at dot 22). In 400 frames
+  the first picture line was lit in 124 and dark in 276; the sky's colour
+  bands also jumped a line in about 4% of frames (HDMA switched on a line
+  late). Both changes are needed (each alone still flickers). A register
+  write before dot 48 now changes the line it's in: the end of H-blank
+  queues the line (`S9xQueueRenderLine`), and it's taken at the first PPU
+  register write or VRAM/CG-RAM flush from dot 48 on, or at the next
+  H-blank before HDMA. Against the old build, every test game and demo is
+  pixel-identical except Yoshi's Island, the Rings demo (the first line,
+  where the demo writes the second half of a scroll value at dot 8; the
+  old build drew that line with a half-written value) and Chrono Trigger
+  (one line of one loading frame that is blanked at dot 34, now blank).
+
 
 Gotchas
 -------
@@ -398,6 +422,7 @@ History
 | 2026-10-11 | | Pushed to PR #10; release v4.0 updated in place with all of the above |
 | 2026-10-11 | 19a516b | Saves folder `zPocketSNES_saves`, below the game folders in My Documents (not pushed) |
 | 2026-10-11 | 7834655 | OS file list refreshed at exit; GBA zips refused (not pushed) |
+| 2026-10-13 | (this commit) | Yoshi's Island's top line steady: H-blank at dot 274, lines taken at dot 48 (not pushed) |
 
 `git log` has the details; every commit message says what changed and why.
 
@@ -420,7 +445,7 @@ Ideas, most promising first (see README → Future steps):
   directly for I/O.
 * Profile-guided optimisation.
 * SRAM rendering again, leaving the first 32 KB alone.
-* S-DD1 and SPC7110 chips; Yoshi's Island's top-row glitch (Super FX code).
+* S-DD1 and SPC7110 chips.
 
 
 Researched, not built
