@@ -32,3 +32,4 @@ tools/clocktest/*.elf
 tools/clocktest/*.tns
 tools/clocktest/*.zehn
 tests/fx_test
+tests/__pycache__/

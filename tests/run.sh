@@ -31,6 +31,8 @@ for path in PPU/Mode7/RotZoom/RotZoom.sfc PPU/Mode7/Perspective/Perspective.sfc 
         { echo "couldn't download $name"; exit 1; }
 done
 [ -f "$ROMS/SramWrite.sfc" ] || python3 tests/make_sram_rom.py "$ROMS/SramWrite.sfc"
+[ -f "$ROMS/SDD1Test.sfc" ] && [ "$ROMS/SDD1Test.sfc" -nt tests/make_sdd1_rom.py ] ||
+    python3 tests/make_sdd1_rom.py "$ROMS/SDD1Test.sfc"
 
 # setup NAME ROM [config lines...]: a fake calculator folder layout in $OUT/NAME,
 # with a settings file (just "config_version=2" if no lines are given), so
@@ -369,6 +371,22 @@ play storedrt tests/scripts/roundtrip.txt MonsterFarmJump.sfc
 d=$OUT/storedrt/shots
 check "$(same "$d/A.png" "$d/B.png")$(flags "$OUT/storedrt/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns")" same01 \
     "with Compress saves off a state is stored as it is, and loads back exactly"
+
+echo "== S-DD1 (Star Ocean, Street Fighter Alpha 2)"
+# backdrop NAME: green, red or other, from the centre of shots/end.png
+backdrop() {
+    python3 -c "
+from PIL import Image
+p = Image.open('$OUT/$1/shots/end.png').convert('RGB').getpixel((160, 120))
+print('green' if p[1] > 200 and p[0] < 50 else 'red' if p[0] > 200 and p[1] < 50 else 'other')" 2>/dev/null || echo none
+}
+setup sdd1 SDD1Test.sfc config_version=3 show_fps=0 save_on_exit=1 load_on_start=0
+play sdd1 tests/scripts/wait_shot_quit.txt SDD1Test.sfc
+check "$(backdrop sdd1)" green "the S-DD1 test cartridge passes (bank registers, 8 decompressing DMAs, \$4801 cleared)"
+mv "$OUT/sdd1/shots/end.png" "$OUT/sdd1/shots/first.png"
+sed -i 's/^load_on_start=0$/load_on_start=1/' "$OUT/sdd1/zPocketSNES_saves/pocketsnes.cfg.tns"
+play sdd1 tests/scripts/wait_shot_quit.txt SDD1Test.sfc
+check "$(backdrop sdd1)" green "loading its state on a fresh start puts the S-DD1 banks back"
 
 echo "== Menu"
 setup menu MonsterFarmJump.sfc config_version=2

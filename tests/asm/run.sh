@@ -96,6 +96,8 @@ game yi_boot yi.sfc - start
 # Super FX interpreter, the C core the C one)
 game gsu_fillpoly GSU4BPP256x192FillPoly.sfc - none
 game gsu_plotline GSU8BPP256x192PlotLine.sfc - none
+# S-DD1 test cartridge (tests/make_sdd1_rom.py)
+game sdd1 SDD1Test.sfc - none
 
 # The overclock test's game check (emu.cpp): from a snapshot, the same
 # frames twice must leave the same memory, on each core.

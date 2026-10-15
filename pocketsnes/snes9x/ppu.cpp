@@ -1960,6 +1960,17 @@ void S9xSetCPU (uint8 byte, uint16 Address)
 #endif
 			break;
 
+		  case 0x4804:
+		  case 0x4805:
+		  case 0x4806:
+		  case 0x4807:
+			// S-DD1: which megabyte of the ROM banks c0-cf, d0-df, e0-ef
+			// and f0-ff show ($4800 and $4801, the DMA channels that
+			// decompress, only need keeping in FillRAM, below)
+			if (Settings.SDD1)
+				S9xSetSDD1MemoryMap (Address - 0x4804, byte & 7);
+			break;
+
 		  default:
 #ifdef DEBUGGER
 			missing.unknowncpu_write = Address;
