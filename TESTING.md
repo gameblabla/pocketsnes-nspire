@@ -111,6 +111,22 @@ frame turning for the CX II LCD, the settings files (defaults, old files,
 key combinations, settings for one game, the CPU speed reset after a
 freeze) and the key bindings. tests/run.sh runs them first.
 
+The S-DD1 test cartridge
+------------------------
+
+`tests/make_sdd1_rom.py` writes `tests/roms/SDD1Test.sfc` (tests/run.sh does,
+when it's missing or older than the script): a 2 MB cartridge with an S-DD1
+header that checks the bank registers ($4804-$4807, reading through banks
+c0-ff), decompresses eight streams (every bit plane and context mode, 1 to
+65536 bytes) by DMA into WRAM and compares them with the expected bytes,
+checks that $4801 is clear afterwards, and then keeps checking the banks.
+The backdrop is green when all of that passed, red when something failed
+(WRAM $0000 holds which test). The expected bytes come from the script's own
+S-DD1 decompressor, written for the test from the algorithm's description,
+not from the emulator's. run.sh plays it, and plays it again loading the
+state it saved when it closed (which only stays green if loading a state
+restores the S-DD1 banks); tests/asm/run.sh plays it on both CPU cores.
+
 The Super FX interpreters
 -------------------------
 

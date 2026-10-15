@@ -308,6 +308,15 @@ Emulation core:
   on nearly every line through HDMA (the sky) with colour maths on the
   backdrop only, and was drawn in about 210 one-line pieces a frame; the
   pixels are the same as before for every test game.
+* **S-DD1 is on** (`SDD1_DECOMP` in `pocketsnes/linux/port.h`; the port had
+  it commented out and `sdd1.cpp`/`sdd1emu.cpp` in `unused/`). $4804-$4807
+  map a megabyte of ROM into banks c0-ff (`S9xSetSDD1MemoryMap`), a DMA with
+  a fixed source address while $4801 is set gets `SDD1_decompress`'s output
+  instead of the ROM, and loading a state now puts the banks back
+  (`S9xSDD1PostLoadState`, which Snes9x 1.43 and snes9x2005 have but never
+  call). `sdd1emu.cpp` gives the same bytes as bsnes's decompressor for
+  3000 random streams (checked once, in a scratch harness, not kept: bsnes
+  is GPL) and as `tests/make_sdd1_rom.py`'s own decompressor.
 * **Two Super FX interpreters.** `fx_run` in C keeps the status register,
   the source and destination register numbers, the pipe byte and the bank
   pointers in locals and jumps from one instruction's code to the next
@@ -445,7 +454,8 @@ History
 | 2026-10-11 | 19a516b | Saves folder `zPocketSNES_saves`, below the game folders in My Documents (not pushed) |
 | 2026-10-11 | 7834655 | OS file list refreshed at exit; GBA zips refused (not pushed) |
 | 2026-10-13 | ee26428 | Yoshi's Island's top line steady: H-blank at dot 274, lines taken at dot 48 (not pushed) |
-| 2026-10-13 | | Per-line fixed colour; Super FX interpreters in C and ARM assembler; `tests/calc_speed.sh` (not pushed) |
+| 2026-10-13 | 84f8ed7..05b6cf7 | Per-line fixed colour; Super FX interpreters in C and ARM assembler; `tests/calc_speed.sh` (not pushed) |
+| 2026-10-14 | | S-DD1 (Star Ocean, Street Fighter Alpha 2) and its test cartridge (not pushed) |
 
 `git log` has the details; every commit message says what changed and why.
 
@@ -472,7 +482,9 @@ Ideas, most promising first (see README → Future steps):
   directly for I/O.
 * Profile-guided optimisation.
 * SRAM rendering again, leaving the first 32 KB alone.
-* S-DD1 and SPC7110 chips.
+* The SPC7110 chip.
+* Star Ocean and Street Fighter Alpha 2 themselves (only the S-DD1 test
+  cartridge has run).
 
 
 Researched, not built

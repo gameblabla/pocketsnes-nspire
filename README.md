@@ -364,10 +364,14 @@ What runs
 ---------
 
 * Most SNES games run, including ones with DSP-1, DSP-2, Super FX, SA-1,
-  C4, OBC1 and Seta chips (the heavy ones slowly). SA-1 games run on the C
-  CPU core whatever *CPU core* says.
-* **S-DD1 and SPC7110 games don't run**: Star Ocean and Street Fighter Alpha
-  2 (S-DD1), Far East of Eden Zero and Momotarou Dentetsu Happy (SPC7110).
+  S-DD1, C4, OBC1 and Seta chips (the heavy ones slowly). SA-1 games run on
+  the C CPU core whatever *CPU core* says.
+* **S-DD1 games** (Star Ocean, Street Fighter Alpha 2) run since 2026-10-14:
+  their graphics decompression is emulated. Star Ocean is a 6 MB ROM, so it
+  needs that much free memory on the calculator. Not tried with the real
+  games yet; a test cartridge checks the chip (TESTING.md).
+* **SPC7110 games don't run**: Far East of Eden Zero and Momotarou Dentetsu
+  Happy.
 * There's no sound emulation at all, which also saves time.
 * Yoshi's Island's top line no longer flickers (fixed 2026-10-13; the
   original port and v4.0 have the flicker).
@@ -634,8 +638,7 @@ Ideas that haven't been done yet, roughly from most to least promising:
   no known way yet to make it run well. Picking it up again would take
   something concrete, such as working out the memory controller's timing
   registers so the memory can be given slower timings at higher speeds.
-* **S-DD1 and SPC7110 support** (Star Ocean, Street Fighter Alpha 2, Far East
-  of Eden Zero).
+* **SPC7110 support** (Far East of Eden Zero, Momotarou Dentetsu Happy).
 
 
 Credits and license
