@@ -3680,6 +3680,39 @@ static void S9xDisplayString_text (const char *string)
  * in interlaced modes 5 and 6) into GFX.Screen and its depth and sub screen
  * buffers: everything S9xUpdateScreen does that works line by line. */
 /* Sets 'count' pixels from p on to 'colour', two at a time where it can. */
+#ifdef ARM_ASM_GFX
+/* pocketsnes/arm/gfx_arm.s: bytes (a multiple of 4) from p (word-aligned)
+ * set to pattern, with 8-word stores; used with the ARM CPU core setting */
+extern "C" void FillWords (void *p, uint32 pattern, uint32 bytes);
+#endif
+
+/* count bytes of a depth buffer from p set to depth */
+static inline void FillDepth (uint8 *p, uint8 depth, uint32 count)
+{
+#ifdef ARM_ASM_GFX
+    if (Settings.AsmCPU && !(((uintptr_t) p | count) & 3))
+    {
+	FillWords (p, depth * 0x01010101u, count);
+	return;
+    }
+#endif
+    memset (p, depth, count);
+}
+
+/* words words from p set to pattern */
+static inline void FillPattern (uint32 *p, uint32 pattern, uint32 words)
+{
+#ifdef ARM_ASM_GFX
+    if (Settings.AsmCPU)
+    {
+	FillWords (p, pattern, words * 4);
+	return;
+    }
+#endif
+    for (; words != 0; words--)
+	*p++ = pattern;
+}
+
 static inline void FillLine16 (uint16 *p, uint16 colour, uint32 count)
 {
     uint32 pair = colour | ((uint32) colour << 16);
@@ -3688,6 +3721,15 @@ static inline void FillLine16 (uint16 *p, uint16 colour, uint32 count)
 	*p++ = colour;
 	count--;
     }
+#ifdef ARM_ASM_GFX
+    if (Settings.AsmCPU)
+    {
+	FillWords (p, pair, (count & ~1u) * 2);
+	if (count & 1)
+	    p [count - 1] = colour;
+	return;
+    }
+#endif
     uint32 *q = (uint32 *) p;
     for (; count >= 2; count -= 2)
 	*q++ = pair;
@@ -3759,8 +3801,8 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 				// Colour window enabled.
 				for (uint32 y = starty; y <= endy; y++)
 				{
-					ZeroMemory (GFX.SubZBuffer + y * GFX.ZPitch, IPPU.RenderedScreenWidth);
-					ZeroMemory (GFX.ZBuffer + y * GFX.ZPitch, IPPU.RenderedScreenWidth);
+					FillDepth (GFX.SubZBuffer + y * GFX.ZPitch, 0, IPPU.RenderedScreenWidth);
+					FillDepth (GFX.ZBuffer + y * GFX.ZPitch, 0, IPPU.RenderedScreenWidth);
 
 					if (IPPU.Clip [0].Count [5])
 					{
@@ -3800,8 +3842,8 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 			{
 				for (uint32 y = starty; y <= endy; y++)
 				{
-					ZeroMemory (GFX.ZBuffer + y * GFX.ZPitch, IPPU.RenderedScreenWidth);
-					memset (GFX.SubZBuffer + y * GFX.ZPitch, 1, IPPU.RenderedScreenWidth);
+					FillDepth (GFX.ZBuffer + y * GFX.ZPitch, 0, IPPU.RenderedScreenWidth);
+					FillDepth (GFX.SubZBuffer + y * GFX.ZPitch, 1, IPPU.RenderedScreenWidth);
 					if (backdrop_from_sub)
 						FillLine16 ((uint16 *) (sub_screen + y * GFX.Pitch2),
 							    (uint16) FixedColourOfLine (y), 256 * x2);
@@ -4128,20 +4170,14 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 			else
 			{
 				for (uint32 y = starty; y <= endy; y++)
-				{
-					uint32 *p = (uint32 *) (GFX.Screen + y * GFX.Pitch2);
-					uint32 *q = (uint32 *) ((uint16 *) p + IPPU.RenderedScreenWidth);
-					while (p < q)
-						*p++ = back;
-				}
+					FillPattern ((uint32 *) (GFX.Screen + y * GFX.Pitch2), back,
+						     IPPU.RenderedScreenWidth / 2);
 			}
 
 			if (!PPU.ForcedBlanking)
 			{
 				for (uint32 y = starty; y <= endy; y++)
-				{
-					ZeroMemory (GFX.ZBuffer + y * GFX.ZPitch, IPPU.RenderedScreenWidth);
-				}
+					FillDepth (GFX.ZBuffer + y * GFX.ZPitch, 0, IPPU.RenderedScreenWidth);
 				GFX.DB = GFX.ZBuffer;
 				RenderScreen (GFX.Screen, FALSE, TRUE, SUB_SCREEN_DEPTH);
 			}

@@ -94,6 +94,8 @@
 #include "gfx.h"
 #include "tile.h"
 
+#include <stddef.h>	/* offsetof */
+
 static uint8 ConvertTile (uint8 *pCache, uint32 TileAddr)
 {
     register uint8 *tp = &Memory.VRAM[TileAddr];
@@ -773,6 +775,40 @@ static inline void DrawTileLine16Flipped (uint16 *__restrict Screen, uint8 *__re
 	TILE16_PIXEL (7, A & 0xff)
 }
 
+#ifdef ARM_ASM_GFX
+/* DrawTileLines16 in ARM assembler (pocketsnes/arm/gfx_arm.s), used with
+ * the ARM CPU core setting: [(Tile >> 14) & 3] by the flips (H_FLIP is bit
+ * 14, V_FLIP bit 15), and 4 on from there the clipped ones, with the masks.
+ * bp is the first line to draw; the others follow it in the cache (go back
+ * from it when flipped vertically). */
+typedef void (*TileLines16Asm) (uint16 *Screen, uint8 *Depth, const uint8 *bp,
+				const uint16 *ScreenColors, uint32 LineCount,
+				uint32 MaskA, uint32 MaskB);
+extern "C"
+{
+	void DrawTileLines16_n (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_h (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_v (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_hv (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_nm (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_hm (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_vm (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_hvm (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+}
+static const TileLines16Asm DrawTileLines16Asm [8] = {
+	DrawTileLines16_n, DrawTileLines16_h, DrawTileLines16_v, DrawTileLines16_hv,
+	DrawTileLines16_nm, DrawTileLines16_hm, DrawTileLines16_vm, DrawTileLines16_hvm
+};
+
+/* What gfx_arm.s reads from GFX (its GFX_ offsets) */
+#define TILE_CHECK_OFFSET(field, offset) \
+	static_assert (offsetof (struct SGFX, field) == (offset), \
+		       "SGFX." #field " moved: update pocketsnes/arm/gfx_arm.s")
+TILE_CHECK_OFFSET (PPL, 48);
+TILE_CHECK_OFFSET (Z1, 72);
+TILE_CHECK_OFFSET (Z2, 73);
+#endif
+
 /* Draws LineCount lines of the tile's cached pixels from bp (stepping by
  * Step bytes a line), with the words masked by MaskA and MaskB (pixel order,
  * see above). */
@@ -803,6 +839,15 @@ void DrawTile16 (uint32 Tile, uint32 Offset, uint32 StartLine,
 
 	uint16 *Screen = (uint16 *) GFX.S + (int32) Offset;
 	uint8 *Depth = GFX.DB + (int32) Offset;
+#ifdef ARM_ASM_GFX
+	if (Settings.AsmCPU)
+	{
+		DrawTileLines16Asm [(Tile >> 14) & 3] (Screen, Depth,
+			pCache + ((Tile & V_FLIP) ? 56 - StartLine : StartLine),
+			ScreenColors, LineCount, 0xffffffff, 0xffffffff);
+		return;
+	}
+#endif
 	if (Tile & V_FLIP)
 		DrawTileLines16 (Screen, Depth, pCache + 56 - StartLine, -8, LineCount,
 				 (Tile & H_FLIP) != 0, 0xffffffff, 0xffffffff, ScreenColors);
@@ -831,6 +876,15 @@ void DrawClippedTile16 (uint32 Tile, uint32 Offset,
 
 	uint16 *Screen = (uint16 *) GFX.S + (int32) Offset;
 	uint8 *Depth = GFX.DB + (int32) Offset;
+#ifdef ARM_ASM_GFX
+	if (Settings.AsmCPU)
+	{
+		DrawTileLines16Asm [4 + ((Tile >> 14) & 3)] (Screen, Depth,
+			pCache + ((Tile & V_FLIP) ? 56 - StartLine : StartLine),
+			ScreenColors, LineCount, MaskA, MaskB);
+		return;
+	}
+#endif
 	if (Tile & V_FLIP)
 		DrawTileLines16 (Screen, Depth, pCache + 56 - StartLine, -8, LineCount,
 				 (Tile & H_FLIP) != 0, MaskA, MaskB, ScreenColors);

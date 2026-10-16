@@ -4,12 +4,17 @@
 #   tests/asm/run.sh [frames]
 # 0. fx_test: the Super FX interpreters (C and ARM assembler) against the
 #    original C loop, on random instructions and programs (tests/fx_test.cpp).
+#    tile_test: the tile drawers (C and, with the ARM core setting, ARM
+#    assembler) against Snes9x 1.43's, on random tiles (tests/asm/tile_test.cpp).
 # 1. opcode_test: every opcode in emulation mode and the four M/X modes, from
 #    random registers and memory; registers, cycles and memory must match.
-# 2. game_test: games run once on each core with the same scripted input;
-#    every frame's RAM, VRAM, palette, sprites, I/O registers, picture and
-#    registers must match. Uses the homebrew demos tests/run.sh downloads and,
-#    if they are there, the commercial ROMs in ~/nspire/build/testroms.
+# 2. game_test: games run once on each core setting with the same scripted
+#    input; every frame's RAM, VRAM, palette, sprites, I/O registers, picture
+#    and registers must match. The ARM core setting also uses the ARM Super
+#    FX interpreter, tile drawers and line fills and the word-at-a-time VRAM
+#    DMA loop, so those are checked against the C ones too. Uses the
+#    homebrew demos tests/run.sh downloads and, if they are there, the
+#    commercial ROMs in ~/nspire/build/testroms.
 # Needs the Ndless toolchain (. ~/nspire/build/env.sh) and qemu-arm (QEMU=,
 # by default the one unpacked in ~/nspire/build/tools/qemu).
 set -u
@@ -39,6 +44,12 @@ for which in c asm; do
     case "$last" in PASS*) r=pass ;; *) r=fail ;; esac
     result $r "Super FX, $which: $last"
 done
+
+echo "== Tile drawers (C and ARM assembler) against Snes9x 1.43's, on random tiles"
+"$QEMU" -cpu arm926 $BUILD/tile_test 20000 1 > "$OUT/tiles.txt" 2>&1
+last=$(tail -1 "$OUT/tiles.txt")
+case "$last" in PASS*) r=pass ;; *) r=fail ;; esac
+result $r "tiles: $(tail -2 "$OUT/tiles.txt" | head -1)"
 
 echo "== Opcodes (both cores, one opcode at a time)"
 for seed in 1 2; do
