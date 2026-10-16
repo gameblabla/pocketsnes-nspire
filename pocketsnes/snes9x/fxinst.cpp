@@ -1604,6 +1604,7 @@ static void fx_sm_r15() { FX_SM(15); }
     static_assert (offsetof (struct FxRegs_s, field) == (offset), \
 		   "FxRegs_s." #field " moved: update pocketsnes/arm/fx_run_arm.s")
 FX_CHECK_OFFSET (avReg, 0);
+FX_CHECK_OFFSET (vColorReg, 64);
 FX_CHECK_OFFSET (vPlotOptionReg, 68);
 FX_CHECK_OFFSET (vStatusReg, 72);
 FX_CHECK_OFFSET (vLastRamAdr, 96);
@@ -1616,6 +1617,9 @@ FX_CHECK_OFFSET (vZero, 120);
 FX_CHECK_OFFSET (vCarry, 124);
 FX_CHECK_OFFSET (vOverflow, 128);
 FX_CHECK_OFFSET (pvRegisters, 140);
+FX_CHECK_OFFSET (apvScreen, 172);
+FX_CHECK_OFFSET (x, 300);
+FX_CHECK_OFFSET (vScreenHeight, 428);
 FX_CHECK_OFFSET (pvRamBank, 444);
 FX_CHECK_OFFSET (pvRomBank, 448);
 FX_CHECK_OFFSET (pvPrgBank, 452);
@@ -1624,7 +1628,7 @@ extern "C"
 {
     void fx_run_arm (void);
     extern uint32 fx_arm_handlers [];
-    extern uint32 fx_arm_tables [2048];
+    extern uint32 fx_arm_tables [3072];
 }
 #endif
 
@@ -1640,16 +1644,19 @@ enum FxArmHandler
     H_IBT, H_IBT_R14, H_IBT_R15, H_LMS, H_LMS_R14, H_SMS,
     H_FROM, H_INC, H_INC_R14, H_DEC, H_DEC_R14,
     H_GETB, H_IWT, H_IWT_R14, H_IWT_R15, H_LM, H_LM_R14, H_SM,
-    H_COUNT
+    H_PLOT4, H_MERGE, H_COLOR, H_TO_R14, H_WITH_R14,
+    H_COUNT	/* (then the same list again, the R14 table's versions) */
 };
 
-/* Fills an interpreter's two tables (1024 handler addresses each, ALT mode
- * << 8 | opcode): the fast one, and the careful one that runs everything but
- * stop through fx_apfOpcodeTable. Instructions that would read R15 by
- * register number, write R14 by number, or make R15 the source or R14 or R15
- * the destination run through the table even in the fast one (handler
- * H_SLOW), as do plot, rpix, cache, color, cmode, merge, sbk, div2, ljmp,
- * fmult, lmult, getc, ramb, romb, getbh, getbl and getbs. */
+/* Fills an interpreter's three tables (1024 handler addresses each, ALT mode
+ * << 8 | opcode): the fast one; the careful one, for a source or
+ * destination of R15, which runs everything but stop through
+ * fx_apfOpcodeTable; and the R14 one, for a destination of R14, with the
+ * handlers' versions that reload the ROM buffer (handlers [H_COUNT + h]).
+ * Instructions that would read or write R15 by register number run through
+ * the C table (H_SLOW) from every table, as do rpix, cache, cmode, sbk, div2,
+ * ljmp, fmult, lmult, getc, ramb, romb, getbh, getbl, getbs, and plot unless
+ * fx_arm_plot_entries says otherwise. */
 extern "C" void fx_arm_setup_tables (uint32 *tables, const uint32 *handlers)
 {
     static const struct { uint8 first, last, alts, handler; } map[] =
@@ -1685,18 +1692,32 @@ extern "C" void fx_arm_setup_tables (uint32 *tables, const uint32 *handlers)
 	{ 0xe0, 0xed, 15, H_DEC }, { 0xee, 0xee, 15, H_DEC_R14 }, { 0xef, 0xef, 1, H_GETB },
 	{ 0xf0, 0xfd, 1, H_IWT }, { 0xfe, 0xfe, 1, H_IWT_R14 }, { 0xff, 0xff, 1, H_IWT_R15 },
 	{ 0xf0, 0xfd, 10, H_LM }, { 0xfe, 0xfe, 10, H_LM_R14 }, { 0xf0, 0xfe, 4, H_SM },
+	{ 0x70, 0x70, 15, H_MERGE }, { 0x4e, 0x4e, 5, H_COLOR },
+	{ 0x1e, 0x1e, 15, H_TO_R14 }, { 0x2e, 0x2e, 15, H_WITH_R14 },
     };
-    uint32 *fast = tables, *careful = tables + 1024;
-    for (int i = 0; i < 1024; i++)
-    {
-	fast [i] = handlers [H_SLOW];
-	careful [i] = handlers [(i & 0xff) == 0 ? H_STOP : H_SLOW];
-    }
+    uint8 handler [1024];
+    memset (handler, H_SLOW, sizeof handler);
     for (unsigned m = 0; m < sizeof map / sizeof map [0]; m++)
 	for (int alt = 0; alt < 4; alt++)
 	    if (map [m].alts & (1 << alt))
 		for (int o = map [m].first; o <= map [m].last; o++)
-		    fast [(alt << 8) | o] = handlers [map [m].handler];
+		    handler [(alt << 8) | o] = map [m].handler;
+    uint32 *fast = tables, *careful = tables + 1024, *r14 = tables + 2048;
+    for (int i = 0; i < 1024; i++)
+    {
+	fast [i] = handlers [handler [i]];
+	careful [i] = handlers [(i & 0xff) == 0 ? H_STOP : H_SLOW];
+	r14 [i] = handlers [H_COUNT + handler [i]];
+    }
+}
+
+/* plot (4c, ALT0 and ALT2) in assembler for the 4-bit colour modes, which
+ * fx_readRegisterSpace has set fx_apfOpcodeTable to before each run. */
+extern "C" void fx_arm_plot_entries (uint32 *tables, const uint32 *handlers)
+{
+    int h = fx_apfOpcodeTable [0x04c] == &fx_plot_4bit ? H_PLOT4 : H_SLOW;
+    tables [0x04c] = tables [0x24c] = handlers [h];
+    tables [2048 + 0x04c] = tables [2048 + 0x24c] = handlers [H_COUNT + h];
 }
 
 /*** GSU executions functions ***/
@@ -1735,6 +1756,7 @@ void fx_run(uint32 nInstructions)
     {
 	if (!fx_arm_tables [0])
 	    fx_arm_setup_tables (fx_arm_tables, fx_arm_handlers);
+	fx_arm_plot_entries (fx_arm_tables, fx_arm_handlers);
 	fx_run_arm ();
 	return;
     }

@@ -29,8 +29,9 @@ extern "C"
 {
     void fx_run_arm_counted (uint32 nInstructions);
     extern uint32 fx_arm_handlers_counted [];
-    extern uint32 fx_arm_tables_counted [2048];
+    extern uint32 fx_arm_tables_counted [3072];
     void fx_arm_setup_tables (uint32 *tables, const uint32 *handlers);
+    void fx_arm_plot_entries (uint32 *tables, const uint32 *handlers);
 }
 #endif
 #include "fxemu.h"
@@ -38,7 +39,9 @@ extern "C"
 
 extern struct FxRegs_s GSU;
 void fx_run_reference(uint32 nInstructions);
+void fx_computeScreenPointers ();
 static void (*run_new) (uint32) = fx_run;
+static bool asm_counted;
 
 #define ROM_SIZE (0x600000)
 #define RAM_SIZE (0x20000)
@@ -110,6 +113,17 @@ static void random_state(uint32 op_index, bool single)
     GSU.pvRomBank = GSU.apvRomBank[GSU.vRomBankReg];
     GSU.vRamBankReg = rnd() & 3;
     GSU.pvRamBank = GSU.apvRamBank[GSU.vRamBankReg];
+    /* A screen mode and height, as fx_readRegisterSpace sets them (plot and
+     * rpix through the table, the screen's pointers for them) */
+    if (rnd() % 4 == 0)
+    {
+	static const uint32 heights[] = { 128, 160, 192, 256 };
+	GSU.vMode = rnd() & 3;
+	GSU.vScreenHeight = GSU.vScreenRealHeight = heights[rnd() & 3];
+	fx_apfOpcodeTable[0x24c] = fx_apfOpcodeTable[0x04c] = fx_apfPlotTable[GSU.vMode];
+	fx_apfOpcodeTable[0x14c] = fx_apfOpcodeTable[0x34c] = fx_apfPlotTable[GSU.vMode + 5];
+	fx_computeScreenPointers();
+    }
     GSU.vCacheBaseReg = rnd() & 0xfff0;
     GSU.bCacheActive = rnd() & 1;
     GSU.pvRegisters[GSU_CFGR] = rnd();
@@ -125,7 +139,8 @@ static uint8 random_opcode()
 {
     static const uint8 common[] = {
 	0x01, 0x03, 0x04, 0x05, 0x08, 0x09, 0x0a, 0x0c, 0x0d, 0x3c, 0x3d, 0x3e, 0x3f, 0x95, 0x96, 0x97,
-	0x9e, 0x9f, 0xc0, 0x4d, 0x4f, 0x70, 0x90, 0x91, 0x4e, 0xdf, 0xef };
+	0x9e, 0x9f, 0xc0, 0x4d, 0x4f, 0x70, 0x90, 0x91, 0x4e, 0xdf, 0xef, 0x4c, 0x4c, 0x70, 0x4e,
+	0x1e, 0x2e };
     uint32 k = rnd() % 16;
     if (k < 3)
 	return 0x10 + (rnd() % 0x30);		/* to, with, stw/stb */
@@ -141,6 +156,15 @@ static uint8 random_opcode()
     if (op == 0x00 && rnd() % 4)		/* stop now and then */
 	op = 0x01;
     return op;
+}
+
+/* What fx_run does before running the assembler interpreter */
+static void plot_entries()
+{
+#ifdef ARM_ASM_FX
+    if (asm_counted)
+	fx_arm_plot_entries(fx_arm_tables_counted, fx_arm_handlers_counted);
+#endif
 }
 
 static uint8 *program_at(uint32 r15)
@@ -230,6 +254,7 @@ int main(int argc, char **argv)
     {
 	fx_arm_setup_tables(fx_arm_tables_counted, fx_arm_handlers_counted);
 	run_new = fx_run_arm_counted;
+	asm_counted = true;
     }
 #else
     if (strcmp(which, "c"))
@@ -273,6 +298,7 @@ int main(int argc, char **argv)
 	    fx_run_reference(1);
 	    take(ref);
 	    put_back(start);
+	    plot_entries();
 	    run_new(1);
 	    if (!same(ref, "single", op_index, &reported))
 		failed++;
@@ -289,6 +315,7 @@ int main(int argc, char **argv)
 	fx_run_reference(length);
 	take(ref);
 	put_back(start);
+	plot_entries();
 	run_new(length);
 	if (!same(ref, "program", length, &reported))
 	    failed++;
