@@ -2,7 +2,8 @@
 # The ARM assembler CPU core (pocketsnes/arm) against the C core, on a PC:
 # both are built for ARM and run under qemu-arm.
 #   tests/asm/run.sh [frames]
-# 0. fx_test: the Super FX interpreters (C and ARM assembler) against the
+# 0. fx_test: the Super FX interpreters (C and ARM assembler) and its
+#    translation into ARM code (pocketsnes/snes9x/fxjit.cpp) against the
 #    original C loop, on random instructions and programs (tests/fx_test.cpp).
 #    tile_test: the tile drawers (C and, with the ARM core setting, ARM
 #    assembler) against Snes9x 1.43's, on random tiles (tests/asm/tile_test.cpp).
@@ -39,9 +40,10 @@ result() {
     else echo "FAIL  $2"; FAIL=$((FAIL + 1)); fi
 }
 
-echo "== Super FX interpreters against the original loop (random instructions and programs)"
-for which in c asm; do
-    "$QEMU" -cpu arm926 $BUILD/fx_test 40 7 $which > "$OUT/fx_$which.txt" 2>&1
+echo "== Super FX interpreters and translator against the original loop (random instructions and programs)"
+for which in c asm jit; do
+    # (a translation that sends a program round in circles fails by the time limit)
+    timeout 900 "$QEMU" -cpu arm926 $BUILD/fx_test 40 7 $which > "$OUT/fx_$which.txt" 2>&1
     last=$(tail -1 "$OUT/fx_$which.txt")
     case "$last" in PASS*) r=pass ;; *) r=fail ;; esac
     result $r "Super FX, $which: $last"
@@ -76,6 +78,10 @@ link ct.sfc "$TESTROMS/calc/Chrono Trigger (USA).sfc.tns"
 link alttp.sfc "$TESTROMS/calc/Legend of Zelda, The - A Link to the Past (USA).sfc.tns"
 link yi.sfc "$TESTROMS/calc/Super Mario World 2 - Yoshi's Island.sfc.tns"
 link yi.sv001 "$TESTROMS/calc/Super Mario World 2 - Yoshi's Island.sfc.sv001.tns"
+# The owner's Yoshi's Island states (build/calc-saves/yi, from the calculator):
+# 1-1's busiest part, and Baby Mario's bubble (a sprite the Super FX turns)
+link yi.sv010 build/calc-saves/yi/sv010.tns
+link yi.sv011 build/calc-saves/yi/sv011.tns
 
 # game NAME ROM STATE INPUT: both cores, frame by frame
 game() {
@@ -111,8 +117,10 @@ game ct_boot ct.sfc - start
 game alttp_boot alttp.sfc - start
 game yi_state yi.sfc yi.sv001 walk
 game yi_boot yi.sfc - start
-# Super FX demos (plotting polygons and lines; the ARM core runs the ARM
-# Super FX interpreter, the C core the C one)
+game yi_1_1 yi.sfc yi.sv010 walk
+game yi_bubble yi.sfc yi.sv011 busy
+# Super FX demos (plotting polygons and lines; the ARM core setting runs the
+# Super FX translated into ARM code, the C one the C interpreter)
 game gsu_fillpoly GSU4BPP256x192FillPoly.sfc - none
 game gsu_plotline GSU8BPP256x192PlotLine.sfc - none
 # S-DD1 test cartridge (tests/make_sdd1_rom.py)
@@ -136,6 +144,7 @@ echo "== Replays from a snapshot (the overclock test)"
 replay smw_state smw.sfc smw.sv001 walk
 replay ct_boot ct.sfc - start
 replay monsterfarm MonsterFarmJump.sfc - busy
+replay yi_1_1 yi.sfc yi.sv010 walk
 
 echo "== $PASS passed, $FAIL failed (output in $OUT)"
 [ "$FAIL" -eq 0 ]

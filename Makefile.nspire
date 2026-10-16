@@ -36,8 +36,9 @@ endif
 ifeq ($(BENCH),1)
 DEFINES += -DAUTO_BENCH
 endif
-# scale.cpp uses scale_arm.S
-DEFINES += -DSCALE_ARM
+# scale.cpp uses scale_arm.S; the Super FX translator (fxjit.cpp) keeps the
+# caches in step with the code it writes
+DEFINES += -DSCALE_ARM -DFX_JIT_CACHE_OPS
 ARCH    = -marm -march=armv5te -mtune=arm926ej-s
 OPT     = $(OPT_LEVEL) -fomit-frame-pointer -fno-strict-aliasing -ffunction-sections -fdata-sections
 

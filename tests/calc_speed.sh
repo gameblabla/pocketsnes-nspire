@@ -79,7 +79,8 @@ funcs = int(sys.argv[8])
 syms = []
 for l in open(symfile):
     p = l.rstrip('\n').split(' ', 2)
-    if len(p) == 3 and p[1] in 'tTwW':
+    # (the Super FX translator's code buffer is data, but runs)
+    if len(p) == 3 and (p[1] in 'tTwW' or p[2] == 'fx_jit_code'):
         syms.append((int(p[0], 16), p[2]))
 syms.sort(); addrs = [a for a, _ in syms]
 lines = open(out).read().split('\n')

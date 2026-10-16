@@ -13,6 +13,9 @@ BUILD = build/asm-test
 
 ARCH    = -marm -mcpu=arm926ej-s
 DEFINES = -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -DARM_ASM_CPU -DARM_ASM_FX -DARM_ASM_GFX
+# The Super FX translator's code buffer made executable for qemu-arm
+# (fxjit.cpp; on the calculator memory is)
+DEFINES += -DFX_JIT_MPROTECT
 # zlib.h from the Ndless SDK (the core's port.h includes it)
 ZLIB    = $(HOME)/nspire/build/Ndless/ndless-sdk/thirdparty/zlib
 INCLUDE = -Ipocketsnes -Ipocketsnes/include -Ipocketsnes/linux -Ipocketsnes/snes9x -isystem $(ZLIB)
@@ -77,7 +80,7 @@ $(BUILD)/tests/fx_test.o: tests/fx_test.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(TEST_FLAGS) -MMD -c $< -o $@
 
-$(BUILD)/fx_test: $(BUILD)/tests/fx_test.o $(BUILD)/fxtest/fxinst.o $(BUILD)/fxtest/fxemu.o \
+$(BUILD)/fx_test: $(BUILD)/tests/fx_test.o $(BUILD)/fxtest/fxinst.o $(BUILD)/fxtest/fxemu.o $(BUILD)/fxtest/fxjit.o \
 		  $(BUILD)/arm/fx_run_arm.o $(BUILD)/arm/fx_run_arm_counted.o $(BUILD)/tests/asm/newlib_shim.o
 	$(CXX) $(LDFLAGS) $^ $(LIBS) -o $@
 

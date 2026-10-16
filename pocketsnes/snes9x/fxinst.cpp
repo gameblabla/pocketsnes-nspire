@@ -1748,19 +1748,43 @@ extern "C" void fx_arm_plot_entries (uint32 *tables, const uint32 *handlers)
 		   goto *table[(sfr & 0x300) | op]; }
 #define FXR_BRA(cond) { uint8 v = pipe; R15++; FXR_FETCHPIPE; if(cond) R15 += SEX8(v); else R15++; } FXR_NEXT
 
+/* The interpreter. A run starts by reading the ROM buffer (READR14); a step
+ * that goes on with a run doesn't (fx_step), as the ROM buffer keeps what it
+ * read when R14 was last written, even after a romb. */
+static void fx_run_c(uint32 nInstructions, bool start);
+
 void fx_run(uint32 nInstructions)
 {
 #ifdef ARM_ASM_FX
-    /* Until the GSU stops (FxEmulate's usual ~0), with the ARM CPU core set */
+    /* Until the GSU stops (FxEmulate's usual ~0), with the ARM CPU core set:
+     * translated into ARM code (fxjit.cpp) */
     if (nInstructions == ~0u && Settings.AsmCPU)
     {
-	if (!fx_arm_tables [0])
-	    fx_arm_setup_tables (fx_arm_tables, fx_arm_handlers);
-	fx_arm_plot_entries (fx_arm_tables, fx_arm_handlers);
-	fx_run_arm ();
+	fx_jit_run ();
 	return;
     }
 #endif
+    fx_run_c (nInstructions, true);
+}
+
+void fx_step(uint32 nInstructions)
+{
+    fx_run_c (nInstructions, false);
+}
+
+#ifdef ARM_ASM_FX
+/* The assembler interpreter (fx_run_arm.s), until the GSU stops. */
+void fx_run_arm_interpreter(void)
+{
+    if (!fx_arm_tables [0])
+	fx_arm_setup_tables (fx_arm_tables, fx_arm_handlers);
+    fx_arm_plot_entries (fx_arm_tables, fx_arm_handlers);
+    fx_run_arm ();
+}
+#endif
+
+static void fx_run_c(uint32 nInstructions, bool start)
+{
     static void *table[1024];
     uint32 *const r = GSU.avReg;
     uint32 sfr = GSU.vStatusReg;
@@ -1810,7 +1834,8 @@ void fx_run(uint32 nInstructions)
 	table[0] = &&stop;	/* (set last: it marks the table as ready) */
     }
 
-    READR14;
+    if (start)
+	READR14;
     /* Only stop clears G, and stop ends the run. */
     if (!(sfr & FLG_G) || vCounter == 0)
 	return;

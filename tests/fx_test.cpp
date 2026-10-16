@@ -10,7 +10,13 @@
  *   tests/fx_test [N] [SEED] [c|asm]
  * On ARM (tests/asm/run.sh, under qemu) "asm" tests the ARM assembler
  * interpreter (pocketsnes/arm/fx_run_arm.s, its FX_COUNTED build) instead of
- * fx_run.
+ * fx_run, and "jit" the translation into ARM code (pocketsnes/snes9x/
+ * fxjit.cpp): parts 1 and 2 through fx_jit_run_counted, which translates
+ * blocks that stop after the given number of instructions, with the pipe
+ * holding the byte before R15 in most runs (or nothing would be
+ * translated), and a part 3 that runs programs until they stop with
+ * fx_jit_run as games do (blocks kept and linked within a run), compared
+ * with the original loop run until it stops.
  *
  * Part 1 runs every one of the 1024 opcode/ALT combinations N times as a
  * single instruction (with the B flag on and off, every source and
@@ -33,6 +39,8 @@ extern "C"
     void fx_arm_setup_tables (uint32 *tables, const uint32 *handlers);
     void fx_arm_plot_entries (uint32 *tables, const uint32 *handlers);
 }
+void fx_jit_run_counted (uint32 n);
+extern uint32 fx_jit_stats [6];
 #endif
 #include "fxemu.h"
 #include "fxinst.h"
@@ -41,7 +49,7 @@ extern struct FxRegs_s GSU;
 void fx_run_reference(uint32 nInstructions);
 void fx_computeScreenPointers ();
 static void (*run_new) (uint32) = fx_run;
-static bool asm_counted;
+static bool asm_counted, jit;
 
 #define ROM_SIZE (0x600000)
 #define RAM_SIZE (0x20000)
@@ -158,13 +166,25 @@ static uint8 random_opcode()
     return op;
 }
 
-/* What fx_run does before running the assembler interpreter */
+/* What fx_run does before running the assembler interpreter; the
+ * translator forgets the code it translated (the tests change the ROM). */
 static void plot_entries()
 {
 #ifdef ARM_ASM_FX
     if (asm_counted)
 	fx_arm_plot_entries(fx_arm_tables_counted, fx_arm_handlers_counted);
+    if (jit)
+	fx_jit_flush();
 #endif
+}
+
+/* For the translator: the pipe holds the byte before R15, as between
+ * instructions in a run (else it runs the interpreter for one first). */
+static void pipe_before_r15()
+{
+    uint32 a = GSU.avReg[15] - 1;
+    if (jit && a <= 0xffff && rnd() % 8)
+	GSU.pvPrgBank[a] = GSU.vPipe;
 }
 
 static uint8 *program_at(uint32 r15)
@@ -256,6 +276,11 @@ int main(int argc, char **argv)
 	run_new = fx_run_arm_counted;
 	asm_counted = true;
     }
+    else if (!strcmp(which, "jit"))
+    {
+	run_new = fx_jit_run_counted;
+	jit = true;
+    }
 #else
     if (strcmp(which, "c"))
     {
@@ -294,6 +319,7 @@ int main(int argc, char **argv)
 	    random_state(op_index, true);
 	    /* bytes after the opcode (immediates, the next pipe byte) */
 	    write_program(2);
+	    pipe_before_r15();
 	    take(start);
 	    fx_run_reference(1);
 	    take(ref);
@@ -311,6 +337,7 @@ int main(int argc, char **argv)
 	int length = 1 + rnd() % 200;
 	random_state(0, false);
 	write_program(length);
+	pipe_before_r15();
 	take(start);
 	fx_run_reference(length);
 	take(ref);
@@ -322,7 +349,120 @@ int main(int argc, char **argv)
 	runs++;
     }
 
-    printf("%s: %d of %ld runs differ (%s interpreter; %d rounds of all 1024 opcodes, %d programs)\n",
+#ifdef ARM_ASM_FX
+    /* Part 3 (the translator): programs run until they stop, as in games.
+     * Each program runs from 6 random states (registers, flags, the prefix
+     * state; the same start address) with the translations kept between
+     * them, so blocks are found again in other states and linked. Each run
+     * goes on the original loop first; one that doesn't stop within 20000
+     * instructions is left out. */
+    int stopped = 0;
+    if (jit)
+	for (int round = 0; round < n * 50; round++)
+	{
+	    int length = 1 + rnd() % 200;
+	    random_state(0, false);
+	    write_program(length);
+	    fx_jit_flush();
+	    uint32 pbr = GSU.vPrgBankReg, r15 = GSU.avReg[15] & 0xffff;
+	    for (int k = 0; k < 6; k++)
+	    {
+		random_state(0, false);
+		GSU.vStatusReg |= FLG_G;
+		GSU.vPrgBankReg = pbr;
+		GSU.pvPrgBank = GSU.apvRomBank[pbr];
+		GSU.avReg[15] = r15;
+		if (r15 && rnd() % 8)
+		    GSU.vPipe = GSU.pvPrgBank[r15 - 1];
+		take(start);
+		fx_run_reference(20000);
+		if (GSU.vStatusReg & FLG_G)
+		{
+		    put_back(start);
+		    continue;
+		}
+		take(ref);
+		put_back(start);
+		fx_jit_run();
+		if (!same(ref, "until stop", length, &reported))
+		    failed++;
+		runs++;
+		stopped++;
+	    }
+	}
+
+    /* ... and programs whose delay slots set a prefix, so a block is
+     * entered again in another state (as in Yoshi's Island): a loop with
+     * "with r2" in its delay slot (its body adds to r0 the first time, to
+     * r2 after), and a branch with "to r14" in its delay slot (r14 = r0 +
+     * r6 when it falls through, "with r8" first when it's taken). */
+    static const uint8 loop_with[] = { 0xfc, 0x05, 0x00, 0xfd, 0x06, 0x00, 0x51, 0x3c, 0x22, 0x00, 0x01, 0x01 };
+    static const uint8 branch_to[] = { 0x09, 0x02, 0x1e, 0x56, 0x00, 0x01, 0x28, 0x55, 0x00, 0x01, 0x01 };
+    /* the loop alone, entered at its body (R12 and R13 set): its block is
+     * entered clean and loops back to itself after "with r2" */
+    static const uint8 loop_body[] = { 0x51, 0x3c, 0x22, 0x00, 0x01, 0x01 };
+    const uint8 *programs[] = { loop_with, branch_to, loop_body };
+    const int sizes[] = { (int) sizeof loop_with, (int) sizeof branch_to, (int) sizeof loop_body };
+    static const char *const names[] = { "loop with with r2", "branch with to r14", "loop body" };
+    if (jit)
+	for (int round = 0; round < n * 10; round++)
+	    for (int p = 0; p < 3; p++)
+	    {
+		random_state(0, false);
+		uint32 pbr = rnd() & 0x3f, at = 0x8000 + (rnd() & 0x7f00);
+		GSU.vPrgBankReg = pbr;
+		GSU.pvPrgBank = GSU.apvRomBank[pbr];
+		memcpy(&GSU.pvPrgBank[at], programs[p], sizes[p]);
+		/* the loop's target (iwt r13, #at + 6) */
+		if (p == 0)
+		{
+		    GSU.pvPrgBank[at + 4] = (uint8) (at + 6);
+		    GSU.pvPrgBank[at + 5] = (uint8) ((at + 6) >> 8);
+		}
+		fx_jit_flush();
+		for (int k = 0; k < 4; k++)
+		{
+		    random_state(0, false);
+		    GSU.vStatusReg = (GSU.vStatusReg & ~(FLG_ALT1 | FLG_ALT2 | FLG_B)) | FLG_G;
+		    GSU.pvSreg = GSU.pvDreg = &GSU.avReg[0];
+		    GSU.vPrgBankReg = pbr;
+		    GSU.pvPrgBank = GSU.apvRomBank[pbr];
+		    GSU.avReg[15] = at + 1;
+		    GSU.vPipe = GSU.pvPrgBank[at];
+		    if (p == 1 && rnd() % 2)
+			GSU.vZero = 0;		/* taken */
+		    if (p == 2)
+		    {
+			GSU.avReg[12] = 2 + rnd() % 6;
+			GSU.avReg[13] = at;
+		    }
+		    take(start);
+		    fx_run_reference(20000);
+		    if (GSU.vStatusReg & FLG_G)
+		    {
+			put_back(start);
+			continue;
+		    }
+		    take(ref);
+		    put_back(start);
+		    fx_jit_run();
+		    if (!same(ref, names[p], 0, &reported))
+			failed++;
+		    runs++;
+		    stopped++;
+		}
+	    }
+#endif
+
+    printf("%s: %d of %ld runs differ (%s interpreter; %d rounds of all 1024 opcodes, %d programs",
 	   failed ? "FAIL" : "PASS", failed, runs, which, n, n * 50);
+#ifdef ARM_ASM_FX
+    if (jit)
+	printf(", %d run until they stopped; counted: %u instructions translated in %u blocks, %u interpreted;"
+	       " until stop: %u blocks entered, %u instructions interpreted, %u branches linked",
+	       stopped, (unsigned) fx_jit_stats[0], (unsigned) fx_jit_stats[2], (unsigned) fx_jit_stats[1],
+	       (unsigned) fx_jit_stats[3], (unsigned) fx_jit_stats[4], (unsigned) fx_jit_stats[5]);
+#endif
+    printf(")\n");
     return failed ? 1 : 0;
 }
