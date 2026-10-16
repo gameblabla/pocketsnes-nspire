@@ -26,7 +26,9 @@
  * game check sees a difference), --program FILE uses FILE as the program file
  * that holds the settings (selfstore.h), and --backlight N sets the pretend
  * calculator's own backlight value (0 brightest, 225 darkest; changes are
- * logged as "backlight N"). */
+ * logged as "backlight N"). --landscape acts like a calculator whose LCD
+ * isn't a CX II's: game frames are shown whole from platform_screen(), not
+ * turned in pieces (as with the DMA setting, which the PC build follows). */
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +44,7 @@
 
 #include "platform.h"
 #include "rotate.h"
+#include "scale.h"
 
 #define HOST_TICK_HZ 32768
 
@@ -72,6 +75,8 @@ static int clock_stuck;
 static int clock_limit = 63;
 static int glitch_above = 63;
 static char program_path[1024];
+static int landscape_lcd;   /* --landscape */
+static int frames_by_dma;   /* platform_set_game_frames_by_dma */
 
 #ifdef HOST_SDL
 static SDL_Window *window;
@@ -306,6 +311,8 @@ int platform_init(int *argc, char **argv)
             glitch_above = atoi(argv[++i]);
         else if (strcmp(argv[i], "--backlight") == 0 && i + 1 < *argc)
             os_backlight = backlight = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--landscape") == 0)
+            landscape_lcd = 1;
         else
             argv[out++] = argv[i];
     }
@@ -429,13 +436,20 @@ void platform_present(void)
 }
 
 /* Game frames go into portrait buffers like on the CX II, and are turned
- * back for showing, so the tests check the same steps. */
-static uint16_t portrait_screens[PLATFORM_MAX_SCREENS][SCREEN_W * SCREEN_H];
+ * back for showing, so the tests check the same steps. With --landscape or
+ * the DMA setting they're shown whole from platform_screen(), as on the
+ * calculator. */
+static uint16_t portrait_screens[PLATFORM_MAX_SCREENS][SCREEN_W * SCREEN_H] __attribute__ ((aligned (8)));
 static int current_portrait;
 static uint16_t *frame_target;
 
 int platform_frame_begin(void)
 {
+    if (landscape_lcd || frames_by_dma || copy_mode)
+    {
+        frame_target = NULL;
+        return platform_screen_index();
+    }
     frame_target = portrait_screens[current_portrait];
     return PLATFORM_MAX_SCREENS + current_portrait;
 }
@@ -446,12 +460,31 @@ void platform_frame_copy(int x, int y, int w, int h)
     if (y < 0) { h += y; y = 0; }
     if (x + w > SCREEN_W) w = SCREEN_W - x;
     if (y + h > SCREEN_H) h = SCREEN_H - y;
-    if (w > 0 && h > 0)
+    if (frame_target && w > 0 && h > 0)
         rotate_block(platform_screen() + y * SCREEN_W + x, SCREEN_W, x, y, w, h, frame_target);
+}
+
+/* Like the calculator's (platform_nspire.cpp). */
+void platform_frame_copy_scaled(const uint16_t *src, int src_pitch, int lines, int smooth)
+{
+    if (frame_target)
+    {
+        scale_turn(src, src_pitch, lines, smooth, frame_target);
+        return;
+    }
+    static uint16_t picture[SCREEN_H * SCALE_SRC_W];
+    for (int y = 0; y < lines && y < SCREEN_H; y++)
+        memcpy(picture + y * SCALE_SRC_W, src + y * src_pitch, SCALE_SRC_W * 2);
+    scale_frame(picture, SCALE_SRC_W, lines, smooth, platform_screen(), SCREEN_W);
 }
 
 void platform_frame_present(void)
 {
+    if (!frame_target)
+    {
+        platform_present();
+        return;
+    }
     for (int y = 0; y < SCREEN_H; y++)
         for (int x = 0; x < SCREEN_W; x++)
             shown[y * SCREEN_W + x] = frame_target[x * SCREEN_H + SCREEN_H - 1 - y];
@@ -546,7 +579,7 @@ void platform_clock_report(char *text, size_t size)
 
 void platform_set_game_frames_by_dma(int dma)
 {
-    (void) dma;
+    frames_by_dma = dma;
 }
 
 void platform_write_diagnostics(const char *path)

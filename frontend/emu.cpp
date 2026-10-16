@@ -22,6 +22,7 @@
 #include "paths.h"
 #include "romzip.h"
 #include "platform.h"
+#include "scale.h"
 #include "states.h"
 #include "ui.h"
 
@@ -39,6 +40,11 @@
  * SNES picture, and now and then a pixel before it. That much border around
  * the picture is wiped after every frame. */
 #define SPILL 8
+
+/* Screen size "full, crop edges": the lines left out at the top and at the
+ * bottom of the picture, about what a TV's edge hid (Yoshi's Island blanks
+ * them itself). */
+#define CROP_LINES 8
 
 enum
 {
@@ -80,6 +86,7 @@ static struct
 static int picture_top = (SCREEN_H - SNES_HEIGHT) / 2;
 static int depth_lines;   /* lines from the top of the depth buffer */
 static int picture_height = SNES_HEIGHT;
+static uint32_t shown_screen_size;   /* cfg.screen_size of the frames shown */
 static unsigned screens_to_clear = ~0u;   /* one bit per screen buffer */
 
 static char rom_path[512];
@@ -401,6 +408,12 @@ bool8 S9xInitUpdate ()
         picture_top = (SCREEN_H - height) / 2;
         clear_screens_later();
     }
+    /* A stretched picture filled the screens: clear them for the border. */
+    if (cfg.screen_size != shown_screen_size)
+    {
+        shown_screen_size = cfg.screen_size;
+        clear_screens_later();
+    }
 
     unsigned screen_bit = 1u << platform_screen_index();
     if (screens_to_clear & screen_bit)
@@ -469,10 +482,22 @@ bool8 S9xDeinitUpdate (int, int, bool8)
 
     /* A frame buffer that is out of date gets everything, but only once
      * platform_screen() has been cleared too: a message that just timed out
-     * is still in it until the next frame. */
+     * is still in it until the next frame. A stretched picture covers all
+     * of it anyway. */
     unsigned frame_bit = 1u << platform_frame_begin();
     unsigned screen_bit = 1u << platform_screen_index();
-    if ((screens_to_clear & frame_bit) && !(screens_to_clear & screen_bit))
+    if (cfg.screen_size != SCREEN_SIZE_ORIGINAL)
+    {
+        int top = picture_top, lines = picture_height;
+        if (cfg.screen_size == SCREEN_SIZE_FULL_CROP && lines - 2 * CROP_LINES >= SCALE_MIN_LINES)
+        {
+            top += CROP_LINES;
+            lines -= 2 * CROP_LINES;
+        }
+        platform_frame_copy_scaled(platform_screen() + top * SCREEN_W + PICTURE_LEFT, SCREEN_W, lines,
+                                   (int) cfg.smooth);
+    }
+    else if ((screens_to_clear & frame_bit) && !(screens_to_clear & screen_bit))
     {
         platform_frame_copy(0, 0, SCREEN_W, SCREEN_H);
         screens_to_clear &= ~frame_bit;
@@ -1043,6 +1068,18 @@ static const struct SpeedTestPart speed_test_parts[] =
 
 static const char *const cpu_core_names[NUM_CPU_CORES] = { "ARM", "C" };
 
+/* The picture's size for the results, e.g. "full screen, smooth". */
+static const char *screen_size_name(void)
+{
+    static const char *const names[NUM_SCREEN_SIZES][2] =
+    {
+        { "original", "original" },
+        { "full screen, sharp", "full screen, smooth" },
+        { "full, crop edges, sharp", "full, crop edges, smooth" }
+    };
+    return names[cfg.screen_size][cfg.smooth != 0];
+}
+
 /* Runs the game on the CPU core set (core < 0) or on the one given. The C
  * core runs SA-1 games anyway (S9xMainLoop), and is the only one in the PC
  * build. */
@@ -1137,9 +1174,9 @@ void emu_speed_test(int close_after_seconds)
     FILE *f = fopen(path, "w");
     if (f)
     {
-        fprintf(f, "== %s, build %s, cpu %u MHz, screen: %s, CPU core set: %s%s\n%s\n", game_title,
-                BUILD_NAME, (unsigned) mhz, platform_screen_mode_name(), cpu_core_names[cfg.cpu_core],
-                Settings.SA1 ? " (SA-1 game: C core)" : "", clock_report);
+        fprintf(f, "== %s, build %s, cpu %u MHz, screen: %s, %s, CPU core set: %s%s\n%s\n", game_title,
+                BUILD_NAME, (unsigned) mhz, platform_screen_mode_name(), screen_size_name(),
+                cpu_core_names[cfg.cpu_core], Settings.SA1 ? " (SA-1 game: C core)" : "", clock_report);
         for (int i = 0; i < done; i++)
             fprintf(f, "%s\n%s\n", results[i][0], results[i][1]);
         fclose(f);
@@ -1411,7 +1448,9 @@ static void game_speed(void)
     if (text[0])
         add_message(text);
     shown_multiplier = multiplier;
-    platform_set_game_frames_by_dma((int) cfg.screen_dma);
+    /* A stretched picture is always turned: by DMA it would need its own
+     * copy of the frame (slower), and DMA can tear. */
+    platform_set_game_frames_by_dma(cfg.screen_dma && cfg.screen_size == SCREEN_SIZE_ORIGINAL);
 }
 
 uint32_t emu_game_mhz(void)

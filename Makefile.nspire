@@ -36,6 +36,8 @@ endif
 ifeq ($(BENCH),1)
 DEFINES += -DAUTO_BENCH
 endif
+# scale.cpp uses scale_arm.S
+DEFINES += -DSCALE_ARM
 ARCH    = -marm -march=armv5te -mtune=arm926ej-s
 OPT     = $(OPT_LEVEL) -fomit-frame-pointer -fno-strict-aliasing -ffunction-sections -fdata-sections
 
@@ -53,10 +55,11 @@ ZEHNFLAGS = --name "PocketSNES" --author "gameblabla (port), nspire QoL frontend
 CORE_SRC     = $(wildcard pocketsnes/snes9x/*.cpp)
 FRONTEND_SRC = frontend/savemanager.cpp frontend/romzip.cpp frontend/paths.cpp frontend/selfstore.cpp frontend/brightness.cpp frontend/keys.cpp frontend/draw.cpp frontend/ui.cpp frontend/config.cpp frontend/states.cpp \
                frontend/gui.cpp frontend/browser.cpp frontend/menu.cpp frontend/overclock.cpp frontend/emu.cpp \
-               frontend/main.cpp frontend/rotate.cpp frontend/platform_nspire.cpp
+               frontend/main.cpp frontend/rotate.cpp frontend/scale.cpp frontend/platform_nspire.cpp
 
-# The CPU clock switch, copied into the on-chip SRAM to run (platform_nspire.cpp).
-FRONTEND_ASM = frontend/clock_switch_nspire.S
+# The CPU clock switch, copied into the on-chip SRAM to run (platform_nspire.cpp),
+# and the full screen picture's loops (scale.cpp).
+FRONTEND_ASM = frontend/clock_switch_nspire.S frontend/scale_arm.S
 
 CORE_ASM     = pocketsnes/arm/os9x_65c816_global.s pocketsnes/arm/os9x_65c816_cpu.s pocketsnes/arm/fx_run_arm.s \
                pocketsnes/arm/gfx_arm.s

@@ -394,7 +394,8 @@ play menu tests/scripts/menu_options.txt MonsterFarmJump.sfc
 cfg=$OUT/menu/zPocketSNES_saves/pocketsnes.cfg.tns
 check "$(grep -c -e '^auto_increment=0$' -e '^save_on_exit=0$' -e '^load_on_start=0$' -e '^show_fps=2$' "$cfg")" 4 \
     "menu turned off auto-increment, saving when leaving and loading on start, and the FPS counter to detailed"
-check "$(grep -c -e '^screen_dma=1$' -e '^cpu_speed=4$' "$cfg")" 2 "menu set the screen output to DMA and the CPU speed to 432 MHz"
+check "$(grep -c -e '^screen_size=1$' -e '^screen_dma=1$' -e '^cpu_speed=4$' "$cfg")" 3 \
+    "menu set the screen size to full screen, the screen output to DMA and the CPU speed to 432 MHz"
 check "$(grep -c -e '^key_a=6$' -e '^key_a_2=121+20$' -e '^key_save_state_2=121+23$' "$cfg")" 3 \
     "menu set A to Z and shift+3, and shift+S as a second key for Save state"
 play menu tests/scripts/menu_game_settings.txt MonsterFarmJump.sfc
@@ -402,6 +403,34 @@ game_cfg=$OUT/menu/zPocketSNES_saves/MonsterFarmJump.sfc.cfg.tns
 check "$(grep -c -e '^own_settings=1$' -e '^auto_increment=1$' "$game_cfg" 2>/dev/null)" 2 \
     "settings for this game only: auto-increment went back on for the game"
 check "$(grep -c '^auto_increment=0$' "$cfg")" 1 "... and stayed off for all games"
+
+echo "== Full screen (Screen size)"
+# The same frame of a demo at the original size and stretched (sharp, smooth,
+# cropped), turned like on the CX II and shown whole (--landscape, as on
+# other calculators); tests/scale_check.py works out each stretched pixel
+# from the original screenshot.
+script=$(realpath tests/scripts/wait_shot_quit.txt)
+for lcd in turned landscape; do
+    opt=; [ $lcd = landscape ] && opt=--landscape
+    for size in 0 1 2; do
+        for smooth in 0 1; do
+            [ $size = 0 ] && [ $smooth = 1 ] && continue
+            name=full_${lcd}_${size}_${smooth}
+            setup $name RotZoom.sfc config_version=3 show_fps=0 screen_size=$size smooth=$smooth
+            (cd "$OUT/$name" && "$HOST" --script "$script" --shots shots \
+                --exe-dir ndless $opt roms/RotZoom.sfc.tns >/dev/null 2>&1)
+        done
+    done
+    o=$OUT/full_${lcd}_0_0/shots/end.png
+    for size in 1 2; do
+        for smooth in 0 1; do
+            check "$(python3 tests/scale_check.py "$o" "$OUT/full_${lcd}_${size}_${smooth}/shots/end.png" \
+                $((size - 1)) $smooth)" same "full screen, $lcd LCD, crop $((size - 1)), smooth $smooth: each pixel as defined"
+        done
+    done
+done
+check "$(same "$OUT/full_turned_1_1/shots/end.png" "$OUT/full_landscape_1_1/shots/end.png")" same \
+    "full screen looks the same turned and shown whole"
 
 echo "== Files that aren't ROMs"
 # The core crashes on files under 32 KB; documents and programs are .tns

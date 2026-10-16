@@ -8,6 +8,7 @@
 #include "paths.h"
 #include "platform.h"
 #include "rotate.h"
+#include "scale.h"
 
 static void register_rom_types(const char *program_path);
 
@@ -692,6 +693,22 @@ void platform_frame_copy(int x, int y, int w, int h)
     if (!frame_target || w <= 0 || h <= 0)
         return;
     rotate_block(platform_screen() + y * SCREEN_W + x, SCREEN_W, x, y, w, h, frame_target);
+}
+
+void platform_frame_copy_scaled(const uint16_t *src, int src_pitch, int lines, int smooth)
+{
+    if (frame_target)
+    {
+        scale_turn(src, src_pitch, lines, smooth, frame_target);
+        return;
+    }
+    /* Shown from platform_screen(), which the picture is in: stretch a copy
+     * of it (no LCD that isn't a CX II's, or the speed test's other
+     * outputs). */
+    static uint16_t picture[SCREEN_H * SCALE_SRC_W] __attribute__ ((aligned (8)));
+    for (int y = 0; y < lines && y < SCREEN_H; y++)
+        memcpy(picture + y * SCALE_SRC_W, src + y * src_pitch, SCALE_SRC_W * 2);
+    scale_frame(picture, SCALE_SRC_W, lines, smooth, platform_screen(), SCREEN_W);
 }
 
 void platform_frame_present(void)

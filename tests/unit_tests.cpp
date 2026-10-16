@@ -20,6 +20,7 @@
 #include "selfstore.h"
 #include "platform.h"
 #include "rotate.h"
+#include "scale.h"
 
 static int failures, checks;
 
@@ -260,6 +261,69 @@ static void test_rotation(void)
     CHECK(memcmp(fast, slow, sizeof(fast_words)) == 0, "rotate_block of the whole frame differs");
 }
 
+/* ---- The picture stretched to the whole screen (scale.h) ---- */
+
+static void test_scaling(void)
+{
+    /* A picture of random pixels in a frame of 320-pixel lines, at the
+     * place the game draws it, with lines of other pixels around it. */
+    static uint16_t picture[320 * 260] __attribute__ ((aligned (8)));
+    static uint16_t expected[320 * 240], landscape[320 * 240];
+    static uint32_t portrait_words[240 * 320 / 2];
+    uint16_t *portrait = (uint16_t *) portrait_words;
+    uint16_t *turned = (uint16_t *) slow_words;
+
+    for (int i = 0; i < 320 * 260; i++)
+        picture[i] = (uint16_t) rnd(0x10000);
+    const uint16_t *src = picture + 10 * 320 + 32;
+
+    int mismatches[2][2] = { { 0, 0 }, { 0, 0 } };
+    for (int lines = SCALE_MIN_LINES; lines <= 240; lines++)
+        for (int smooth = 0; smooth < 2; smooth++)
+        {
+            scale_reference(src, 320, lines, smooth, expected, 320);
+            rotate_frame_reference(expected, turned, ROTATE_FLIP_COLUMNS);
+            memset(portrait_words, 0x55, sizeof(portrait_words));
+            scale_turn(src, 320, lines, smooth, portrait);
+            mismatches[0][smooth] += memcmp(portrait, turned, sizeof(portrait_words)) != 0;
+            memset(landscape, 0x55, sizeof(landscape));
+            scale_frame(src, 320, lines, smooth, landscape, 320);
+            mismatches[1][smooth] += memcmp(landscape, expected, sizeof(landscape)) != 0;
+        }
+    for (int smooth = 0; smooth < 2; smooth++)
+    {
+        CHECK(mismatches[0][smooth] == 0, "scale_turn (smooth %d) differs at %d of 121 heights", smooth,
+              mismatches[0][smooth]);
+        CHECK(mismatches[1][smooth] == 0, "scale_frame (smooth %d) differs at %d of 121 heights", smooth,
+              mismatches[1][smooth]);
+    }
+
+    /* The definition itself, on a picture whose pixels say where they are:
+     * 224 lines, sharp: across, columns 0 1 2 2 3 4 5 6 6 7 ...; down,
+     * line 7 shown twice (output lines 7 and 8), then every 14 lines. */
+    for (int y = 0; y < 224; y++)
+        for (int x = 0; x < 256; x++)
+            picture[y * 320 + x] = (uint16_t) (y << 8 | x);
+    scale_reference(picture, 320, 224, 0, expected, 320);
+    static const int columns[10] = { 0, 1, 2, 2, 3, 4, 5, 6, 6, 7 };
+    int across = 1;
+    for (int X = 0; X < 10; X++)
+        across &= expected[X] == columns[X];
+    CHECK(across && expected[319] == 255, "sharp: the third of every 4 columns shown twice");
+    CHECK(expected[7 * 320] >> 8 == 7 && expected[8 * 320] >> 8 == 7 && expected[9 * 320] >> 8 == 8 &&
+          expected[22 * 320] >> 8 == 21 && expected[23 * 320] >> 8 == 21 && expected[239 * 320] >> 8 == 223,
+          "sharp: lines 7, 21, ... shown twice, the last line last");
+    /* Smooth: the repeated column and line are averages (here of
+     * neighbouring values, so the average rounds down). */
+    scale_reference(picture, 320, 224, 1, expected, 320);
+    uint16_t c = (uint16_t) 2, d = (uint16_t) 3;
+    uint16_t avg = (uint16_t) ((c & d) + (((c ^ d) & 0xF7DE) >> 1));
+    CHECK(expected[3] == avg && expected[2] == 2 && expected[4] == 3, "smooth: column 3 averages columns 2 and 3");
+    uint16_t l7 = (uint16_t) (7 << 8), l8 = (uint16_t) (8 << 8);
+    CHECK(expected[8 * 320] == (uint16_t) ((l7 & l8) + (((l7 ^ l8) & 0xF7DE) >> 1)) && expected[7 * 320] == l7,
+          "smooth: output line 8 averages lines 7 and 8");
+}
+
 /* ---- Settings files ---- */
 
 static void write_file(const char *path, const char *text)
@@ -308,6 +372,8 @@ static void test_config(void)
     CHECK(cfg.auto_increment == 1 && cfg.save_on_exit == 1 && cfg.load_on_start == 1,
           "defaults: auto-increment, save when leaving and load on start are on");
     CHECK(cfg.cpu_speed == CPU_SPEED_NORMAL && cfg.screen_dma == 0, "defaults: normal CPU speed, no DMA");
+    CHECK(cfg.screen_size == SCREEN_SIZE_ORIGINAL && cfg.smooth == 1,
+          "defaults: the original screen size, smooth stretching on");
     CHECK(cfg.keys[ACTION_A][0].key == KEY_SHIFT && !cfg.keys[ACTION_A][0].with && !cfg.keys[ACTION_A][1].key,
           "defaults: A is shift, with no second key");
     CHECK(cfg.keys[ACTION_LOAD_NEWEST][0].key == KEY_N && cfg.keys[ACTION_SHOW_FPS][0].key == 0,
@@ -375,9 +441,16 @@ static void test_config(void)
     CHECK(cfg.keys[ACTION_START][0].key == KEY_MINUS && cfg.keys[ACTION_SELECT][0].key == KEY_PLUS &&
           !cfg.keys[ACTION_BRIGHTER][0].key && !cfg.keys[ACTION_DIMMER][0].key,
           "... both, when the file uses + and -");
-    write_file(global_path, "config_version=3\nbrightness=99\nauto_slot=5\n");
+    write_file(global_path, "config_version=3\nscreen_size=2\nsmooth=0\n");
     config_load();
-    CHECK(cfg.brightness == BRIGHTNESS_LEVELS && cfg.auto_slot == 1, "out of range values are clamped");
+    CHECK(cfg.screen_size == SCREEN_SIZE_FULL_CROP && cfg.smooth == 0, "the screen size and smoothing read as written");
+    config_save();
+    CHECK(file_has_line(global_path, "screen_size=2") && file_has_line(global_path, "smooth=0"),
+          "... and written back");
+    write_file(global_path, "config_version=3\nbrightness=99\nauto_slot=5\nscreen_size=7\n");
+    config_load();
+    CHECK(cfg.brightness == BRIGHTNESS_LEVELS && cfg.auto_slot == 1 && cfg.screen_size == NUM_SCREEN_SIZES - 1,
+          "out of range values are clamped");
     write_file(global_path, "config_version=2\nauto_increment=0\nsave_on_exit=0\nload_on_start=1\n"
                             "cpu_speed=3\nscreen_dma=1\nkey_a=6\nkey_a_2=121+20\nkey_save_state_2=121+23\n"
                             "key_b=999\nkey_x=113\nkey_y=121+121\nkey_next_slot=0\nkey_next_slot_2=20\n");
@@ -615,6 +688,7 @@ int main(void)
 
     test_tile_drawing();
     test_rotation();
+    test_scaling();
     test_config();
     test_brightness();
     test_selfstore();

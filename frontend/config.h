@@ -86,6 +86,18 @@ enum CpuCore
     NUM_CPU_CORES
 };
 
+/* The picture's size (cfg.screen_size): the SNES's own pixels, or
+ * stretched to the whole screen (scale.h), like a TV showed it; "crop"
+ * leaves out the 8 lines at the top and the bottom first, which a TV's edge
+ * hid and some games (Yoshi's Island) leave black. */
+enum ScreenSize
+{
+    SCREEN_SIZE_ORIGINAL,
+    SCREEN_SIZE_FULL,
+    SCREEN_SIZE_FULL_CROP,
+    NUM_SCREEN_SIZES
+};
+
 /* The multiplier of 12 MHz for a raised speed, 0 for the normal one (and for
  * "highest tested" before the overclock test has passed a speed). */
 int config_cpu_multiplier(uint32_t cpu_speed);
@@ -110,6 +122,8 @@ struct Config
     uint32_t sram_autosave;
     uint32_t compress_saves;    /* new states and in-game saves are compressed */
     uint32_t screen_dma;        /* game frames by DMA (faster, can tear) */
+    uint32_t screen_size;       /* enum ScreenSize */
+    uint32_t smooth;            /* stretched: repeated pixels blended (scale.h) */
     uint32_t cpu_speed;         /* enum CpuSpeed */
     uint32_t cpu_core;          /* enum CpuCore */
     uint32_t brightness;        /* 0 the calculator's own, 1-10 (brightness.h) */

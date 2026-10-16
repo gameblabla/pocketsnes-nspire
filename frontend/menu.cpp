@@ -225,6 +225,8 @@ static const char *const fps_modes[] = { "off", "on", "detailed" };
 static const char *const sram_write_modes[] = { "on exit", "automatic" };
 static const char *const scopes[] = { "all games", "this game" };
 static const char *const screen_outputs[] = { "no tearing", "DMA" };
+static const char *const screen_sizes[] = { "original", "full screen", "full, crop edges" };
+static_assert(sizeof(screen_sizes) / sizeof(screen_sizes[0]) == NUM_SCREEN_SIZES, "a name for each screen size");
 /* "normal" shows the calculator's own clock (288 MHz while USB is plugged
  * in), "highest tested" the overclock test's result. */
 static char normal_cpu_speed[24] = "normal";
@@ -284,36 +286,42 @@ static void update_speed_names(void)
     CHOICE("FPS counter", \
            "Frames drawn per second: 60/60 is full speed. Detailed adds timings (also logged).", \
            2, &cfg.show_fps, fps_modes, 2, ICON_NONE), \
+    CHOICE("Screen size", \
+           "Full screen stretches the picture like a TV did. Crop edges also cuts the 8 lines TVs hid.", \
+           3, &cfg.screen_size, screen_sizes, NUM_SCREEN_SIZES - 1, ICON_NONE), \
+    CHOICE("Smooth stretching", \
+           "On: full screen blends the pixels it doubles, so all look the same size. Off: sharp.", \
+           4, &cfg.smooth, off_on, 1, ICON_NONE), \
     CHOICE("Screen output", \
-           "No tearing (best): every frame shows whole. DMA: slightly faster, but it can tear.", \
-           3, &cfg.screen_dma, screen_outputs, 1, ICON_NONE), \
+           "No tearing (best): every frame shows whole. DMA: a little faster, can tear (original size).", \
+           5, &cfg.screen_dma, screen_outputs, 1, ICON_NONE), \
     CHOICE("Brightness", \
            "The screen while PocketSNES runs (CX II); yours comes back after. Keys: + and -.", \
-           4, &cfg.brightness, brightness_levels, BRIGHTNESS_LEVELS, ICON_NONE), \
+           6, &cfg.brightness, brightness_levels, BRIGHTNESS_LEVELS, ICON_NONE), \
     CHOICE("CPU speed", \
            "Overclocks the CX II in games. Highest tested is what the overclock test passed.", \
-           5, &cfg.cpu_speed, cpu_speeds, NUM_CPU_SPEEDS - 1, ICON_NONE), \
+           7, &cfg.cpu_speed, cpu_speeds, NUM_CPU_SPEEDS - 1, ICON_NONE), \
     { OPTION_ACTION, "Overclock test", \
       "Plays the open game at 408-504 MHz until it goes wrong: about 3 minutes.", \
-      6, NULL, NULL, 0, run_overclock_test, NULL, NULL, 0, ICON_SPEED, tested_result }, \
+      8, NULL, NULL, 0, run_overclock_test, NULL, NULL, 0, ICON_SPEED, tested_result }, \
     CHOICE("CPU core", \
            "ARM: the SNES CPU in ARM assembler (faster). C: the old core, if a game acts up.", \
-           7, &cfg.cpu_core, cpu_cores, NUM_CPU_CORES - 1, ICON_NONE)
+           9, &cfg.cpu_core, cpu_cores, NUM_CPU_CORES - 1, ICON_NONE)
 
 static struct Option graphics_options[] =
 {
     GRAPHICS_OPTIONS,
     ACTION("Run speed test",
            "Plays from here for about 40 seconds in six ways, both CPU cores, and shows the frame rates.",
-           8, run_speed_test, ICON_STAR),
-    BACK_OPTION(9),
+           10, run_speed_test, ICON_STAR),
+    BACK_OPTION(11),
 };
 
 /* The same from the game list, which has no game running to test. */
 static struct Option list_graphics_options[] =
 {
     GRAPHICS_OPTIONS,
-    BACK_OPTION(7),
+    BACK_OPTION(10),
 };
 
 static struct Option savestate_options[] =
@@ -411,7 +419,7 @@ MENU(about_menu, about_options, "Controls & about");
       line + 1, &own_keys, scopes, 1, NULL, NULL, own_keys_changed, 0, ICON_KEY }
 
 #define SETTINGS_SUBMENUS(line, graphics) \
-    SUBMENU("Graphics & speed", "Frameskip, the FPS counter, screen output, brightness, CPU speed and core.", \
+    SUBMENU("Graphics & speed", "Frameskip, FPS counter, screen size and output, brightness, CPU speed, core.", \
             line, graphics, ICON_SPEED), \
     SUBMENU("Saving", "Auto-increment, saving when you leave (and where), loading on start, in-game saves.", \
             line + 1, &savestate_menu, ICON_DISK), \

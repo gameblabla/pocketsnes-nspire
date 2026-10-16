@@ -27,7 +27,8 @@ ASM_DEPS = $(wildcard pocketsnes/arm/*.s)
 COMMON   = $(BUILD)/tests/asm/stubs.o $(BUILD)/tests/asm/newlib_shim.o $(BUILD)/arm/global.o \
            $(BUILD)/frontend/romzip.o $(BUILD)/arm/fx_run_arm.o $(BUILD)/arm/gfx_arm.o
 
-all: $(BUILD)/opcode_test $(BUILD)/game_test $(BUILD)/game_trace $(BUILD)/fx_test $(BUILD)/tile_test
+all: $(BUILD)/opcode_test $(BUILD)/game_test $(BUILD)/game_trace $(BUILD)/fx_test $(BUILD)/tile_test \
+     $(BUILD)/scale_test
 
 $(BUILD)/pocketsnes/%.o: pocketsnes/%.cpp
 	@mkdir -p $(dir $@)
@@ -111,6 +112,26 @@ $(BUILD)/game_test: $(BUILD)/tests/asm/game_test.o $(BUILD)/arm/cpu.o $(COMMON) 
 # The tile drawers (C and ARM assembler) against Snes9x 1.43's
 $(BUILD)/tile_test: $(BUILD)/tests/asm/tile_test.o $(BUILD)/arm/cpu.o $(COMMON) $(BUILD)/libcore.a
 	$(CXX) $(LDFLAGS) $^ $(LIBS) -o $@
+
+# The full screen picture (frontend/scale.cpp with its ARM assembler loops,
+# frontend/scale_arm.S) against its definition
+FRONTEND_TEST_FLAGS = $(ARCH) -O3 -fno-strict-aliasing -DSCALE_ARM -Ifrontend -Wall
+
+$(BUILD)/scaletest/%.o: frontend/%.cpp frontend/scale.h frontend/rotate.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(FRONTEND_TEST_FLAGS) -c $< -o $@
+
+$(BUILD)/scaletest/scale_arm.o: frontend/scale_arm.S
+	@mkdir -p $(dir $@)
+	$(CC) $(ARCH) -c $< -o $@
+
+$(BUILD)/scaletest/scale_test.o: tests/asm/scale_test.cpp frontend/scale.h frontend/rotate.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(FRONTEND_TEST_FLAGS) -c $< -o $@
+
+$(BUILD)/scale_test: $(BUILD)/scaletest/scale_test.o $(BUILD)/scaletest/scale.o $(BUILD)/scaletest/rotate.o \
+		     $(BUILD)/scaletest/scale_arm.o $(BUILD)/tests/asm/newlib_shim.o
+	$(CXX) $(LDFLAGS) $^ -o $@
 
 # game_test that prints every opcode of chosen frames, on either core
 $(BUILD)/game_trace: $(BUILD)/tests/asm/game_trace.o $(BUILD)/arm/cpu_trace.o $(COMMON) $(BUILD)/libcore.a

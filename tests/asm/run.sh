@@ -6,6 +6,8 @@
 #    original C loop, on random instructions and programs (tests/fx_test.cpp).
 #    tile_test: the tile drawers (C and, with the ARM core setting, ARM
 #    assembler) against Snes9x 1.43's, on random tiles (tests/asm/tile_test.cpp).
+#    scale_test: the full screen picture's ARM assembler loops against its
+#    definition (tests/asm/scale_test.cpp).
 # 1. opcode_test: every opcode in emulation mode and the four M/X modes, from
 #    random registers and memory; registers, cycles and memory must match.
 # 2. game_test: games run once on each core setting with the same scripted
@@ -50,6 +52,12 @@ echo "== Tile drawers (C and ARM assembler) against Snes9x 1.43's, on random til
 last=$(tail -1 "$OUT/tiles.txt")
 case "$last" in PASS*) r=pass ;; *) r=fail ;; esac
 result $r "tiles: $(tail -2 "$OUT/tiles.txt" | head -1)"
+
+echo "== Full screen picture (ARM assembler) against its definition"
+"$QEMU" -cpu arm926 $BUILD/scale_test 3 1 > "$OUT/scale.txt" 2>&1
+last=$(tail -1 "$OUT/scale.txt")
+case "$last" in PASS*) r=pass ;; *) r=fail ;; esac
+result $r "full screen: $(tail -2 "$OUT/scale.txt" | head -1)"
 
 echo "== Opcodes (both cores, one opcode at a time)"
 for seed in 1 2; do

@@ -133,6 +133,14 @@ int  platform_frame_begin(void);
 void platform_frame_copy(int x, int y, int w, int h);
 void platform_frame_present(void);
 
+/* The picture stretched to the whole screen (Screen size, scale.h): puts
+ * the SCALE_SRC_W-pixel-wide picture at src (src_pitch pixels a line,
+ * 'lines' lines) into the frame being shown, stretched to 320x240 over all
+ * of it; overlays copied with platform_frame_copy afterwards go on top.
+ * Where frames aren't turned (platform_frame_begin), the stretched picture
+ * goes into platform_screen() instead and is shown from there. */
+void platform_frame_copy_scaled(const uint16_t *src, int src_pitch, int lines, int smooth);
+
 /* Lines of spare memory after the 240 lines of platform_screen(). */
 int platform_screen_spare_lines(void);
 

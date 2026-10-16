@@ -88,6 +88,8 @@ static void default_settings_into(struct Config *c)
     c->sram_autosave = 1;
     c->compress_saves = 1;
     c->screen_dma = 0;
+    c->screen_size = SCREEN_SIZE_ORIGINAL;
+    c->smooth = 1;
     c->cpu_speed = CPU_SPEED_NORMAL;
     c->cpu_core = CPU_CORE_ARM;
     c->brightness = 0;
@@ -117,6 +119,8 @@ static void copy_settings(struct Config *to, const struct Config *from)
     to->sram_autosave = from->sram_autosave;
     to->compress_saves = from->compress_saves;
     to->screen_dma = from->screen_dma;
+    to->screen_size = from->screen_size;
+    to->smooth = from->smooth;
     to->cpu_speed = from->cpu_speed;
     to->cpu_core = from->cpu_core;
     to->brightness = from->brightness;
@@ -295,6 +299,10 @@ static void read_text(const char *text, struct Config *c, struct FileInfo *info)
             c->compress_saves = clamp(number, 1);
         else if (strcmp(line, "screen_dma") == 0)
             c->screen_dma = clamp(number, 1);
+        else if (strcmp(line, "screen_size") == 0)
+            c->screen_size = clamp(number, NUM_SCREEN_SIZES - 1);
+        else if (strcmp(line, "smooth") == 0)
+            c->smooth = clamp(number, 1);
         else if (strcmp(line, "cpu_speed") == 0)
             info->cpu_speed = number;
         else if (strcmp(line, "cpu_core") == 0)
@@ -386,6 +394,8 @@ static void write_settings(FILE *f, const struct Config *c)
     fprintf(f, "sram_autosave=%u\n", (unsigned) c->sram_autosave);
     fprintf(f, "compress_saves=%u\n", (unsigned) c->compress_saves);
     fprintf(f, "screen_dma=%u\n", (unsigned) c->screen_dma);
+    fprintf(f, "screen_size=%u\n", (unsigned) c->screen_size);
+    fprintf(f, "smooth=%u\n", (unsigned) c->smooth);
     fprintf(f, "cpu_speed=%u\n", (unsigned) c->cpu_speed);
     fprintf(f, "cpu_core=%u\n", (unsigned) c->cpu_core);
     fprintf(f, "brightness=%u\n", (unsigned) c->brightness);
