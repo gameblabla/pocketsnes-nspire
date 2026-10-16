@@ -506,6 +506,36 @@ void S9xDoDMA (uint8 Channel)
 #endif
 						if (!PPU.VMA.FullGraphicCount)
 						{
+#ifdef ARM_ASM_CPU
+							/* With the ARM CPU core setting, the usual case
+							 * (the address moving on after the high byte)
+							 * a word at a time: the same as the loop below,
+							 * which the C core setting keeps (so the game
+							 * tests compare the two). Both bytes of a word
+							 * are in the same tiles. */
+							if (Settings.AsmCPU && PPU.VMA.High)
+							{
+								uint8 *vram = Memory.VRAM;
+								uint8 *cached2 = IPPU.TileCached [TILE_2BIT];
+								uint8 *cached4 = IPPU.TileCached [TILE_4BIT];
+								uint8 *cached8 = IPPU.TileCached [TILE_8BIT];
+								uint32 address = PPU.VMA.Address;
+								uint32 increment = PPU.VMA.Increment;
+								for (; count > 1; count -= 2)
+								{
+									uint32 a = (address << 1) & 0xFFFF;
+									vram [a] = *(base + p);
+									p += inc;
+									vram [a + 1] = *(base + p);
+									p += inc;
+									cached2 [a >> 4] = FALSE;
+									cached4 [a >> 5] = FALSE;
+									cached8 [a >> 6] = FALSE;
+									address += increment;
+								}
+								PPU.VMA.Address = (uint16) address;
+							}
+#endif
 							while (count > 1)
 							{
 								Work = *(base + p);
