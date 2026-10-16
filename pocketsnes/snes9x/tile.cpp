@@ -832,6 +832,82 @@ static inline void DrawTileLines16 (uint16 *Screen, uint8 *Depth, const uint8 *b
 	}
 }
 
+#ifdef ARM_ASM_GFX
+/* DrawBackground's unclipped tiles of one row, with the ARM CPU core
+ * setting: DrawTile16's work for a run of Count tiles with everything in
+ * locals, and blank tiles left before any of it. t is the map entry of
+ * column Quot, b1 and b2 the two halves of the map row; t moves on and
+ * wraps as in DrawBackground and is returned for the next column. The
+ * pixels, depths and GFX.Z1/Z2 come out as from DrawBackground's own loop
+ * calling DrawTile16 (tests/asm/run.sh compares every frame with the C
+ * setting's). */
+const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2, uint32 s,
+			     uint32 Quot, int Count, uint32 StartLine, uint32 LineCount,
+			     uint32 t1, uint32 t2, const uint8 *depths)
+{
+    const bool Big = BG.TileSize != 8;
+    const uint32 TileShift = BG.TileShift, TileAddress = BG.TileAddress, NameSelect = BG.NameSelect;
+    uint8 *const Buffer = BG.Buffer;
+    uint8 *const Buffered = BG.Buffered;
+    const uint32 PaletteMask = BG.PaletteMask, PaletteShift = BG.PaletteShift;
+    const uint16 *const Colors = &IPPU.ScreenColors [BG.StartPalette];
+    uint16 *Screen = (uint16 *) GFX.S + (int32) s;
+    uint8 *Depth = GFX.DB + (int32) s;
+    uint32 SetZ = 0x100, Z = 0x100;
+
+    for (; Count > 0; Count--, Quot++, Screen += 8, Depth += 8)
+    {
+	uint32 Tile = READ_2BYTES (t);
+	Z = depths [(Tile & 0x2000) >> 13];
+	if (Big)
+	{
+	    /* the 8x8 quarter: top or bottom by the line (t1, t2 when flipped
+	     * vertically), left or right by the column (swapped when flipped) */
+	    uint32 q = Quot & 1;
+	    Tile += (Tile & V_FLIP ? t2 : t1) + (Tile & H_FLIP ? 1 - q : q);
+	    t += q;
+	    if (Quot == 63)
+		t = b2;
+	    else if (Quot == 127)
+		t = b1;
+	}
+	else
+	{
+	    t++;
+	    if (Quot == 31)
+		t = b2;
+	    else if (Quot == 63)
+		t = b1;
+	}
+
+	uint32 TileAddr = TileAddress + ((Tile & 0x3ff) << TileShift);
+	if ((Tile & 0x1ff) >= 256)
+	    TileAddr += NameSelect;
+	TileAddr &= 0xffff;
+	uint32 TileNumber = TileAddr >> TileShift;
+	uint8 *pCache = &Buffer [TileNumber << 6];
+	uint8 Cached = Buffered [TileNumber];
+	if (!Cached)
+	    Cached = Buffered [TileNumber] = ConvertTile (pCache, TileAddr);
+	if (Cached == BLANK_TILE)
+	    continue;
+
+	if (Z != SetZ)
+	{
+	    GFX.Z1 = GFX.Z2 = (uint8) Z;
+	    SetZ = Z;
+	}
+	DrawTileLines16Asm [(Tile >> 14) & 3] (Screen, Depth,
+	    pCache + ((Tile & V_FLIP) ? 56 - StartLine : StartLine),
+	    Colors + (((Tile >> 10) & PaletteMask) << PaletteShift), LineCount, 0xffffffff, 0xffffffff);
+    }
+    /* (DrawBackground set them for every tile, the last one included) */
+    if (Z != 0x100 && Z != SetZ)
+	GFX.Z1 = GFX.Z2 = (uint8) Z;
+    return t;
+}
+#endif
+
 void DrawTile16 (uint32 Tile, uint32 Offset, uint32 StartLine,
 	         uint32 LineCount)
 {

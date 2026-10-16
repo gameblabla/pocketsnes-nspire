@@ -449,6 +449,9 @@ static void fx_plot_4bit()
     else a[0x11] &= ~v;
 }
 
+/* (the translator, fxjit.cpp, does this one itself when it's the mode's) */
+void (*fx_plot_4bit_function) () = fx_plot_4bit;
+
 /* 4c(ALT1) - rpix - read color of the pixel with R1,R2 as x,y */
 static void fx_rpix_4bit()
 {

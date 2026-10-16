@@ -20,17 +20,27 @@
  * and random programs on both and compares the whole GSU state and memory
  * (fx_jit_run_counted, which translates blocks that stop after a given
  * number of instructions, and fx_jit_run_until_stop), and tests/asm/run.sh
- * compares Yoshi's Island's frames with the C setting's. What isn't
+ * compares Yoshi's Island's frames with the C setting's.
+ *
+ * Writing R15 is a jump to the value after the next instruction (the delay
+ * slot): branches, iwt r15 and loop to known addresses, and jmp, lms r15
+ * (a return) or any instruction with R15 as its destination to a computed
+ * one, whose block the exit looks up in the table itself. A delay slot
+ * runs with R15 the jump's target, and a multi-byte one takes its operand
+ * bytes from there (Yoshi's Island jumps into the middle of an instruction
+ * that way); both are fine after a jump to a known address. What isn't
  * translated runs on the C interpreter one instruction at a time (fx_step):
- * code in the GSU's RAM, the rare instructions that jump by writing R15,
- * ljmp, a delay slot holding a jump or a multi-byte instruction, an
- * instruction that reads R15 in a delay slot, the end of a bank, and a
+ * code in the GSU's RAM, ljmp, the C functions with R15 as destination, a
+ * delay slot holding a jump, a delay slot reading R15 or with operand bytes
+ * after a jump to a computed address (jump tables), the end of a bank, and a
  * state where the pipe doesn't hold the byte before R15 (a run's first
- * instruction, after a stop). */
+ * instruction, after a stop). A place where a block can't start is
+ * remembered, so it isn't tried again. */
 #include "snes9x.h"
 #include "fxemu.h"
 #include "fxinst.h"
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -76,7 +86,6 @@ uint32 fx_jit_stats [12];
  * nothing to patch, 9 flushes, 10 steps of code in RAM, 11 steps because
  * the state wasn't translatable) */
 #ifdef FX_JIT_STATS_PRINT
-extern "C" int printf (const char *, ...);
 /* (addresses: failed translations and where dispatcher exits went) */
 #define LOG_SLOTS 64
 static uint32 fail_key [LOG_SLOTS], fail_count [LOG_SLOTS], dyn_key [LOG_SLOTS], dyn_count [LOG_SLOTS];
@@ -87,23 +96,6 @@ static void log_key (uint32 *keys, uint32 *counts, uint32 key)
 	if (counts [i] && keys [i] == key) { counts [i]++; return; }
 	if (!counts [i]) { keys [i] = key; counts [i] = 1; return; }
     }
-}
-static void print_stats (void)
-{
-    for (int i = 0; i < LOG_SLOTS && fail_count [i]; i++)
-	printf ("failed %02x:%04x st %03x: %u times, bytes %02x %02x %02x %02x\n", fail_key [i] >> 27,
-		(fail_key [i] >> 11) & 0xffff, fail_key [i] & 0x7ff, fail_count [i],
-		GSU.apvRomBank [fail_key [i] >> 27] [(fail_key [i] >> 11) & 0xffff],
-		GSU.apvRomBank [fail_key [i] >> 27] [((fail_key [i] >> 11) + 1) & 0xffff],
-		GSU.apvRomBank [fail_key [i] >> 27] [((fail_key [i] >> 11) + 2) & 0xffff],
-		GSU.apvRomBank [fail_key [i] >> 27] [((fail_key [i] >> 11) + 3) & 0xffff]);
-    for (int i = 0; i < LOG_SLOTS && dyn_count [i]; i++)
-	printf ("dispatcher exit to %02x:%04x st %03x: %u times\n", dyn_key [i] >> 27, (dyn_key [i] >> 11) & 0xffff,
-		dyn_key [i] & 0x7ff, dyn_count [i]);
-    printf ("fx_jit: entered %u, translated %u (failed %u), interpreted %u (not translatable %u, RAM %u), "
-	    "linked %u, unpatched exits %u, flushes %u\n", fx_jit_stats [3], fx_jit_stats [6], fx_jit_stats [7],
-	    fx_jit_stats [4], fx_jit_stats [11], fx_jit_stats [10], fx_jit_stats [5], fx_jit_stats [8],
-	    fx_jit_stats [9]);
 }
 #endif
 
@@ -117,6 +109,46 @@ struct Block
 static Block blocks [BLOCKS];
 static int block_count;
 static uint32 flushes;			/* (a branch to patch is in code that is still there) */
+
+/* A block that can't be translated (its first instruction runs on the
+ * interpreter), so it isn't tried again */
+static uint32 interpret_marker;
+#define INTERPRET (&interpret_marker)
+
+#ifdef FX_JIT_STATS_PRINT
+static void print_stats (void)
+{
+    for (int i = 0; i < LOG_SLOTS && fail_count [i]; i++)
+	printf ("failed %02x:%04x st %03x: %u times, bytes %02x %02x %02x %02x\n", fail_key [i] >> 27,
+		(fail_key [i] >> 11) & 0xffff, fail_key [i] & 0x7ff, fail_count [i],
+		GSU.apvRomBank [fail_key [i] >> 27] [(fail_key [i] >> 11) & 0xffff],
+		GSU.apvRomBank [fail_key [i] >> 27] [((fail_key [i] >> 11) + 1) & 0xffff],
+		GSU.apvRomBank [fail_key [i] >> 27] [((fail_key [i] >> 11) + 2) & 0xffff],
+		GSU.apvRomBank [fail_key [i] >> 27] [((fail_key [i] >> 11) + 3) & 0xffff]);
+    for (int i = 0; i < LOG_SLOTS && dyn_count [i]; i++)
+	printf ("dispatcher exit to %02x:%04x st %03x: %u times\n", dyn_key [i] >> 27, (dyn_key [i] >> 11) & 0xffff,
+		dyn_key [i] & 0x7ff, dyn_count [i]);
+    /* the code and the blocks, for looking at with objdump */
+    const char *dump = "build/work/jitcode.bin";	/* (semihosting has no environment) */
+    {
+	FILE *f = fopen (dump, "wb");
+	if (f)
+	{
+	    fwrite (fx_jit_code, 4, code_end - fx_jit_code, f);
+	    fclose (f);
+	}
+	printf ("code buffer %p, %u words\n", (void *) fx_jit_code, (unsigned) (code_end - fx_jit_code));
+	for (int i = 0; i < BLOCKS; i++)
+	    if (blocks [i].key_high && blocks [i].code != INTERPRET)
+		printf ("block %02x:%04x st %03x at +%x\n", blocks [i].key_high & 0xff, blocks [i].key_low >> 11,
+			blocks [i].key_low & 0x7ff, (unsigned) (4 * (blocks [i].code - fx_jit_code)));
+    }
+    printf ("fx_jit: entered %u, translated %u (failed %u), interpreted %u (not translatable %u, RAM %u), "
+	    "linked %u, unpatched exits %u, flushes %u\n", fx_jit_stats [3], fx_jit_stats [6], fx_jit_stats [7],
+	    fx_jit_stats [4], fx_jit_stats [11], fx_jit_stats [10], fx_jit_stats [5], fx_jit_stats [8],
+	    fx_jit_stats [9]);
+}
+#endif
 
 /* The prefix state an instruction runs in */
 struct State
@@ -134,10 +166,26 @@ static inline uint32 state_bits (State st)
     return st.alt | st.b << 2 | st.s << 3 | st.d << 7;
 }
 
+/* The table slot to look in first: the address mixed with a salt for the
+ * bank and state, cheap enough for the blocks' own lookups (exit_dynamic).
+ * The tests make it a few bits wide (fx_jit_test_hash_bits), so blocks
+ * meet each other in the first slot all the time. */
+uint32 fx_jit_test_hash_bits = 12;
+
+static inline uint32 block_salt (uint32 pbr, State st)
+{
+    return (state_bits (st) * 0x2b ^ pbr * 0x167) & ((1u << fx_jit_test_hash_bits) - 1);
+}
+
+static inline uint32 block_hash (uint32 pbr, uint32 addr, State st)
+{
+    return (addr ^ (addr >> 12) ^ block_salt (pbr, st)) & ((1u << fx_jit_test_hash_bits) - 1);
+}
+
 static uint32 *find_block (uint32 pbr, uint32 addr, State st)
 {
     uint32 high = 0x80000000u | pbr, low = addr << 11 | state_bits (st);
-    uint32 h = (low * 2654435761u ^ pbr * 40503u) >> 20;
+    uint32 h = block_hash (pbr, addr, st);
     for (int i = 0; i < BLOCKS; i++, h = (h + 1) & (BLOCKS - 1))
     {
 	if (!blocks [h].key_high)
@@ -153,7 +201,7 @@ static bool add_block (uint32 pbr, uint32 addr, State st, uint32 *code)
     if (block_count >= BLOCKS / 2)
 	return false;
     uint32 high = 0x80000000u | pbr, low = addr << 11 | state_bits (st);
-    uint32 h = (low * 2654435761u ^ pbr * 40503u) >> 20;
+    uint32 h = block_hash (pbr, addr, st);
     while (blocks [h].key_high)
 	h = (h + 1) & (BLOCKS - 1);
     blocks [h].key_high = high;
@@ -324,7 +372,9 @@ enum Kind
 struct Insn
 {
     uint32 addr;
+    uint32 r15;		/* R15 while it runs: addr + 1, or a delay slot's jump target */
     uint8 op, kind, len;
+    uint8 jump;		/* it writes R15: a jump to a computed address */
     State st;		/* the state it runs in */
     uint32 imm;		/* operand bytes */
     uint8 reads, writes, store;	/* flags */
@@ -336,17 +386,20 @@ static inline bool control (int kind)
     return kind >= K_BRA && kind <= K_IWT_R15;
 }
 
-/* Decodes the instruction at addr in state st. Returns false for a
- * prefix (st updated). */
-static bool decode (uint32 addr, State &st, Insn &in)
+/* Decodes the instruction at addr in state st, its operand bytes from
+ * 'operands' (a delay slot after a jump takes them from the jump's target).
+ * Returns false for a prefix (st updated). */
+static bool decode (uint32 addr, State &st, Insn &in, uint32 operands)
 {
     uint8 op = code_byte (addr);
     int n = op & 15;
     in.addr = addr;
+    in.r15 = addr + 1;
     in.op = op;
     in.st = st;
     in.len = 1;
     in.imm = 0;
+    in.jump = 0;
     in.reads = in.writes = 0;
     in.kind = K_UNSUPPORTED;
     bool reads_r15 = false, writes_dreg = false, reads_sreg = false;
@@ -387,7 +440,7 @@ static bool decode (uint32 addr, State &st, Insn &in)
     case 0x02: in.kind = K_HELPER; reads_r15 = true; break;	/* cache */
     case 0x03: in.kind = K_LSR; reads_sreg = writes_dreg = true; in.writes = F_S | F_Z | F_C; break;
     case 0x04: in.kind = K_ROL; reads_sreg = writes_dreg = true; in.reads = F_C; in.writes = F_S | F_Z | F_C; break;
-    case 0x05: in.kind = K_BRA; in.len = 2; break;
+    case 0x05: in.kind = K_BRA; in.len = 2; in.imm = code_byte (operands); break;
     case 0x3c: in.kind = K_LOOP; in.writes = F_S | F_Z; break;
     case 0x4c:
 	in.kind = alt & 1 ? K_HELPER : K_PLOT;	/* rpix / plot */
@@ -431,12 +484,14 @@ static bool decode (uint32 addr, State &st, Insn &in)
     {
 	in.kind = K_BCOND;
 	in.len = 2;
+	in.imm = code_byte (operands);
 	static const uint8 flags [10] = { F_S | F_V, F_S | F_V, F_Z, F_Z, F_S, F_S, F_C, F_C, F_V, F_V };
 	in.reads = flags [op - 6];
     }
     else if (op >= 0x10 && op <= 0x1f)		/* move (B) */
     {
-	in.kind = n == 15 ? K_UNSUPPORTED : K_MOVE;
+	in.kind = K_MOVE;
+	in.jump = n == 15;
 	reads_sreg = true;
     }
     else if (op >= 0x30 && op <= 0x3b)
@@ -494,7 +549,7 @@ static bool decode (uint32 addr, State &st, Insn &in)
     else if (op >= 0xa0 && op <= 0xaf)
     {
 	in.len = 2;
-	in.imm = code_byte (addr + 1);
+	in.imm = code_byte (operands);
 	if (alt == 0)
 	    in.kind = K_IBT;
 	else if (alt == 2)
@@ -506,7 +561,7 @@ static bool decode (uint32 addr, State &st, Insn &in)
 	    if (alt == 2)
 		reads_r15 = true;
 	    else
-		in.kind = K_UNSUPPORTED;	/* a jump */
+		in.jump = 1;			/* ibt r15 / lms r15 */
 	}
     }
     else if (op >= 0xb0 && op <= 0xbf)		/* moves (B) */
@@ -537,7 +592,7 @@ static bool decode (uint32 addr, State &st, Insn &in)
     else if (op >= 0xf0)
     {
 	in.len = 3;
-	in.imm = code_byte (addr + 1) | code_byte (addr + 2) << 8;
+	in.imm = code_byte (operands) | code_byte (operands + 1) << 8;
 	if (alt == 0)
 	    in.kind = n == 15 ? K_IWT_R15 : K_IWT;
 	else if (alt == 2)
@@ -546,17 +601,26 @@ static bool decode (uint32 addr, State &st, Insn &in)
 	    reads_r15 = n == 15;
 	}
 	else
-	    in.kind = n == 15 ? K_UNSUPPORTED : K_LM;
+	{
+	    in.kind = K_LM;
+	    in.jump = n == 15;		/* lm r15 */
+	}
     }
 
-    /* Source R15 reads A + 1; a destination of R15 is a jump. */
+    /* Source R15 reads A + 1; a destination of R15 is a jump to the value
+     * (but not through the C functions, which may not write it last). */
     if (reads_sreg && st.s == 15)
 	reads_r15 = true;
     if (writes_dreg && st.d == 15)
-	in.kind = K_UNSUPPORTED;
+    {
+	if (in.kind == K_HELPER)
+	    in.kind = K_UNSUPPORTED;
+	else
+	    in.jump = 1;
+    }
     if (in.kind == K_HELPER)
 	in.reads = F_ALL;		/* (and its writes aren't counted on) */
-    if (addr + in.len - 1 > 0xffff)
+    if (addr > 0xffff || (in.len > 1 && operands + in.len - 2 > 0xffff))
 	in.kind = K_UNSUPPORTED;	/* the bank's end */
     /* reads_r15 is kept in reads' bit 7 */
     if (reads_r15)
@@ -564,21 +628,24 @@ static bool decode (uint32 addr, State &st, Insn &in)
     return true;
 }
 
-/* A delay slot the blocks can run: one byte, no jump, R15 not read. */
-static bool good_delay_slot (const Insn &in, bool prefix)
+/* A delay slot the blocks can run: no jump of its own; after a jump to a
+ * computed address also one byte and R15 not read (R15 is the target while
+ * it runs, and further bytes come from there). */
+static bool good_delay_slot (const Insn &in, bool prefix, bool dynamic)
 {
     if (prefix)
 	return true;
-    return in.len == 1 && !control (in.kind) && in.kind != K_UNSUPPORTED && in.kind != K_STOP &&
-	!(in.reads & 0x80);
+    if (control (in.kind) || in.jump || in.kind == K_UNSUPPORTED || in.kind == K_STOP)
+	return false;
+    return !dynamic || (in.len == 1 && !(in.reads & 0x80));
 }
 
 /* ---- Code for instructions ---- */
 
-static void load_reg (int rt, int n, uint32 addr)
+static void load_reg (int rt, int n, uint32 r15)
 {
     if (n == 15)
-	mov_const (rt, addr + 1);
+	mov_const (rt, r15);
     else
 	LDR (rt, R4, REG (n));
 }
@@ -593,9 +660,15 @@ static void read_r14 (void)
     STRB (R2, R4, G (vRomBuffer));
 }
 
-/* r[d] = rv, then the ROM buffer if d is R14 */
+/* r[d] = rv, then the ROM buffer if d is R14; R15 is a jump: its target
+ * goes in r6 (the block's exit stores it) */
 static void set_dreg (int rv, int d)
 {
+    if (d == 15)
+    {
+	dp_r (OP_MOV, R6, 0, rv);
+	return;
+    }
     STR (rv, R4, REG (d));
     if (d == 14)
 	read_r14 ();
@@ -636,13 +709,75 @@ static void store_regs_pointers (State st)
     STR (R0, R4, G (pvDreg));
 }
 
+/* plot: the 16-colour plot (fx_plot_4bit's work without the prefix
+ * flags and R15, which the block keeps) when that's the screen mode's
+ * (fx_apfOpcodeTable's entry is it: r7 holds its address), else the
+ * table's function. */
+static void emit_plot (const Insn &in)
+{
+    LDR (R12, R5, 4 * ((in.st.alt << 8) | in.op));
+    dp_r (OP_CMP, 0, R12, R7, SH_LSL, 0, C_AL, 1);
+    uint32 *other = out;
+    put (0);					/* bne: the table's function */
+    LDR (R0, R4, REG (1));
+    LDR (R1, R4, REG (2));
+    dp_i (OP_ADD, R2, R0, 1);
+    STR (R2, R4, REG (1));			/* R1 + 1 */
+    dp_i (OP_AND, R0, R0, 0xff);		/* x */
+    dp_i (OP_AND, R1, R1, 0xff);		/* y */
+    LDR (R2, R4, G (vScreenHeight));
+    dp_r (OP_CMP, 0, R1, R2, SH_LSL, 0, C_AL, 1);
+    uint32 *below = out;
+    put (0);					/* bhs: below the screen, nothing */
+    LDR (R3, R4, G (vPlotOptionReg));
+    LDR (R2, R4, G (vColorReg));
+    dp_i (OP_TST, 0, R3, 2, C_AL, 1);		/* dithering: the high nibble where x ^ y is odd */
+    dp_r (OP_EOR, R12, R0, R1, SH_LSL, 0, C_NE);
+    dp_i (OP_TST, 0, R12, 1, C_NE, 1);
+    dp_r (OP_MOV, R2, 0, R2, SH_LSR, 4, C_NE);
+    dp_i (OP_AND, R2, R2, 0xff);		/* c */
+    dp_i (OP_TST, 0, R3, 1, C_AL, 1);		/* colour 0 is transparent unless POR bit 0 */
+    dp_i (OP_TST, 0, R2, 0x0f, C_EQ, 1);
+    uint32 *clear = out;
+    put (0);					/* beq: transparent */
+    /* the pixel's byte: apvScreen [y >> 3] + x [x >> 3] + (y & 7) * 2 */
+    dp_r (OP_MOV, R3, 0, R1, SH_LSR, 3);
+    dp_r (OP_ADD, R3, R4, R3, SH_LSL, 2);
+    LDR (R3, R3, G (apvScreen));
+    dp_r (OP_MOV, R12, 0, R0, SH_LSR, 3);
+    dp_r (OP_ADD, R12, R4, R12, SH_LSL, 2);
+    LDR (R12, R12, G (x));
+    dp_r (OP_ADD, R3, R3, R12);
+    dp_i (OP_AND, R12, R1, 7);
+    dp_r (OP_ADD, R3, R3, R12, SH_LSL, 1);
+    dp_i (OP_AND, R0, R0, 7);
+    dp_i (OP_MOV, R12, 0, 0x80);
+    put (0xE1A00000u | R12 << 12 | R0 << 8 | 0x30 | R12);	/* mov r12, r12, lsr r0: its bit */
+    static const int planes [4] = { 0x00, 0x01, 0x10, 0x11 };
+    for (int p = 0; p < 4; p++)
+    {
+	LDRB (R0, R3, planes [p]);
+	dp_i (OP_TST, 0, R2, 1u << p, C_AL, 1);
+	dp_r (OP_ORR, R0, R0, R12, SH_LSL, 0, C_NE);
+	dp_r (OP_BIC, R0, R0, R12, SH_LSL, 0, C_EQ);
+	STRB (R0, R3, planes [p]);
+    }
+    uint32 *done = out;
+    put (0);					/* b: past the table's call */
+    *other = branch_word (other, out, C_NE);
+    blx (R12);
+    *below = branch_word (below, out, C_CS);
+    *clear = branch_word (clear, out, C_EQ);
+    *done = branch_word (done, out, C_AL);
+}
+
 /* The instruction through fx_apfOpcodeTable (r5 points at it) */
 static void call_helper (const Insn &in)
 {
     if (in.kind != K_PLOT)
     {
 	store_regs_pointers (in.st);
-	mov_const (R0, in.addr + 1);
+	mov_const (R0, in.r15);
 	STR (R0, R4, REG (15));
     }
     LDR (R12, R5, 4 * ((in.st.alt << 8) | in.op));
@@ -652,15 +787,17 @@ static void call_helper (const Insn &in)
 static void emit_insn (const Insn &in)
 {
     const int s = in.st.s, d = in.st.d, n = in.op & 15;
-    const uint32 a = in.addr;
+    const uint32 a = in.r15;		/* (what R15 reads) */
 
     switch (in.kind)
     {
     case K_NOP:
 	break;
     case K_HELPER:
-    case K_PLOT:
 	call_helper (in);
+	break;
+    case K_PLOT:
+	emit_plot (in);
 	break;
     case K_LSR:
 	load_reg (R0, s, a);
@@ -956,7 +1093,7 @@ static void emit_insn (const Insn &in)
 	ram_access (false, R1, R2, R0, R3);
 	break;
     case K_LINK:
-	mov_const (R0, a + 1 + n);
+	mov_const (R0, a + n);
 	STR (R0, R4, REG (11));
 	break;
     case K_SEX:
@@ -1113,7 +1250,7 @@ static void exit_to (uint32 next, State st, uint32 insns)
     {
 	uint32 *target = next == block_start && same_state (st, block_state) ? block_code :
 	    find_block (code_pbr, next, st);
-	if (target)
+	if (target && target != INTERPRET)
 	{
 	    b_to (target);
 	    return;
@@ -1165,10 +1302,50 @@ static void place_stubs (void)
     }
 }
 
-/* Leaves for an address in r6 (jmp, loop's R13): R15 = r6 + 1, the pipe
- * = the program byte at r6. */
+/* Leaves for an address in r6 (jmp, loop's R13, a computed jump): straight
+ * into its block if the table's first slot for it has one, else R15 =
+ * r6 + 1, the pipe = the program byte at r6, and to the dispatcher. */
 static void exit_dynamic (State st, uint32 insns)
 {
+    if (!counted)
+    {
+	/* slot (r6 ^ r6 >> 12 ^ salt) & 4095, key r6 << 11 | state */
+	dp_r (OP_MOV, R0, 0, R6, SH_LSR, 16, C_AL, 1);
+	uint32 *junk = out;
+	put (0);				/* bne: bits above 16 */
+	if (fx_jit_test_hash_bits)
+	{
+	    dp_r (OP_EOR, R2, R6, R6, SH_LSR, 12);
+	    if (block_salt (code_pbr, st))
+		dp_i (OP_EOR, R2, R2, block_salt (code_pbr, st));
+	    dp_r (OP_MOV, R2, 0, R2, SH_LSL, 32 - fx_jit_test_hash_bits);
+	    dp_r (OP_MOV, R2, 0, R2, SH_LSR, 32 - fx_jit_test_hash_bits);
+	}
+	else
+	    dp_i (OP_MOV, R2, 0, 0);
+	dp_r (OP_ADD, R2, R2, R2, SH_LSL, 1);	/* 12 bytes a slot */
+	mov_const (R3, (uint32) (uintptr_t) blocks);
+	dp_r (OP_ADD, R3, R3, R2, SH_LSL, 2);
+	LDR (R1, R3, 0);
+	mov_const (R12, 0x80000000u | code_pbr);
+	dp_r (OP_CMP, 0, R1, R12, SH_LSL, 0, C_AL, 1);
+	uint32 *miss1 = out;
+	put (0);
+	dp_r (OP_MOV, R0, 0, R6, SH_LSL, 11);
+	if (state_bits (st))
+	    dp_i (OP_ORR, R0, R0, state_bits (st));
+	LDR (R1, R3, 4);
+	dp_r (OP_CMP, 0, R1, R0, SH_LSL, 0, C_AL, 1);
+	uint32 *miss2 = out;
+	put (0);
+	LDR (R1, R3, 8);
+	mov_const (R12, (uint32) (uintptr_t) INTERPRET);
+	dp_r (OP_CMP, 0, R1, R12, SH_LSL, 0, C_AL, 1);
+	put (0x112FFF11);			/* bxne r1 */
+	*junk = branch_word (junk, out, C_NE);
+	*miss1 = branch_word (miss1, out, C_NE);
+	*miss2 = branch_word (miss2, out, C_NE);
+    }
     store_exit_state (st, insns);
     dp_i (OP_ADD, R0, R6, 1);
     STR (R0, R4, REG (15));
@@ -1216,6 +1393,16 @@ static int branch_condition (uint8 op)
     }
 }
 
+/* The block's jump to a known address, and its delay slot as it runs when
+ * the jump is taken (R15 the target, more bytes from there) */
+#define END_JUMP 200		/* (end: an instruction that writes R15) */
+static Insn taken_slot;
+
+static inline uint32 static_target (const Insn &c)
+{
+    return c.kind == K_IWT_R15 ? c.imm : c.addr + 2 + (uint32) (int32) (int8) c.imm;
+}
+
 /* Translates a block at addr (in the program bank pbr) entered in state
  * st, of at most max instructions; NULL if its first instruction isn't
  * translated. */
@@ -1237,28 +1424,39 @@ static uint32 *translate (uint32 pbr, uint32 addr, State entry, uint32 max)
     {
 	Insn in;
 	State before = st;
-	bool insn = decode (at, st, in);
+	bool insn = decode (at, st, in, at + 1);
 	if (insn && in.kind == K_UNSUPPORTED)
 	    break;
-	if (insn && control (in.kind))
+	if (insn && (control (in.kind) || in.jump))
 	{
 	    /* It and its delay slot, or stop before it */
 	    if ((uint32) count + 2 > max)
 		break;
 	    State after = in.kind == K_BRA || in.kind == K_BCOND ? before : State { 0, 0, 0, 0 };
+	    /* the slot as it runs with the jump not taken: its bytes in order */
 	    Insn slot;
 	    State slot_state = after;
-	    bool slot_insn = decode (at + in.len, slot_state, slot);
-	    if (!good_delay_slot (slot, !slot_insn))
+	    uint32 slot_addr = at + in.len;
+	    bool slot_insn = decode (slot_addr, slot_state, slot, slot_addr + 1);
+	    bool dynamic = in.kind == K_LOOP || in.kind == K_JMP || in.jump;
+	    if (!good_delay_slot (slot, !slot_insn, dynamic))
 		break;
+	    if (slot_insn && !dynamic)
+	    {
+		/* taken: R15 is the target, the operand bytes from there */
+		uint32 target = static_target (in);
+		State taken_state = after;
+		decode (slot_addr, taken_state, taken_slot, target);
+		taken_slot.r15 = target;
+		if (target > 0xffff || taken_slot.kind == K_UNSUPPORTED)
+		    break;
+	    }
 	    prefix [count] = 0;
 	    list [count++] = in;
 	    prefix [count] = !slot_insn;
-	    if (slot_insn)
-		slot.st = after;
 	    list [count++] = slot;
 	    st = slot_insn ? State { 0, 0, 0, 0 } : slot_state;
-	    end = in.kind;
+	    end = in.jump ? END_JUMP : in.kind;
 	    break;
 	}
 	prefix [count] = !insn;
@@ -1337,35 +1535,47 @@ static uint32 *translate (uint32 pbr, uint32 addr, State entry, uint32 max)
     if (end && end != K_STOP)
     {
 	const Insn &c = list [count - 2];
-	const Insn &slot = list [count - 1];
+	Insn &slot = list [count - 1];
 	bool slot_code = !prefix [count - 1];
 	uint32 total = insns + 2;
 	uint32 a = c.addr;
+	/* where each path goes on after the slot: in order (not taken), or the
+	 * target's bytes after those the slot took */
+	uint32 in_order = a + c.len + (slot_code ? slot.len : 1);
+	if (slot_code)
+	    taken_slot.store = slot.store;
 	switch (end)
 	{
 	case K_BRA:
 	case K_IWT_R15:
 	    {
-		uint32 target = end == K_BRA ? a + 2 + (uint32) (int32) (int8) code_byte (a + 1) : c.imm;
+		uint32 target = static_target (c);
 		if (slot_code)
-		    emit_insn (slot);
-		exit_to (target, st, total);
+		    emit_insn (taken_slot);
+		exit_to (target + (slot_code ? taken_slot.len - 1 : 0), st, total);
 	    }
 	    break;
 	case K_BCOND:
 	    {
-		uint32 target = a + 2 + (uint32) (int32) (int8) code_byte (a + 1);
+		uint32 target = static_target (c);
 		int cond = branch_condition (c.op);
 		uint32 *taken = out;
 		put (0);			/* b<cond> to the taken path */
 		if (slot_code)
 		    emit_insn (slot);
-		exit_to (a + 3, st, total);
+		exit_to (in_order, st, total);
 		*taken = branch_word (taken, out, cond);
 		if (slot_code)
-		    emit_insn (slot);
-		exit_to (target, st, total);
+		    emit_insn (taken_slot);
+		exit_to (target + (slot_code ? taken_slot.len - 1 : 0), st, total);
 	    }
+	    break;
+	case END_JUMP:
+	    /* the instruction leaves its value in r6 (set_dreg) */
+	    emit_insn (c);
+	    if (slot_code)
+		emit_insn (slot);
+	    exit_dynamic (st, total);
 	    break;
 	case K_LOOP:
 	    {
@@ -1395,7 +1605,7 @@ static uint32 *translate (uint32 pbr, uint32 addr, State entry, uint32 max)
 		*done = branch_word (done, out, C_EQ);
 		if (slot_code)
 		    emit_insn (slot);
-		exit_to (a + 2, st, total);
+		exit_to (in_order, st, total);
 	    }
 	    break;
 	case K_JMP:
@@ -1418,7 +1628,8 @@ static uint32 *translate (uint32 pbr, uint32 addr, State entry, uint32 max)
 
 /* ---- Running ---- */
 
-/* The code at the start of the buffer: enter (code, &GSU, table) and exit */
+/* The code at the start of the buffer: enter (code, &GSU, table, the
+ * 16-colour plot) and exit */
 static void setup (void)
 {
     out = fx_jit_code;
@@ -1427,6 +1638,7 @@ static void setup (void)
     put (0xE92D5FF0);			/* push {r4-r12, lr} */
     dp_r (OP_MOV, R4, 0, R1);
     dp_r (OP_MOV, R5, 0, R2);
+    dp_r (OP_MOV, R7, 0, R3);		/* (the 16-colour plot, for emit_plot) */
     put (0xE12FFF10 | R0);		/* bx r0 */
     exit_code = out;
     put (0xE8BD9FF0);			/* pop {r4-r12, pc} */
@@ -1456,7 +1668,8 @@ static void sync_code (const uint32 *from, const uint32 *to)
 }
 
 static bool ready;
-static int (*entry) (uint32 *, struct FxRegs_s *, void (**) ());
+static int (*entry) (uint32 *, struct FxRegs_s *, void (**) (), void (*) ());
+extern void (*fx_plot_4bit_function) ();	/* fxinst.cpp */
 
 /* Under qemu-arm (the tests) the buffer is in a segment that isn't
  * executable: Linux's mprotect, which qemu-arm's user mode runs. */
@@ -1482,7 +1695,7 @@ void fx_jit_flush (void)
     }
     setup ();
     sync_code (fx_jit_code, code_end);
-    entry = (int (*) (uint32 *, struct FxRegs_s *, void (**) ())) enter_code;
+    entry = (int (*) (uint32 *, struct FxRegs_s *, void (**) (), void (*) ())) enter_code;
     ready = true;
 }
 
@@ -1525,18 +1738,20 @@ static uint32 *block_for (uint32 addr, State st)
 	start = code_end;
 	code = translate (pbr, addr, st, MAX_INSNS);
     }
-    if (!code)
-	return NULL;
-    sync_code (start, code_end);
+    if (code)
+	sync_code (start, code_end);
+    else
+	code = INTERPRET;		/* (remembered: not tried again) */
     if (!add_block (pbr, addr, st, code))
     {
 	/* The table is full: start again */
 	fx_jit_flush ();
 	start = code_end;
 	code = translate (pbr, addr, st, MAX_INSNS);
-	if (!code)
-	    return NULL;
-	sync_code (start, code_end);
+	if (code)
+	    sync_code (start, code_end);
+	else
+	    code = INTERPRET;
 	add_block (pbr, addr, st, code);
     }
     return code;
@@ -1568,14 +1783,14 @@ void fx_jit_run (void)
 	    continue;
 	}
 	uint32 *code = block_for (addr, st);
-	if (!code)
+	if (code == INTERPRET)
 	{
 	    fx_step (1);
 	    fx_jit_stats [4]++;
 	    continue;
 	}
 	fx_jit_stats [3]++;
-	uint32 *site = (uint32 *) (uintptr_t) entry (code, &GSU, fx_apfOpcodeTable);
+	uint32 *site = (uint32 *) (uintptr_t) entry (code, &GSU, fx_apfOpcodeTable, fx_plot_4bit_function);
 	if (!site)
 	{
 	    fx_jit_stats [8]++;
@@ -1591,7 +1806,7 @@ void fx_jit_run (void)
 	{
 	    uint32 before = flushes;
 	    uint32 *target = block_for (addr, st);
-	    if (target && flushes == before)
+	    if (target != INTERPRET && flushes == before)
 	    {
 		*site = branch_word (site, target, C_AL);
 		sync_code (site, site + 1);
@@ -1636,7 +1851,7 @@ void fx_jit_run_counted (uint32 n)
 	}
 	counted_insns = 0;
 	fx_jit_stats [2]++;
-	entry (code, &GSU, fx_apfOpcodeTable);
+	entry (code, &GSU, fx_apfOpcodeTable, fx_plot_4bit_function);
 	fx_jit_stats [0] += counted_insns;
 	n -= counted_insns;
 	code_end = code;	/* (not kept) */

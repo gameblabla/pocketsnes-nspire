@@ -40,7 +40,8 @@ extern "C"
     void fx_arm_plot_entries (uint32 *tables, const uint32 *handlers);
 }
 void fx_jit_run_counted (uint32 n);
-extern uint32 fx_jit_stats [6];
+extern uint32 fx_jit_stats [12];
+extern uint32 fx_jit_test_hash_bits;
 #endif
 #include "fxemu.h"
 #include "fxinst.h"
@@ -363,6 +364,7 @@ int main(int argc, char **argv)
 	    int length = 1 + rnd() % 200;
 	    random_state(0, false);
 	    write_program(length);
+	    fx_jit_test_hash_bits = round % 3 == 2 ? 12 : round % 3;
 	    fx_jit_flush();
 	    uint32 pbr = GSU.vPrgBankReg, r15 = GSU.avReg[15] & 0xffff;
 	    for (int k = 0; k < 6; k++)
@@ -401,40 +403,99 @@ int main(int argc, char **argv)
     /* the loop alone, entered at its body (R12 and R13 set): its block is
      * entered clean and loops back to itself after "with r2" */
     static const uint8 loop_body[] = { 0x51, 0x3c, 0x22, 0x00, 0x01, 0x01 };
-    const uint8 *programs[] = { loop_with, branch_to, loop_body };
-    const int sizes[] = { (int) sizeof loop_with, (int) sizeof branch_to, (int) sizeof loop_body };
-    static const char *const names[] = { "loop with with r2", "branch with to r14", "loop body" };
+    /* Delay slots after jumps and jumps to computed addresses, with
+     * addresses filled in below (A = the program's start):
+     * - iwt r15, #A+8 with "ibt r12" in its delay slot: the immediate is the
+     *   byte at A+8, and it goes on at A+9 (as Yoshi's Island does);
+     * - bra A+6 with "cache" in its delay slot (R15 is A+6 there);
+     * - beq A+6 with "link #4" in its delay slot (R11 = R15 + 4 either way);
+     * - to r15; add r1 (a jump to R0 + R1, set to A+16) with "inc r3" in its
+     *   delay slot; alt1; lms r15, (60) (a return to A+16 from RAM);
+     * - link #4; iwt r15, #A+16 (a call), the routine's jmp r11 (back to
+     *   A+5, its block found by the exit itself once translated). */
+    static const uint8 iwt_ibt[] = { 0xff, 0x08, 0x00, 0xac, 0x00, 0x01, 0x01, 0x01, 0x28, 0x51, 0x00, 0x01, 0x01 };
+    static const uint8 bra_cache[] = { 0x05, 0x04, 0x02, 0x00, 0x01, 0x01, 0x51, 0x00, 0x01, 0x01 };
+    static const uint8 beq_link[] = { 0x09, 0x04, 0x94, 0x51, 0x00, 0x01, 0x52, 0x00, 0x01, 0x01 };
+    static const uint8 add_r15[] = { 0x1f, 0x51, 0xd3, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+				     0x01, 0x01, 0x01, 0x01, 0x52, 0x00, 0x01, 0x01 };
+    static const uint8 lms_r15[] = { 0x3d, 0xaf, 0x30, 0xd4, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+				     0x01, 0x01, 0x01, 0x01, 0x53, 0x00, 0x01, 0x01 };
+    static const uint8 call_ret[] = { 0x94, 0xff, 0x10, 0x00, 0x01, 0x52, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01,
+				      0x01, 0x01, 0x01, 0x01, 0x51, 0x9b, 0x01, 0x01, 0x01 };
+    /* ... the routine's jmp r11 with "with r2" in its delay slot, so it
+     * returns in another state; every other run starts at the return
+     * point in the plain state (the same address, two blocks) */
+    static const uint8 call_ret_with[] = { 0x94, 0xff, 0x10, 0x00, 0x01, 0x51, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01,
+					   0x01, 0x01, 0x01, 0x01, 0x9b, 0x22, 0x01, 0x01, 0x01 };
+    const uint8 *programs[] = { loop_with, branch_to, loop_body, iwt_ibt, bra_cache, beq_link, add_r15,
+				lms_r15, call_ret, call_ret_with };
+    const int sizes[] = { (int) sizeof loop_with, (int) sizeof branch_to, (int) sizeof loop_body,
+			  (int) sizeof iwt_ibt, (int) sizeof bra_cache, (int) sizeof beq_link,
+			  (int) sizeof add_r15, (int) sizeof lms_r15, (int) sizeof call_ret,
+			  (int) sizeof call_ret_with };
+    static const char *const names[] = { "loop with with r2", "branch with to r14", "loop body",
+					 "iwt r15 with ibt", "bra with cache", "beq with link",
+					 "to r15; add r1", "lms r15", "call and jmp r11", "jmp r11 with with r2" };
+    const int directed = (int) (sizeof sizes / sizeof sizes[0]);
     if (jit)
 	for (int round = 0; round < n * 10; round++)
-	    for (int p = 0; p < 3; p++)
+	    for (int p = 0; p < directed; p++)
 	    {
+		/* two thirds of the time the table's first slots crowded: every
+		 * block looked for in the same one, or in one of two */
+		fx_jit_test_hash_bits = round % 3 == 2 ? 12 : round % 3;
 		random_state(0, false);
 		uint32 pbr = rnd() & 0x3f, at = 0x8000 + (rnd() & 0x7f00);
 		GSU.vPrgBankReg = pbr;
 		GSU.pvPrgBank = GSU.apvRomBank[pbr];
 		memcpy(&GSU.pvPrgBank[at], programs[p], sizes[p]);
-		/* the loop's target (iwt r13, #at + 6) */
+		/* the addresses: the loop's target (iwt r13, #at + 6), iwt r15's
+		 * target, the call's routine */
+		uint8 *code = &GSU.pvPrgBank[at];
 		if (p == 0)
 		{
-		    GSU.pvPrgBank[at + 4] = (uint8) (at + 6);
-		    GSU.pvPrgBank[at + 5] = (uint8) ((at + 6) >> 8);
+		    code[4] = (uint8) (at + 6);
+		    code[5] = (uint8) ((at + 6) >> 8);
+		}
+		if (p == 3)
+		{
+		    code[1] = (uint8) (at + 8);
+		    code[2] = (uint8) ((at + 8) >> 8);
+		}
+		if (p == 8 || p == 9)
+		{
+		    code[2] = (uint8) (at + 16);
+		    code[3] = (uint8) ((at + 16) >> 8);
 		}
 		fx_jit_flush();
-		for (int k = 0; k < 4; k++)
+		for (int k = 0; k < (p == 9 ? 8 : 4); k++)
 		{
 		    random_state(0, false);
 		    GSU.vStatusReg = (GSU.vStatusReg & ~(FLG_ALT1 | FLG_ALT2 | FLG_B)) | FLG_G;
 		    GSU.pvSreg = GSU.pvDreg = &GSU.avReg[0];
 		    GSU.vPrgBankReg = pbr;
 		    GSU.pvPrgBank = GSU.apvRomBank[pbr];
-		    GSU.avReg[15] = at + 1;
-		    GSU.vPipe = GSU.pvPrgBank[at];
+		    uint32 start_at = p == 9 && k % 2 == 0 ? at + 5 : at;
+		    GSU.avReg[15] = start_at + 1;
+		    GSU.vPipe = GSU.pvPrgBank[start_at];
 		    if (p == 1 && rnd() % 2)
 			GSU.vZero = 0;		/* taken */
 		    if (p == 2)
 		    {
 			GSU.avReg[12] = 2 + rnd() % 6;
 			GSU.avReg[13] = at;
+		    }
+		    if (p == 5 && rnd() % 2)
+			GSU.vZero = 0;		/* taken */
+		    if (p == 6)
+		    {
+			GSU.avReg[1] = rnd() & 0xff;
+			GSU.avReg[0] = at + 16 - GSU.avReg[1];
+		    }
+		    if (p == 7)
+		    {
+			GSU.pvRamBank[0x60] = (uint8) (at + 16);
+			GSU.pvRamBank[0x61] = (uint8) ((at + 16) >> 8);
 		    }
 		    take(start);
 		    fx_run_reference(20000);
@@ -452,6 +513,7 @@ int main(int argc, char **argv)
 		    stopped++;
 		}
 	    }
+    fx_jit_test_hash_bits = 12;
 #endif
 
     printf("%s: %d of %ld runs differ (%s interpreter; %d rounds of all 1024 opcodes, %d programs",

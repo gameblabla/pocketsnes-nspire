@@ -116,6 +116,11 @@ extern uint8 Depths[8][4];
 extern uint8 BGSizes [2];
 
 extern NormalTileRenderer DrawTilePtr;
+#ifdef ARM_ASM_GFX
+const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2, uint32 s,
+			     uint32 Quot, int Count, uint32 StartLine, uint32 LineCount,
+			     uint32 t1, uint32 t2, const uint8 *depths);
+#endif
 extern ClippedTileRenderer DrawClippedTilePtr;
 extern NormalTileRenderer DrawHiResTilePtr;
 extern ClippedTileRenderer DrawHiResClippedTilePtr;
@@ -2628,6 +2633,17 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 				Count = Width - Count;
 				int Middle = Count >> 3;
 				Count &= 7;
+#ifdef ARM_ASM_GFX
+				// ... with the ARM CPU core setting, in one go (tile.cpp)
+				if (Settings.AsmCPU && Middle > 0 && DrawTilePtr == DrawTile16 &&
+				    !BG.DirectColourMode && !IPPU.HalfWidthPixels)
+				{
+					t = (uint16 *) DrawBGTiles16 (t, b1, b2, s, Quot, Middle, VirtAlign, Lines, t1, t2, depths);
+					s += Middle * 8;
+					Quot += Middle;
+					Middle = 0;
+				}
+#endif
 				for (int C = Middle; C > 0; s += (IPPU.HalfWidthPixels ? 4 : 8) * GFX.PixSize, Quot++, C--)
 				{
 					Tile = READ_2BYTES(t);
