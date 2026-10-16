@@ -152,6 +152,11 @@ Estimating the speed on the calculator
     tests/calc_speed.sh ROM [STATE] [FRAMES] [CORE] [INPUT]
     tests/calc_speed.sh build/asm-test/roms/yi.sfc build/asm-test/roms/yi.sv001
 
+    FUNCS=40 tests/calc_speed.sh ...            # also the 40 busiest functions
+    ANNOTATE='_Z10DrawTile16jjjj' tests/calc_speed.sh ...
+                                                # that function's instructions, each
+                                                # with how many times a frame it ran
+
 Builds `tests/asm/game_test` with the calculator build's compiler flags,
 runs it under a qemu-arm with plugin support and `tools/calc_speed/arm926.c`
 (an ARM926EJ-S model: the pipeline's extra cycles, 16 KB / 8 KB caches, the
@@ -167,11 +172,17 @@ calculator's own speed tests of Super Mario World (2026-10-10, 396 MHz:
 3.70 ms per frame with nothing drawn on the ARM CPU core, 4.74 ms on the C
 core, 79.2 fps drawn with the no-tearing output): 2.58 cycles per
 instruction running the game, 2.64 drawing it, 0.63 ms more per frame, and
-2.0 ms to show a drawn frame. It reproduces those within 1%, but nothing
-else on the calculator has checked it yet: a speed test of another game
-(Yoshi's Island) would. To refit, run the speed test on the calculator, run
-the same game and state here, and solve for the four numbers (they're
-variables at the top of the script). The plugin's own cycle model didn't fit
+2.0 ms to show a drawn frame. It reproduces those within 1%. Yoshi's
+Island checked it (2026-10-14): from the owner's save, with the DMA output
+(0.5 ms a frame instead of 2.0, `SHOW_MS=0.5`), the calculator's speed test
+measured 53.0 fps and the script said 53.3. The split was further off: the
+calculator measured 7.9 ms a frame drawing and 10.3 ms the rest, the
+script 9.2 and 9.0. Fitted to that game, drawing takes about 2.3 cycles an
+instruction and the Super FX interpreter about 3.2 (2.64 and 2.58 in the
+script), so expect a bit less from saving drawing instructions than the
+script says and a bit more from saving Super FX ones. To refit, run the
+speed test on the calculator, run the same game and state here, and solve
+for the four numbers (they're variables at the top of the script). The plugin's own cycle model didn't fit
 the calculator as well (its memory timings can't make both the C and ARM
 cores come out right), so it's only used to count.
 
@@ -231,7 +242,21 @@ picture:
   registers and cycle count, for every frame. run.sh runs it on both cores
   for the homebrew demos and, when they're in `~/nspire/build/testroms`,
   Super Mario World, Chrono Trigger, Zelda: A Link to the Past and Yoshi's
-  Island (Super FX), and the lines must be identical.
+  Island (Super FX), and the lines must be identical. The CPU core setting
+  also picks the Super FX interpreter, the tile drawers' and line fills'
+  ARM assembler (`pocketsnes/arm/gfx_arm.s`) and the word-at-a-time VRAM
+  DMA loop, against the C versions with *C*, so the games compare those
+  too.
+* **tile_test** draws random tiles with `DrawTile16` and
+  `DrawClippedTile16` on both settings (the assembler's inner loop and the
+  C one) and with Snes9x 1.43's drawers (`tests/tile_ref.h`, which the PC
+  unit tests use too), and compares the whole screen and depth buffers:
+  blank, opaque and partly transparent tiles, every flip, palettes, places
+  on the screen, 0 to 8 lines, clips, depths and Z values from 0 to 255,
+  and line lengths of 256 to 512 pixels. run.sh runs 20000 cases;
+  `tile_test 100000 1` runs more. Each of 12 bugs planted in the assembler
+  (a condition, the compare's order, a byte's shift, a mask, a flip, the
+  next line's depth, Z2, the line count) made it fail.
 * **game_trace** is game_test printing every opcode of chosen frames with
   the registers, on either core, so the first instruction where the two
   differ can be found with `diff`:

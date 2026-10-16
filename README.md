@@ -193,8 +193,9 @@ Speed and overclocking
 
 On a CX II at its normal 396 MHz, Super Mario World runs at a full 60 frames
 per second with every frame drawn. Games with extra chips (Super FX like
-Yoshi's Island and Star Fox, or SA-1) are heavier; Yoshi's Island should now
-manage 60 too (estimated on a PC, see *How it got faster*).
+Yoshi's Island and Star Fox, or SA-1) are heavier: Yoshi's Island measured
+53 fps in a busy spot of its first world, and the changes since are
+estimated to bring that to about 65 (see *How it got faster*).
 
 To help a slow game:
 
@@ -375,8 +376,9 @@ What runs
 * There's no sound emulation at all, which also saves time.
 * Yoshi's Island's top line no longer flickers (fixed 2026-10-13; the
   original port and v4.0 have the flicker).
-* The Super FX interpreter in ARM assembler goes with *CPU core: ARM*; with
-  *CPU core: C* the Super FX runs on the C interpreter too.
+* The Super FX interpreter, the tile drawing and the line clearing in ARM
+  assembler and the faster VRAM DMA loop go with *CPU core: ARM*; with
+  *CPU core: C* those run the C code too.
 * ROMs can be up to 8 MB, if the calculator has the memory free.
 * Calculators without a colour screen aren't supported.
 
@@ -408,6 +410,18 @@ tests above; not yet measured on the calculator):
 | Each line keeps its own fixed colour (so the sky no longer makes the picture be drawn a line at a time), and the Super FX interpreter rewritten in C | 59.5 |
 | The Super FX interpreter in ARM assembler (with the ARM CPU core) | 64.5 |
 
+Then measured on the calculator from the owner's own save, a busier spot
+(more than twice the Super FX work a frame), with the DMA screen output:
+53.0 fps for the build in the last row, where the PC model said 53.3. From
+that save, same output, estimated:
+
+| Version | Frames per second (no speed limit) |
+|---|---:|
+| The build above (measured 53.0) | 53.3 |
+| The Super FX interpreter's assembler also does what writes R14, plot, merge and color | 56.5 |
+| Tile drawing and line clearing in ARM assembler | 63.6 |
+| VRAM DMA a word at a time | 65.3 |
+
 * **The sky's colour bands.** Yoshi's Island changes the "fixed colour"
   register on almost every line (its sky gradient). Each change used to make
   the renderer draw everything above that line first, so the picture was
@@ -421,7 +435,26 @@ tests above; not yet measured on the calculator):
   instruction's code to the next; the ARM assembler version keeps them in
   ARM registers and runs the common instructions itself (the rare ones go
   to their C function). From about 39 ARM instructions per GSU instruction
-  to 25 (C) and 17 (assembler).
+  to 25 (C) and 17 (assembler). Yoshi's Island often makes R14 the
+  destination, and writing R14 reloads the GSU's ROM buffer, so those
+  instructions went to C too; the assembler now has a version of each for
+  that (a third table), and does plot (4-bit colours), merge and color
+  itself.
+* **Tile drawing in ARM assembler.** A tile's line is 8 palette indexes,
+  and each pixel is drawn where it isn't 0 and is in front of what's there.
+  The C code took 9 instructions a pixel and then waited for the depth it
+  had just loaded; the assembler takes 6 (one instruction gets the index,
+  already doubled to find its colour, and whether it's 0; the depth test
+  and both stores are conditional, with no branch) and loads each depth a
+  pixel early, so it never waits.
+* **Clearing the lines.** Before drawing, each line's two depth buffers and
+  the sub screen are filled (Yoshi's Island: 1 KB a line). That's now 32
+  bytes per store instruction, which the CPU's write buffer sends to memory
+  in bursts, instead of 4.
+* **Copies to video memory.** Yoshi's Island copies about 3.5 KB a frame to
+  VRAM by DMA. Each byte went through a function that worked out its
+  address again and marked its tiles as changed in three caches; both bytes
+  of a word now go together, with the tiles marked once.
 
 * **Drawing straight into the frame.** The original drew into one buffer,
   copied it to another, and then had Ndless's `lcd_blit` copy it again.

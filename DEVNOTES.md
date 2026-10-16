@@ -324,12 +324,30 @@ Emulation core:
   (`pocketsnes/arm/fx_run_arm.s`) keeps them, and R15, in ARM registers. Both
   run the rare instructions through `fx_apfOpcodeTable` (the original C
   functions) with the state written back first. The assembler one also
-  sends any instruction that would read R15 by register number or write R14
-  (the ROM buffer) by number there, and while the source is R15 or the
-  destination R14 or R15 it uses a "careful" table that sends everything
-  there; so its own code never needs those checks. It runs with *CPU core:
+  sends any instruction that would read or write R15 by register number
+  there, and while the source or the destination is R15 it uses a
+  "careful" table that sends everything there. While the destination is
+  R14 it uses a third table of the handlers' `_d14` versions, which reload
+  the ROM buffer after writing R14 (the handlers are macros assembled
+  twice). So its own code never needs those checks. It runs with *CPU core:
   ARM* (the C one with *C*, as a fallback). `tests/fx_test.cpp` checks both
   against the original loop, byte for byte.
+* **Fast paths go with *CPU core: ARM*, the C code with *C*.** The tile
+  drawers' inner loop and the line fills in ARM assembler
+  (`pocketsnes/arm/gfx_arm.s`, `ARM_ASM_GFX`) and the word-at-a-time VRAM
+  DMA loop (`dma.cpp`) check `Settings.AsmCPU`, like the Super FX
+  interpreter. That leaves *C* as a fallback with the original code, and
+  lets `tests/asm/run.sh` compare every frame of the test games with and
+  without them (the C setting's run is the reference).
+* **The tile drawers' assembler** (`DrawTileLines16_*`, 8 versions: flips,
+  clipped or not) gets each pixel's palette index already doubled with one
+  `ands` (mask 0x1fe, shifted), which also says whether it's 0; the depth
+  compare and the three loads/stores after it are conditional, and the next
+  pixel's depth is loaded between the colour's load and its store, so no
+  load result is waited for (byte and halfword loads come 2 cycles late on
+  the ARM926). `DrawTile16`'s C part (the tile cache lookup and palette)
+  calls it through a table indexed by the flip bits; it reads Z1, Z2 and
+  PPL from GFX itself (offsets checked with `static_assert` in tile.cpp).
 
 
 Gotchas
@@ -456,6 +474,8 @@ History
 | 2026-10-13 | ee26428 | Yoshi's Island's top line steady: H-blank at dot 274, lines taken at dot 48 (not pushed) |
 | 2026-10-13 | 84f8ed7..05b6cf7 | Per-line fixed colour; Super FX interpreters in C and ARM assembler; `tests/calc_speed.sh` (not pushed) |
 | 2026-10-14 | | S-DD1 (Star Ocean, Street Fighter Alpha 2) and its test cartridge (not pushed) |
+| 2026-10-15 | 82d4db8 | Super FX assembler: R14 destination table, plot, merge, color (not pushed) |
+| 2026-10-15 | 71bef17..ee6d762 | Tile drawing and line fills in ARM assembler, VRAM DMA a word at a time, `calc_speed.sh` FUNCS/ANNOTATE (not pushed) |
 
 `git log` has the details; every commit message says what changed and why.
 
@@ -465,9 +485,11 @@ Open items and ideas
 
 Waiting on the owner:
 
-* A speed test of Yoshi's Island on the calculator with the new build, to
-  check `tests/calc_speed.sh`'s estimate (64.5 fps with no speed limit from
-  the testroms save) and refit it if needed.
+* A speed test of Yoshi's Island on the calculator from the owner's save
+  (state 10, copied to `build/calc-saves/yi/`) with the 2026-10-15 build
+  (uploaded 2026-10-15, 460,768 bytes with the owner's settings).
+  `tests/calc_speed.sh` estimates 65.3 fps with no speed limit and the DMA
+  output (`SHOW_MS=0.5`); the build before measured 53.0 (estimate 53.3).
 
 * Run v4.0's `_PocketSNES.tns` on the calculator (uploaded 2026-10-11):
   settings, keys and saves still there; `_PocketSNES` first in `snes`; how
@@ -475,8 +497,11 @@ Waiting on the owner:
 
 Ideas, most promising first (see README → Future steps):
 
-* Tile drawing in ARM assembly (snes9x2002's `tile16` renderer). Drawing is
-  still the biggest part of a frame.
+* More of the tile drawing in ARM assembly: `DrawTile16`'s C part (tile
+  cache lookup, palette, the call) is 48 instructions a tile, and in Yoshi's
+  Island 1300 of its 3000 calls a frame are for blank tiles, which
+  `DrawBackground` could skip itself. `DrawBackground` is another 134K
+  instructions a frame there.
 * A lighter HBlank sync for the ARM core (`doHBlank` save/load of registers
   is about 8% of an ARM frame), and calling `S9xGetPPU`/`S9xGetCPU`
   directly for I/O.

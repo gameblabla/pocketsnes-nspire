@@ -414,3 +414,26 @@ Where things stand (2026-10-05)
   over the message's own length and drop anything read past it. Writes add
   the empty packet after a message that fills whole USB packets. Checked
   with files of 478 to 40,000 bytes both ways.
+
+Yoshi's Island (2026-10-14)
+---------------------------
+
+* The owner's speed test of Yoshi's Island (build eebf818, 396 MHz, DMA
+  output, their save in the first world, every frame drawn): 53.0 fps;
+  a frame took 10.3 ms running the game (cpu), 7.9 ms drawing (gfx) and
+  0.5 ms getting it on screen (out). `tests/calc_speed.sh` with the same
+  save said 53.3 fps, but 9.2 ms drawing and 9.0 ms for the rest.
+* So per ARM instruction this game's drawing is cheaper than Super Mario
+  World's (about 2.3 cycles instead of the fitted 2.64) and its Super FX
+  interpreter dearer (about 3.2 cycles instead of 2.58; probably the
+  indirect jump per GSU instruction, and plotting all over the GSU's 128 KB
+  of RAM). Fitted with the CPU core and PPU parts at 2.58, as for SMW.
+* The busiest code then, in ARM instructions a frame: the tile drawers
+  963K, the Super FX 791K (632K after 82d4db8), the PPU, DMA and timing
+  283K (VRAM DMA through the register functions 118K of it), the 65c816
+  core 203K, `DrawBackground` 134K, the per-line buffer clears 149K.
+* Yoshi's Island blanks its own top 8 and bottom 8 lines during play (the
+  screen is off until its line-8 IRQ and again from line 216), so it shows
+  208 lines of its 224; centred on the 240-line screen, that's 16 black
+  rows above and below instead of SMW's 8. A real SNES does the same; a
+  TV's overscan hides it.
