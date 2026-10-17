@@ -4334,7 +4334,16 @@ void S9xUpdateScreen ()
 {
     uint32 perf_start = S9xPerfTicks ();
     int32 x2 = 1;
-	
+
+#ifdef ARM_ASM_CPU
+    /* (the colours rebuilt unless the brightness is back to theirs) */
+    if (S9xBrightnessPending)
+    {
+		if (IPPU.XB != mul_brightness [PPU.Brightness])
+			S9xFixColourBrightness ();
+		S9xBrightnessPending = FALSE;
+    }
+#endif
     GFX.S = GFX.Screen;
     GFX.r2131 = Memory.FillRAM [0x2131];
     GFX.r212c = Memory.FillRAM [0x212c];

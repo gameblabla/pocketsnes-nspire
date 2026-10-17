@@ -201,8 +201,21 @@ void S9xUpdateHTimer ()
 	}
 }
 
+#ifdef ARM_ASM_CPU
+/* With the ARM CPU core setting, the colours are rebuilt for a new
+ * brightness only when they're next drawn with (S9xUpdateScreen), and not
+ * at all if it's back to theirs by then: games change it and back in
+ * V-blank, Yoshi's Island twice a frame. Until then IPPU.XB and the
+ * colours stay as they were; CGRAM writes go on with the old brightness
+ * and are rebuilt with the rest. */
+bool8 S9xBrightnessPending = FALSE;
+#endif
+
 void S9xFixColourBrightness ()
 {
+#ifdef ARM_ASM_CPU
+    S9xBrightnessPending = FALSE;
+#endif
     IPPU.XB = mul_brightness [PPU.Brightness];
 #ifndef FOREVER_16_BIT
     if (Settings.SixteenBit)
@@ -244,6 +257,11 @@ void S9xSetPPU (uint8 Byte, uint16 Address)
 					IPPU.ColorsChanged = TRUE;
 					IPPU.DirectColourMapsNeedRebuild = TRUE;
 					PPU.Brightness = Byte & 0xF;
+#ifdef ARM_ASM_CPU
+					if (Settings.AsmCPU)
+						S9xBrightnessPending = TRUE;
+					else
+#endif
 					S9xFixColourBrightness ();
 					if (PPU.Brightness > IPPU.MaxBrightness)
 						IPPU.MaxBrightness = PPU.Brightness;
