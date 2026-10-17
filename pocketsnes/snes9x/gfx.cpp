@@ -121,6 +121,7 @@ const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2
 			     uint32 Quot, int Count, uint32 StartLine, uint32 LineCount,
 			     uint32 t1, uint32 t2, const uint8 *depths, uint32 Ceiling, uint32 *Drawn);
 bool8 TileWasDrawn (uint32 Tile);
+extern uint32 FixedMathMade;
 
 /* With the ARM CPU core setting: for each line of the depth buffers
  * ([0] GFX.ZBuffer, [1] GFX.SubZBuffer), a depth at least as high as any
@@ -3893,6 +3894,9 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 			GFX.FixedColour = BUILD_PIXEL (IPPU.XB [PPU.FixedColourRed],
 				IPPU.XB [PPU.FixedColourGreen],
 				IPPU.XB [PPU.FixedColourBlue]);
+#ifdef ARM_ASM_GFX
+			FixedMathMade = 0;	/* (tile.cpp: made again with these colours) */
+#endif
 			
 			/* A common case of the backdrop pass at the end, done before the
 			 * main screen is drawn instead, a whole line at a time: no colour
@@ -4028,6 +4032,24 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 					memcpy (GFX.Screen + y * GFX.Pitch2, GFX.SubScreen + y * GFX.Pitch2,
 						256 * x2 * sizeof (uint16));
 			}
+
+#ifdef ARM_ASM_GFX
+			/* With the ARM CPU core setting, the backdrop pass at the end
+			 * for a backdrop without colour maths and no colour window (the
+			 * backdrop colour wherever nothing on the main screen was drawn,
+			 * one pixel at a time) is done here instead, a line at a time.
+			 * The main screen's drawers give every pixel they draw a depth
+			 * above 0 and never read the main screen's own pixels, so lines
+			 * filled with the backdrop colour first end up the same. */
+			bool8 backdrop_first = Settings.AsmCPU && !SUB_OR_ADD(5) && !IPPU.Clip [0].Count [5];
+			if (backdrop_first)
+			{
+				for (uint32 y = starty; y <= endy; y++)
+					FillLine16 ((uint16 *) (GFX.Screen + y * GFX.Pitch2), IPPU.ScreenColors [0], 256 * x2);
+			}
+#else
+			const bool8 backdrop_first = FALSE;
+#endif
 
 			GFX.DB = GFX.ZBuffer;
 			RenderScreen (GFX.Screen, FALSE, FALSE, MAIN_SCREEN_DEPTH);
@@ -4244,14 +4266,14 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 						}
 					}
 				}
-				else
+				else if (!backdrop_first)	// (else done before the main screen)
 				{
 					for (uint32 y = starty; y <= endy; y++)
 					{
 						uint16 *p = (uint16 *) (GFX.Screen + y * GFX.Pitch2);
 						uint8 *d = GFX.ZBuffer + y * GFX.ZPitch;
 						uint8 *e = d + 256 * x2;
-					
+
 						while (d < e)
 						{
 							if (*d == 0)

@@ -1384,12 +1384,158 @@ static void WRITE_4PIXELS16_FLIPPED_SUB1_2 (uint32 Offset, uint8 *Pixels, uint16
 	}
 }
 
+#ifdef ARM_ASM_GFX
+/* The colour maths drawers (DrawTile16Add and the others) with the ARM CPU
+ * core setting: what RENDER_TILE and RENDER_CLIPPED_TILE do with
+ * WRITE_4PIXELS16_ADD and the others (which reload GFX's fields after every
+ * pixel stored), with the lines drawn by DrawTileLinesMath16_X in ARM
+ * assembler (pocketsnes/arm/gfx_arm.s). A pixel drawn is mixed by the sub
+ * screen's depth under it: 0 nothing (its own colour), 1 the fixed colour,
+ * more the sub screen's pixel. For the fixed colour the drawers take the
+ * colour from FixedMathColours, the palette with it already mixed in. The
+ * depths are GFX.ZBuffer's and GFX.SubZBuffer's, as in the helpers. Direct
+ * colour tiles keep the C code. */
+enum TileMath
+{
+    MATH_ADD,		/* the sub screen or the fixed colour added */
+    MATH_ADD1_2,	/* ... the sub screen halved, the fixed colour not */
+    MATH_SUB,		/* ... subtracted */
+    MATH_SUB1_2,
+    MATH_FIXED_ADD1_2,	/* the fixed colour only, halved */
+    MATH_FIXED_SUB1_2
+};
+
+struct MathTile
+{
+    uint32 LineCount;
+    int32 Step;			/* 8, or -8 flipped vertically */
+    uint32 MaskA, MaskB;
+    uint32 PPL;
+    const uint16 *Fixed;	/* the colours with the fixed colour mixed in */
+    uint32 Z;			/* GFX.Z1 << 8 | GFX.Z2 */
+    int32 Sub, SubDepth;	/* bytes to the sub screen's pixel and depth */
+    const uint16 *Table;
+};
+static_assert (offsetof (struct MathTile, Fixed) == 20 && offsetof (struct MathTile, Z) == 24 &&
+	       offsetof (struct MathTile, Table) == 36, "MathTile moved: update pocketsnes/arm/gfx_arm.s");
+
+typedef void (*TileLinesMath16Asm) (uint16 *Screen, uint8 *Depth, const uint8 *bp, const uint16 *Colors,
+				    const struct MathTile *m);
+extern "C"
+{
+    void DrawTileLinesMath16_add (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_add_h (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_add1_2 (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_add1_2_h (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_sub (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_sub_h (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_sub1_2 (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_sub1_2_h (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_fixed (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_fixed_h (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+}
+/* [TileMath][flipped horizontally] */
+static const TileLinesMath16Asm DrawTileLinesMath16Asm [6][2] = {
+    { DrawTileLinesMath16_add, DrawTileLinesMath16_add_h },
+    { DrawTileLinesMath16_add1_2, DrawTileLinesMath16_add1_2_h },
+    { DrawTileLinesMath16_sub, DrawTileLinesMath16_sub_h },
+    { DrawTileLinesMath16_sub1_2, DrawTileLinesMath16_sub1_2_h },
+    { DrawTileLinesMath16_fixed, DrawTileLinesMath16_fixed_h },
+    { DrawTileLinesMath16_fixed, DrawTileLinesMath16_fixed_h }
+};
+
+/* IPPU.ScreenColors with GFX.FixedColour mixed in, as the drawers mix it
+ * over a sub screen depth of 1, made 16 colours at a time when a tile first
+ * needs them. FixedMathMade is cleared whenever the colours, the fixed
+ * colour or the way of mixing may have changed (gfx.cpp, before drawing). */
+static uint16 FixedMathColours [256];
+uint32 FixedMathMade;		/* bit p: colours 16p to 16p + 15 */
+static uint32 FixedMathMix;	/* how they were mixed: a TileMath, the halved ones as their whole ones */
+
+static const uint16 *FixedMathFor (enum TileMath Math, const uint16 *Colors)
+{
+    uint32 Mix = Math == MATH_ADD1_2 ? MATH_ADD : Math == MATH_SUB1_2 ? MATH_SUB : Math;
+    if (Mix != FixedMathMix)
+    {
+	FixedMathMade = 0;
+	FixedMathMix = Mix;
+    }
+    uint32 First = (uint32) (Colors - IPPU.ScreenColors);
+    uint32 Last = First + (1u << BG.BitShift) - 1;
+    if (Last > 255)
+	Last = 255;
+    for (uint32 p = First >> 4; p <= Last >> 4; p++)
+	if (!(FixedMathMade & (1u << p)))
+	{
+	    const uint32 F = GFX.FixedColour;
+	    for (uint32 i = p * 16; i < p * 16 + 16; i++)
+	    {
+		uint32 C = IPPU.ScreenColors [i];
+		FixedMathColours [i] = (uint16) (Mix == MATH_ADD ? COLOR_ADD (C, F) :
+						 Mix == MATH_SUB ? (uint16) COLOR_SUB (C, F) :
+						 Mix == MATH_FIXED_ADD1_2 ? (uint16) COLOR_ADD1_2 (C, F) :
+						 COLOR_SUB1_2 (C, F));
+	    }
+	    FixedMathMade |= 1u << p;
+	}
+    return FixedMathColours + First;
+}
+
+/* A tile's lines; d1 and d2 as TILE_CLIP_PREAMBLE makes them (screen pixels
+ * 0-3 and 4-7; all set for an unclipped tile) */
+static inline void DrawTileMath16 (enum TileMath Math, uint32 Tile, uint32 Offset, const uint8 *pCache,
+				   uint32 StartLine, uint32 LineCount, uint32 d1, uint32 d2,
+				   const uint16 *ScreenColors)
+{
+    struct MathTile m;
+    m.MaskA = d1;
+    m.MaskB = d2;
+    if (Tile & H_FLIP)
+    {
+	SWAP_DWORD (d1);
+	SWAP_DWORD (d2);
+	m.MaskA = d2;
+	m.MaskB = d1;
+    }
+    m.LineCount = LineCount;
+    m.Step = Tile & V_FLIP ? -8 : 8;
+    m.PPL = GFX.PPL;
+    m.Fixed = FixedMathFor (Math, ScreenColors);
+    m.Z = GFX.Z1 << 8 | GFX.Z2;
+    m.Sub = GFX.Delta * 2;
+    m.SubDepth = (int32) (GFX.SubZBuffer - GFX.ZBuffer);
+    m.Table = Math == MATH_ADD ? GFX.X2 : Math == MATH_SUB ? GFX.ZERO_OR_X2 : GFX.ZERO;
+    DrawTileLinesMath16Asm [Math][(Tile & H_FLIP) != 0] ((uint16 *) GFX.S + (int32) Offset,
+							  GFX.ZBuffer + (int32) Offset,
+							  pCache + (Tile & V_FLIP ? 56 - StartLine : StartLine),
+							  ScreenColors, &m);
+}
+
+#define MATH_TILE(MATH) \
+	if (Settings.AsmCPU && !BG.DirectColourMode) \
+	{ \
+		DrawTileMath16 (MATH, Tile, Offset, pCache, StartLine, LineCount, 0xffffffff, 0xffffffff, \
+				ScreenColors); \
+		return; \
+	}
+#define MATH_CLIPPED_TILE(MATH) \
+	if (Settings.AsmCPU && !BG.DirectColourMode) \
+	{ \
+		DrawTileMath16 (MATH, Tile, Offset, pCache, StartLine, LineCount, d1, d2, ScreenColors); \
+		return; \
+	}
+#else
+#define MATH_TILE(MATH)
+#define MATH_CLIPPED_TILE(MATH)
+#endif
 
 void DrawTile16Add (uint32 Tile, uint32 Offset, uint32 StartLine,
 		    uint32 LineCount)
 {
 	TILE_PREAMBLE
 	register uint8 *bp;
+
+	MATH_TILE (MATH_ADD)
 
 	RENDER_TILE(WRITE_4PIXELS16_ADD, WRITE_4PIXELS16_FLIPPED_ADD, 4)
 }
@@ -1402,6 +1548,7 @@ void DrawClippedTile16Add (uint32 Tile, uint32 Offset,
     register uint8 *bp;
 
     TILE_CLIP_PREAMBLE
+    MATH_CLIPPED_TILE (MATH_ADD)
     RENDER_CLIPPED_TILE(WRITE_4PIXELS16_ADD, WRITE_4PIXELS16_FLIPPED_ADD, 4)
 }
 
@@ -1410,6 +1557,8 @@ void DrawTile16Add1_2 (uint32 Tile, uint32 Offset, uint32 StartLine,
 {
     TILE_PREAMBLE
     register uint8 *bp;
+
+    MATH_TILE (MATH_ADD1_2)
 
     RENDER_TILE(WRITE_4PIXELS16_ADD1_2, WRITE_4PIXELS16_FLIPPED_ADD1_2, 4)
 }
@@ -1422,6 +1571,7 @@ void DrawClippedTile16Add1_2 (uint32 Tile, uint32 Offset,
     register uint8 *bp;
 
     TILE_CLIP_PREAMBLE
+    MATH_CLIPPED_TILE (MATH_ADD1_2)
     RENDER_CLIPPED_TILE(WRITE_4PIXELS16_ADD1_2, WRITE_4PIXELS16_FLIPPED_ADD1_2, 4)
 }
 
@@ -1430,6 +1580,8 @@ void DrawTile16Sub (uint32 Tile, uint32 Offset, uint32 StartLine,
 {
     TILE_PREAMBLE
     register uint8 *bp;
+
+    MATH_TILE (MATH_SUB)
 
     RENDER_TILE(WRITE_4PIXELS16_SUB, WRITE_4PIXELS16_FLIPPED_SUB, 4)
 }
@@ -1442,6 +1594,7 @@ void DrawClippedTile16Sub (uint32 Tile, uint32 Offset,
     register uint8 *bp;
 
     TILE_CLIP_PREAMBLE
+    MATH_CLIPPED_TILE (MATH_SUB)
     RENDER_CLIPPED_TILE(WRITE_4PIXELS16_SUB, WRITE_4PIXELS16_FLIPPED_SUB, 4)
 }
 
@@ -1450,6 +1603,8 @@ void DrawTile16Sub1_2 (uint32 Tile, uint32 Offset, uint32 StartLine,
 {
     TILE_PREAMBLE
     register uint8 *bp;
+
+    MATH_TILE (MATH_SUB1_2)
 
     RENDER_TILE(WRITE_4PIXELS16_SUB1_2, WRITE_4PIXELS16_FLIPPED_SUB1_2, 4)
 }
@@ -1462,6 +1617,7 @@ void DrawClippedTile16Sub1_2 (uint32 Tile, uint32 Offset,
     register uint8 *bp;
 
     TILE_CLIP_PREAMBLE
+    MATH_CLIPPED_TILE (MATH_SUB1_2)
     RENDER_CLIPPED_TILE(WRITE_4PIXELS16_SUB1_2, WRITE_4PIXELS16_FLIPPED_SUB1_2, 4)
 }
 
@@ -1551,6 +1707,8 @@ void DrawTile16FixedAdd1_2 (uint32 Tile, uint32 Offset, uint32 StartLine,
     TILE_PREAMBLE
     register uint8 *bp;
 
+    MATH_TILE (MATH_FIXED_ADD1_2)
+
     RENDER_TILE(WRITE_4PIXELS16_ADDF1_2, WRITE_4PIXELS16_FLIPPED_ADDF1_2, 4)
 }
 
@@ -1562,6 +1720,7 @@ void DrawClippedTile16FixedAdd1_2 (uint32 Tile, uint32 Offset,
     register uint8 *bp;
 
     TILE_CLIP_PREAMBLE
+    MATH_CLIPPED_TILE (MATH_FIXED_ADD1_2)
     RENDER_CLIPPED_TILE(WRITE_4PIXELS16_ADDF1_2, 
 			WRITE_4PIXELS16_FLIPPED_ADDF1_2, 4)
 }
@@ -1571,6 +1730,8 @@ void DrawTile16FixedSub1_2 (uint32 Tile, uint32 Offset, uint32 StartLine,
 {
     TILE_PREAMBLE
     register uint8 *bp;
+
+    MATH_TILE (MATH_FIXED_SUB1_2)
 
     RENDER_TILE(WRITE_4PIXELS16_SUBF1_2, WRITE_4PIXELS16_FLIPPED_SUBF1_2, 4)
 }
@@ -1583,6 +1744,7 @@ void DrawClippedTile16FixedSub1_2 (uint32 Tile, uint32 Offset,
     register uint8 *bp;
 
     TILE_CLIP_PREAMBLE
+    MATH_CLIPPED_TILE (MATH_FIXED_SUB1_2)
     RENDER_CLIPPED_TILE(WRITE_4PIXELS16_SUBF1_2, 
 			WRITE_4PIXELS16_FLIPPED_SUBF1_2, 4)
 }

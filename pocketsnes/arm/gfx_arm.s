@@ -608,3 +608,201 @@ DrawBGCommands16:
 	pop	{r4-r11, pc}
 	.size	DrawBGCommands16, . - DrawBGCommands16
 	.ltorg
+
+@ ---------------------------------------------------------------------------
+@ The colour maths tile drawers with the ARM CPU core setting (tile.cpp's
+@ DrawTile16Add and the others):
+@ void DrawTileLinesMath16_X (uint16 *Screen, uint8 *Depth, const uint8 *bp,
+@                             const uint16 *Colors, const struct MathTile *m)
+@ draws m->LineCount lines from bp (m->Step bytes a line: 8, or -8 flipped
+@ vertically), each line's two words masked with m->MaskA and m->MaskB and
+@ flipped horizontally in the _h versions, as DrawTileLines16_X does. A pixel
+@ is drawn where it isn't 0 and Z1 (m->Z >> 8) is above the depth there, and
+@ gets depth Z2 (m->Z & 0xff); its colour is mixed by the sub screen's depth
+@ under it (at Depth + m->SubDepth): 0 the pixel's own colour, 1 its colour
+@ in m->Fixed (the palette with the fixed colour already mixed in, made by
+@ tile.cpp), more its colour mixed with the sub screen's pixel (at Screen +
+@ m->Sub bytes) as X says: add (COLOR_ADD, with GFX.X2 in m->Table), add1_2
+@ (COLOR_ADD1_2), sub (COLOR_SUB, GFX.ZERO_OR_X2), sub1_2 (COLOR_SUB1_2,
+@ GFX.ZERO); fadd1_2 and fsub1_2 mix in the fixed colour only.
+@
+@ The sums (gfx.h's macros, with L the low bits 0x0821): COLOR_ADD's table
+@ index is ((C1 & ~L) + (C2 & ~L)) / 2 + (C1 & C2 & L) = (C1 + C2 - ((C1 ^
+@ C2) & L)) / 2, and that numerator is even, so it's the table entry's byte
+@ offset; COLOR_ADD1_2 is that index itself. COLOR_SUB's index is ((C1 |
+@ 0x10820) - (C2 & ~L)) / 2, and C2 & ~L = C2 - (C2 & L). The strh keeps a
+@ sum's low 16 bits, as the C code's (uint16).
+
+@ struct MathTile (tile.cpp checks the offsets)
+	.equ MATH_LINES,	0
+	.equ MATH_STEP,		4
+	.equ MATH_MASKA,	8
+	.equ MATH_MASKB,	12
+	.equ MATH_PPL,		16
+	.equ MATH_FIXED,	20
+	.equ MATH_Z,		24
+	.equ MATH_SUB,		28
+	.equ MATH_SUBDEPTH,	32
+	.equ MATH_TABLE,	36
+@ the stack: the first six copied, then the line's second word
+	.equ MSTK_LINES,	0
+	.equ MSTK_STEP,		4
+	.equ MSTK_MASKA,	8
+	.equ MSTK_MASKB,	12
+	.equ MSTK_PPL,		16
+	.equ MSTK_FIXED,	20
+	.equ MSTK_WORD,		24
+	.equ MSTK_SIZE,		28	@ (with the 9 registers pushed, 64 bytes)
+
+@ Registers: r0 Screen, r1 Depth, r2 bp, r3 Colors, r4 the line's word
+@ being drawn, r5 0x0821, r6 r7 lr temporary, r8 the colour, r9 Z1 << 8 |
+@ Z2, r10 the sub screen's line, r11 the table, r12 the sub screen's depths.
+
+@ r8 = r8 mixed with r7 (r6, lr temporary)
+.macro MIX_add
+	eor	r6, r8, r7
+	and	r6, r6, r5		@ (C1 ^ C2) & L
+	add	lr, r8, r7
+	sub	lr, lr, r6		@ the X2 entry's byte offset
+	ldrh	lr, [r11, lr]
+	orr	r8, lr, r6
+.endm
+.macro MIX_add1_2
+	eor	r6, r8, r7
+	and	r6, r6, r5
+	add	lr, r8, r7
+	sub	lr, lr, r6
+	mov	r8, lr, lsr #1
+.endm
+.macro MIX_sub
+	orr	r6, r8, #0x10000
+	orr	r6, r6, #0x820		@ C1 | 0x10820
+	and	lr, r7, r5		@ C2 & L
+	sub	r6, r6, r7
+	add	r6, r6, lr		@ - (C2 & ~L)
+	bic	r6, r6, #1		@ the ZERO_OR_X2 entry's byte offset
+	ldrh	r6, [r11, r6]
+	sub	r6, r6, lr
+	and	lr, r8, r5
+	add	r8, r6, lr		@ + (C1 & L) - (C2 & L)
+.endm
+.macro MIX_sub1_2
+	orr	r6, r8, #0x10000
+	orr	r6, r6, #0x820
+	and	lr, r7, r5
+	sub	r6, r6, r7
+	add	r6, r6, lr
+	bic	r6, r6, #1
+	ldrh	r8, [r11, r6]
+.endm
+
+@ Screen pixel \n from byte \k of r4
+.macro MATH_PIXEL mix, fixed_only, n, k
+	ands	r6, r4, #(0xff << (8 * \k))
+	beq	.Lnext\@		@ 0: not drawn
+	ldrb	r7, [r1, #\n]
+.if \k == 0
+	mov	r6, r6, lsl #1		@ the colour's offset
+.else
+	mov	r6, r6, lsr #(8 * \k - 1)
+.endif
+	ldrb	lr, [r12, #\n]		@ the sub screen's depth
+	rsbs	r7, r7, r9, lsr #8
+	bls	.Lnext\@		@ Z1 not above the depth
+	cmp	lr, #1
+.if \fixed_only
+	ldreq	r7, [sp, #MSTK_FIXED]
+	ldrhne	r8, [r3, r6]
+	ldrheq	r8, [r7, r6]
+.else
+	ldrls	r7, [sp, #MSTK_FIXED]
+	ldrhlo	r8, [r3, r6]		@ 0: the colour
+	ldrheq	r8, [r7, r6]		@ 1: with the fixed colour
+	bls	.Lstore\@
+	ldrh	r8, [r3, r6]		@ more: with the sub screen's pixel
+	ldrh	r7, [r10, #(2 * \n)]
+	MIX_\mix
+.endif
+.Lstore\@:
+	strb	r9, [r1, #\n]
+	strh	r8, [r0, #(2 * \n)]
+.Lnext\@:
+.endm
+
+.macro MATH_LINES name, mix, fixed_only, hflip
+	.global	\name
+	.type	\name, %function
+\name:
+	push	{r4-r11, lr}
+	sub	sp, sp, #MSTK_SIZE
+	ldr	lr, [sp, #(MSTK_SIZE + 36)]	@ m
+	ldmia	lr, {r4-r9}		@ the lines, step, masks, PPL, Fixed
+	stmia	sp, {r4-r9}
+	ldr	r9, [lr, #MATH_Z]
+	ldr	r10, [lr, #MATH_SUB]
+	ldr	r12, [lr, #MATH_SUBDEPTH]
+	ldr	r11, [lr, #MATH_TABLE]
+	add	r10, r0, r10
+	add	r12, r1, r12
+	ldr	r5, =0x0821
+	cmp	r4, #0
+	beq	9f
+1:	ldr	r4, [r2]		@ A, pixels 0-3
+	ldr	r6, [r2, #4]		@ B, pixels 4-7
+	ldr	r7, [sp, #MSTK_MASKA]
+	ldr	r8, [sp, #MSTK_MASKB]
+	and	r4, r4, r7
+	and	r6, r6, r8
+	orrs	r7, r4, r6
+	beq	2f			@ nothing to draw on this line
+.if \hflip
+	str	r4, [sp, #MSTK_WORD]
+	mov	r4, r6
+	MATH_PIXEL \mix, \fixed_only, 0, 3
+	MATH_PIXEL \mix, \fixed_only, 1, 2
+	MATH_PIXEL \mix, \fixed_only, 2, 1
+	MATH_PIXEL \mix, \fixed_only, 3, 0
+	ldr	r4, [sp, #MSTK_WORD]
+	MATH_PIXEL \mix, \fixed_only, 4, 3
+	MATH_PIXEL \mix, \fixed_only, 5, 2
+	MATH_PIXEL \mix, \fixed_only, 6, 1
+	MATH_PIXEL \mix, \fixed_only, 7, 0
+.else
+	str	r6, [sp, #MSTK_WORD]
+	MATH_PIXEL \mix, \fixed_only, 0, 0
+	MATH_PIXEL \mix, \fixed_only, 1, 1
+	MATH_PIXEL \mix, \fixed_only, 2, 2
+	MATH_PIXEL \mix, \fixed_only, 3, 3
+	ldr	r4, [sp, #MSTK_WORD]
+	MATH_PIXEL \mix, \fixed_only, 4, 0
+	MATH_PIXEL \mix, \fixed_only, 5, 1
+	MATH_PIXEL \mix, \fixed_only, 6, 2
+	MATH_PIXEL \mix, \fixed_only, 7, 3
+.endif
+2:	ldr	r7, [sp, #MSTK_STEP]
+	ldr	r8, [sp, #MSTK_PPL]
+	add	r2, r2, r7
+	add	r1, r1, r8
+	add	r12, r12, r8
+	add	r0, r0, r8, lsl #1
+	add	r10, r10, r8, lsl #1
+	ldr	r7, [sp, #MSTK_LINES]
+	subs	r7, r7, #1
+	str	r7, [sp, #MSTK_LINES]
+	bne	1b
+9:	add	sp, sp, #MSTK_SIZE
+	pop	{r4-r11, pc}
+	.ltorg
+	.size	\name, . - \name
+.endm
+
+	MATH_LINES DrawTileLinesMath16_add, add, 0, 0
+	MATH_LINES DrawTileLinesMath16_add_h, add, 0, 1
+	MATH_LINES DrawTileLinesMath16_add1_2, add1_2, 0, 0
+	MATH_LINES DrawTileLinesMath16_add1_2_h, add1_2, 0, 1
+	MATH_LINES DrawTileLinesMath16_sub, sub, 0, 0
+	MATH_LINES DrawTileLinesMath16_sub_h, sub, 0, 1
+	MATH_LINES DrawTileLinesMath16_sub1_2, sub1_2, 0, 0
+	MATH_LINES DrawTileLinesMath16_sub1_2_h, sub1_2, 0, 1
+	MATH_LINES DrawTileLinesMath16_fixed, add, 1, 0
+	MATH_LINES DrawTileLinesMath16_fixed_h, add, 1, 1

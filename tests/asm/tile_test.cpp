@@ -34,6 +34,24 @@ const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2
                              uint32 Quot, int Count, uint32 StartLine, uint32 LineCount,
                              uint32 t1, uint32 t2, const uint8 *depths, uint32 Ceiling, uint32 *Drawn);
 extern bool8 BGListInC;
+extern uint32 FixedMathMade;
+
+/* The colour maths drawers (tile.cpp): with the ARM CPU core setting their
+ * lines are drawn in ARM assembler, with the C one by Snes9x 1.43's code */
+typedef void (*NormalDrawer) (uint32, uint32, uint32, uint32);
+typedef void (*ClippedDrawer) (uint32, uint32, uint32, uint32, uint32, uint32);
+void DrawTile16Add (uint32, uint32, uint32, uint32);
+void DrawTile16Add1_2 (uint32, uint32, uint32, uint32);
+void DrawTile16Sub (uint32, uint32, uint32, uint32);
+void DrawTile16Sub1_2 (uint32, uint32, uint32, uint32);
+void DrawTile16FixedAdd1_2 (uint32, uint32, uint32, uint32);
+void DrawTile16FixedSub1_2 (uint32, uint32, uint32, uint32);
+void DrawClippedTile16Add (uint32, uint32, uint32, uint32, uint32, uint32);
+void DrawClippedTile16Add1_2 (uint32, uint32, uint32, uint32, uint32, uint32);
+void DrawClippedTile16Sub (uint32, uint32, uint32, uint32, uint32, uint32);
+void DrawClippedTile16Sub1_2 (uint32, uint32, uint32, uint32, uint32, uint32);
+void DrawClippedTile16FixedAdd1_2 (uint32, uint32, uint32, uint32, uint32, uint32);
+void DrawClippedTile16FixedSub1_2 (uint32, uint32, uint32, uint32, uint32, uint32);
 
 #include "../tile_ref.h"
 
@@ -263,6 +281,116 @@ static int test_bg_rows (int cases, int *failed)
     return failed [0] + failed [1];
 }
 
+/* The colour maths drawers with the ARM CPU core setting against the C
+ * setting's (Snes9x 1.43's WRITE_4PIXELS16_ADD and the others): every way
+ * of mixing, flips, clips, palettes of 2, 4 and 8 bits a pixel, sub screen
+ * depths 0 (nothing), 1 (the fixed colour) and more (its pixel), depths and
+ * Z1/Z2 (equal for backgrounds, apart for sprites), random colours. The
+ * main screen and its depths must come out the same, the sub screen and
+ * its depths untouched. Returns the cases that differ. */
+#define MATH_PITCH 320
+#define MATH_LINES 12
+static uint16 math_screen [3] [2 * MATH_PITCH * MATH_LINES];	/* the main screen, then the sub screen */
+static uint8 math_depth [3] [2 * MATH_PITCH * MATH_LINES];
+
+static int test_math_drawers (int cases)
+{
+    static const NormalDrawer normal [6] = { DrawTile16Add, DrawTile16Add1_2, DrawTile16Sub, DrawTile16Sub1_2,
+                                             DrawTile16FixedAdd1_2, DrawTile16FixedSub1_2 };
+    static const ClippedDrawer clipped [6] = { DrawClippedTile16Add, DrawClippedTile16Add1_2,
+                                               DrawClippedTile16Sub, DrawClippedTile16Sub1_2,
+                                               DrawClippedTile16FixedAdd1_2, DrawClippedTile16FixedSub1_2 };
+    static const char *const names [6] = { "Add", "Add1_2", "Sub", "Sub1_2", "FixedAdd1_2", "FixedSub1_2" };
+    int failed = 0;
+    for (int i = 0; i < cases; i++)
+    {
+        uint32 math = rnd (6);
+        bool is_clipped = rnd (2);
+        BG.TileShift = 5;		/* (as setup_tiles; the row test changes them) */
+        BG.TileAddress = 0;
+        BG.NameSelect = 0x2000;
+        uint32 depth_bits = rnd (3);	/* 2, 4 or 8 bits a pixel */
+        BG.BitShift = 2 << depth_bits;
+        BG.PaletteShift = depth_bits == 0 ? 2 : depth_bits == 1 ? 4 : 0;
+        BG.PaletteMask = depth_bits == 2 ? 0 : 7;
+        BG.StartPalette = depth_bits == 0 ? 32 * rnd (8) : depth_bits == 1 ? 128 * rnd (2) : 0;
+        GFX.PPL = MATH_PITCH;
+        GFX.FixedColour = rnd (4) ? (uint32) rnd (0x10000) : rnd (2) ? 0 : 0xffff;
+        for (int c = 0; c < 256; c++)
+            IPPU.ScreenColors [c] = (uint16) (rnd (8) ? rnd (0x10000) : rnd (2) ? 0 : 0xffff);
+        uint32 range = rnd (4) == 0 ? 256 : 48;
+        for (int j = 0; j < 2 * MATH_PITCH * MATH_LINES; j++)
+        {
+            math_screen [0] [j] = (uint16) (rnd (8) ? rnd (0x10000) : rnd (2) ? 0 : 0xffff);
+            /* the sub screen's depths: 0, 1 or a pixel's */
+            math_depth [0] [j] = j >= MATH_PITCH * MATH_LINES ? (uint8) (rnd (3) == 0 ? 0 : rnd (2) ? 1 : 2 + rnd (60))
+                                                              : (uint8) rnd (range);
+        }
+        for (int k = 1; k < 3; k++)
+        {
+            memcpy (math_screen [k], math_screen [0], sizeof (math_screen [0]));
+            memcpy (math_depth [k], math_depth [0], sizeof (math_depth [0]));
+        }
+        GFX.Z1 = (uint8) rnd (range);
+        GFX.Z2 = rnd (2) ? GFX.Z1 : (uint8) rnd (range);
+        uint32 tile = rnd (0x400) | (rnd (8) << 10) | (rnd (4) << 14);
+        uint32 line = rnd (8), count = rnd (9 - line);
+        if (count == 0 && rnd (4))
+            count = 1;
+        uint32 offset = (1 + rnd (MATH_LINES - 10)) * GFX.PPL + 8 + rnd (GFX.PPL - 24);
+        uint32 start = rnd (8), width = 1 + rnd (8 - start);
+        /* the tile's pixels within its bits a pixel, as ConvertTile makes them
+         * (TILE_PREAMBLE's tile number, setup_tiles' TileAddress and NameSelect) */
+        uint32 number = ((((tile & 0x3ff) << BG.TileShift) + ((tile & 0x1ff) >= 256 ? BG.NameSelect : 0)) &
+                         0xffff) >> BG.TileShift;
+        uint8 saved [64];
+        memcpy (saved, tile_cache + number * 64, 64);
+        for (int j = 0; j < 64; j++)
+            tile_cache [number * 64 + j] &= (uint8) ((1u << BG.BitShift) - 1);
+
+        /* 1: the C setting, 2: the ARM one */
+        for (int k = 1; k < 3; k++)
+        {
+            GFX.Screen = GFX.S = (uint8 *) math_screen [k];
+            GFX.SubScreen = (uint8 *) (math_screen [k] + MATH_PITCH * MATH_LINES);
+            GFX.ZBuffer = GFX.DB = math_depth [k];
+            GFX.SubZBuffer = math_depth [k] + MATH_PITCH * MATH_LINES;
+            GFX.Delta = (GFX.SubScreen - GFX.Screen) >> 1;
+            GFX.DepthDelta = GFX.SubZBuffer - GFX.ZBuffer;
+            Settings.AsmCPU = k == 2;
+            FixedMathMade = 0;		/* (new colours) */
+            if (is_clipped)
+                clipped [math] (tile, offset, start, width, line * 8, count);
+            else
+                normal [math] (tile, offset, line * 8, count);
+        }
+        memcpy (tile_cache + number * 64, saved, 64);
+        if (memcmp (math_screen [2], math_screen [1], sizeof (math_screen [0])) == 0 &&
+            memcmp (math_depth [2], math_depth [1], sizeof (math_depth [0])) == 0)
+            continue;
+        if (failed++ < 5)
+        {
+            printf ("asm Draw%sTile16%s: tile %04x, offset %u, line %u, %u lines, %u bits", is_clipped ? "Clipped" : "",
+                    names [math], tile, offset, line, count, BG.BitShift);
+            if (is_clipped)
+                printf (", pixels %u-%u", start, start + width - 1);
+            printf (", Z1 %u, Z2 %u, fixed %04x\n", GFX.Z1, GFX.Z2, GFX.FixedColour);
+            int shown = 0;
+            for (int j = 0; j < 2 * MATH_PITCH * MATH_LINES && shown < 8; j++)
+                if (math_screen [2] [j] != math_screen [1] [j] || math_depth [2] [j] != math_depth [1] [j])
+                {
+                    printf ("  at %d: screen %04x depth %u, C %04x depth %u (sub depth %u, sub %04x)\n", j,
+                            math_screen [2] [j], math_depth [2] [j], math_screen [1] [j], math_depth [1] [j],
+                            j < MATH_PITCH * MATH_LINES ? math_depth [1] [j + MATH_PITCH * MATH_LINES] : 0,
+                            j < MATH_PITCH * MATH_LINES ? math_screen [1] [j + MATH_PITCH * MATH_LINES] : 0);
+                    shown++;
+                }
+        }
+    }
+    Settings.AsmCPU = FALSE;
+    return failed;
+}
+
 int main (int argc, char **argv)
 {
     int cases = argc > 1 ? atoi (argv [1]) : 100000;
@@ -375,8 +503,11 @@ int main (int argc, char **argv)
     test_bg_rows (row_cases, rows_failed);
     printf ("background rows: %d (assembler list) and %d (C) of %d differ from Snes9x 1.43's loop\n",
             rows_failed [0], rows_failed [1], row_cases);
+    int math_cases = cases / 2;
+    int math_failed = test_math_drawers (math_cases);
+    printf ("colour maths drawers: %d of %d cases differ from the C setting's\n", math_failed, math_cases);
     bool pass = !failed [0] && !failed [1] && !clipped_failed [0] && !clipped_failed [1] && !untested_failed &&
-                !rows_failed [0] && !rows_failed [1];
+                !rows_failed [0] && !rows_failed [1] && !math_failed;
     printf ("%s: %d cases\n", pass ? "PASS" : "FAIL", cases);
     return pass ? 0 : 1;
 }

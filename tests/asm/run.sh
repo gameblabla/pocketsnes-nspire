@@ -54,7 +54,7 @@ echo "== Tile drawers (C and ARM assembler) against Snes9x 1.43's, on random til
 "$QEMU" -cpu arm926 $BUILD/tile_test 20000 1 > "$OUT/tiles.txt" 2>&1
 last=$(tail -1 "$OUT/tiles.txt")
 case "$last" in PASS*) r=pass ;; *) r=fail ;; esac
-result $r "tiles: $(tail -2 "$OUT/tiles.txt" | head -1)"
+result $r "tiles: $(tail -1 "$OUT/tiles.txt") (each part in $OUT/tiles.txt)"
 
 echo "== Full screen picture (ARM assembler) against its definition"
 "$QEMU" -cpu arm926 $BUILD/scale_test 3 1 > "$OUT/scale.txt" 2>&1
@@ -83,6 +83,13 @@ link yi.sv001 "$TESTROMS/calc/Super Mario World 2 - Yoshi's Island.sfc.sv001.tns
 # 1-1's busiest part, and Baby Mario's bubble (a sprite the Super FX turns)
 link yi.sv010 build/calc-saves/yi/sv010.tns
 link yi.sv011 build/calc-saves/yi/sv011.tns
+# More of the owner's states (build/calc-saves): Chrono Trigger's Battle Mode
+# screen (colour maths with the fixed colour and the sub screen), a Super
+# Mario World castle, a Street Fighter Alpha 2 fight (S-DD1, big sprites)
+link ct.sv001 build/calc-saves/ct/sv001.tns
+link smw.sv048 build/calc-saves/smw/sv048.tns
+link sfa2.sfc "$TESTROMS/calc/Street Fighter Alpha 2 (USA).sfc"
+link sfa2.sv001 build/calc-saves/sfa2/sv001.tns
 
 # game NAME ROM STATE INPUT: both cores, frame by frame
 game() {
@@ -120,6 +127,9 @@ game yi_state yi.sfc yi.sv001 walk
 game yi_boot yi.sfc - start
 game yi_1_1 yi.sfc yi.sv010 walk
 game yi_bubble yi.sfc yi.sv011 busy
+game ct_battle_mode ct.sfc ct.sv001 busy
+game smw_castle smw.sfc smw.sv048 walk
+game sfa2_fight sfa2.sfc sfa2.sv001 busy
 # Super FX demos (plotting polygons and lines; the ARM core setting runs the
 # Super FX translated into ARM code, the C one the C interpreter)
 game gsu_fillpoly GSU4BPP256x192FillPoly.sfc - none
