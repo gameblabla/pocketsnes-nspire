@@ -122,6 +122,8 @@ const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2
 			     uint32 t1, uint32 t2, const uint8 *depths, uint32 Ceiling, uint32 *Drawn);
 bool8 TileWasDrawn (uint32 Tile);
 extern uint32 FixedMathMade;
+void DrawOBJTiles16 (uint32 BaseTile, uint32 TileX, int TileInc, uint32 TileLine, int X, int Right, int t,
+		     uint32 Offset);
 
 /* With the ARM CPU core setting: for each line of the depth buffers
  * ([0] GFX.ZBuffer, [1] GFX.SubZBuffer), a depth at least as high as any
@@ -1430,6 +1432,10 @@ if(Settings.BGLayering) {
 	GFX.Z1 = D + 2;
 #ifdef ARM_ASM_GFX
 	uint8 *Ceilings = DepthCeilings ();
+	/* With the ARM CPU core setting and no windows, each sprite's tiles on a
+	 * line go to DrawOBJTiles16 (tile.cpp) in one go, when they're drawn
+	 * with DrawTile16 */
+	bool8 WholeTiles = Settings.AsmCPU && !clipcount && GFX.PixSize == 1;
 #endif
 
 	for(uint32 Y=GFX.StartY, Offset=Y*GFX.PPL; Y<=GFX.EndY; Y++, Offset+=GFX.PPL){
@@ -1483,6 +1489,16 @@ if(Settings.BGLayering) {
 #ifdef ARM_ASM_GFX
 			if (Ceilings && Ceilings [Y] < GFX.Z2)
 				Ceilings [Y] = GFX.Z2;
+#endif
+
+#ifdef ARM_ASM_GFX
+			if (WholeTiles && DrawTilePtr == DrawTile16)
+			{
+				int X = PPU.OBJ[S].HPos; if (X == -256) X = 256;
+				DrawOBJTiles16 (BaseTile, TileX, TileInc, TileLine, X, PPU.OBJ[S].HPos + GFX.OBJWidths[S],
+						tiles, Offset);
+				continue;
+			}
 #endif
 
 			bool8 WinStat=TRUE;

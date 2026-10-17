@@ -1001,6 +1001,73 @@ const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2
     return L.t;
 }
 
+/* DrawOBJS's tiles of one sprite on one line, with the ARM CPU core setting
+ * and no windows: what its loop does with DrawTile16 (and DrawClippedTile16
+ * for the tiles the screen's edges cut), with the whole tiles listed first
+ * and then drawn by DrawOBJTiles16_n or _h (gfx_arm.s) in one call. Tile is
+ * BaseTile | TileX, TileX going on by TileInc (in 0-15) for each 8 pixels
+ * from X while X < Right and X <= 256; t is the line's tiles left (the time
+ * over limit). Needs DrawOBJS's BG fields, GFX.Z1 and GFX.Z2. */
+struct OBJTile
+{
+    const uint8 *bp;
+    int32 X;
+};
+struct OBJLine
+{
+    uint16 *Screen;
+    uint8 *Depth;
+    const uint16 *Colors;
+    uint32 Z1, Z2;
+};
+static_assert (sizeof (struct OBJTile) == 8 && offsetof (struct OBJLine, Z2) == 16,
+	       "OBJTile/OBJLine moved: update pocketsnes/arm/gfx_arm.s");
+extern "C"
+{
+    void DrawOBJTiles16_n (const struct OBJTile *, const struct OBJTile *, const struct OBJLine *);
+    void DrawOBJTiles16_h (const struct OBJTile *, const struct OBJTile *, const struct OBJLine *);
+}
+
+void DrawClippedTile16 (uint32 Tile, uint32 Offset, uint32 StartPixel, uint32 Width,
+			uint32 StartLine, uint32 LineCount);
+
+void DrawOBJTiles16 (uint32 BaseTile, uint32 TileX, int TileInc, uint32 TileLine, int X, int Right, int t,
+		     uint32 Offset)
+{
+    struct OBJTile Tiles [8];		/* (a sprite is at most 64 pixels across) */
+    struct OBJTile *n = Tiles;
+    for (uint32 O = Offset + X; X <= 256 && X < Right; TileX = (TileX + TileInc) & 0x0f, X += 8, O += 8)
+    {
+	if (X < -7 || --t < 0 || X == 256)
+	    continue;
+	uint32 Tile = BaseTile | TileX;
+	if (X < 0 || X > 256 - 8)
+	{
+	    /* (DrawOBJS's window loop cuts these at 0 and 256) */
+	    DrawClippedTile16 (Tile, O, X < 0 ? -X : 0, X < 0 ? X + 8 : 256 - X, TileLine, 1);
+	    continue;
+	}
+	uint32 TileAddr = BG.TileAddress + ((Tile & 0x3ff) << BG.TileShift);
+	if ((Tile & 0x1ff) >= 256)
+	    TileAddr += BG.NameSelect;
+	uint32 TileNumber = (TileAddr & 0xffff) >> BG.TileShift;
+	uint8 *pCache = &BG.Buffer [TileNumber << 6];
+	if (!BG.Buffered [TileNumber])
+	    BG.Buffered [TileNumber] = ConvertTile (pCache, TileAddr & 0xffff);
+	if (BG.Buffered [TileNumber] == BLANK_TILE)
+	    continue;
+	n->bp = pCache + TileLine;
+	n->X = X;
+	n++;
+    }
+    if (n == Tiles)
+	return;
+    struct OBJLine Line = { (uint16 *) GFX.S + (int32) Offset, GFX.DB + (int32) Offset,
+			    &IPPU.ScreenColors [(((BaseTile >> 10) & BG.PaletteMask) << BG.PaletteShift) + BG.StartPalette],
+			    GFX.Z1, GFX.Z2 };
+    (BaseTile & H_FLIP ? DrawOBJTiles16_h : DrawOBJTiles16_n) (Tiles, n, &Line);
+}
+
 /* Whether DrawTile16 or DrawClippedTile16 drew anything of Tile (as passed
  * to it): not a blank tile in the cache (asked after drawing it). */
 bool8 TileWasDrawn (uint32 Tile)

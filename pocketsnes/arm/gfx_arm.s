@@ -806,3 +806,79 @@ DrawBGCommands16:
 	MATH_LINES DrawTileLinesMath16_sub1_2_h, sub1_2, 0, 1
 	MATH_LINES DrawTileLinesMath16_fixed, add, 1, 0
 	MATH_LINES DrawTileLinesMath16_fixed_h, add, 1, 1
+
+@ ---------------------------------------------------------------------------
+@ A sprite's whole tiles on one line, with the ARM CPU core setting
+@ (tile.cpp's DrawOBJTiles16, for DrawOBJS):
+@ void DrawOBJTiles16_X (const struct OBJTile *c, const struct OBJTile *end,
+@                        const struct OBJLine *l)
+@ For each {bp, X} from c to end: the tile line at bp (8 bytes) at pixel X
+@ of l->Screen and l->Depth, drawn as by DrawTileLines16_n (_h: flipped
+@ horizontally) with Z1 l->Z1 and Z2 l->Z2, in l->Colors.
+
+@ struct OBJLine (tile.cpp checks the offsets)
+	.equ OBJ_SCREEN,	0
+	.equ OBJ_DEPTH,		4
+	.equ OBJ_COLORS,	8
+	.equ OBJ_Z1,		12
+	.equ OBJ_Z2,		16
+@ the stack: the line's screen and depth, the commands' end
+	.equ OSTK_SCREEN,	0
+	.equ OSTK_DEPTH,	4
+	.equ OSTK_END,		8
+
+@ Registers: r0 Screen, r1 Depth, r2 bp, r3 Colors, r4 A, r5 B, r6 the
+@ pixel's colour offset, r7 its depth, r8 its colour, r9 Z1, r10 Z2,
+@ r11 0x1fe, r12 the next command. (The last PIXEL's add to r1 doesn't
+@ matter: r1 is set again for each tile.)
+
+.macro OBJ_TILES name, hflip
+	.global	\name
+	.type	\name, %function
+\name:
+	push	{r4-r11, lr}
+	ldmia	r2, {r4, r5, r6, r9, r10}	@ Screen, Depth, Colors, Z1, Z2
+	mov	r8, r1
+	push	{r4, r5, r8}		@ the line's screen and depth, the end
+	mov	r3, r6
+	mov	r12, r0
+	mov	r11, #0xff
+	lsl	r11, r11, #1		@ 0x1fe
+1:	ldr	r0, [sp, #OSTK_END]
+	cmp	r12, r0
+	beq	9f
+	ldmia	r12!, {r2, r6}		@ bp, X
+	ldmia	r2, {r4, r5}		@ A and B
+	orrs	r7, r4, r5
+	beq	1b			@ nothing to draw on this line
+	ldmia	sp, {r0, r1}		@ the line's screen and depth
+	add	r0, r0, r6, lsl #1
+	add	r1, r1, r6
+	ldrb	r7, [r1]
+.if \hflip
+	PIXEL	0, r5, 3
+	PIXEL	1, r5, 2
+	PIXEL	2, r5, 1
+	PIXEL	3, r5, 0
+	PIXEL	4, r4, 3
+	PIXEL	5, r4, 2
+	PIXEL	6, r4, 1
+	PIXEL	7, r4, 0, 1
+.else
+	PIXEL	0, r4, 0
+	PIXEL	1, r4, 1
+	PIXEL	2, r4, 2
+	PIXEL	3, r4, 3
+	PIXEL	4, r5, 0
+	PIXEL	5, r5, 1
+	PIXEL	6, r5, 2
+	PIXEL	7, r5, 3, 1
+.endif
+	b	1b
+9:	add	sp, sp, #12
+	pop	{r4-r11, pc}
+	.size	\name, . - \name
+.endm
+
+	OBJ_TILES DrawOBJTiles16_n, 0
+	OBJ_TILES DrawOBJTiles16_h, 1
