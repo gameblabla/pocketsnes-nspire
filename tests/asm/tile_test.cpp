@@ -4,7 +4,10 @@
  * Snes9x 1.43's drawers (tests/tile_ref.h): random tiles (blank, opaque,
  * with transparent pixels and lines), flips, palettes, places on the
  * screen, lines, clips, depths and line lengths (GFX.PPL). The whole
- * screen and depth buffers must come out the same.
+ * screen and depth buffers must come out the same. Then the drawers
+ * without the depth test (DrawTileLines16_un and the others, for tiles
+ * nothing on their lines can hide) against the tested ones, on depths all
+ * below Z1, where they must do the same.
  *   tile_test [CASES] [SEED]
  * Prints the first differences and PASS or FAIL. Runs on ARM (under
  * qemu-arm on a PC, tests/asm/run.sh). */
@@ -23,6 +26,19 @@ void DrawClippedTile16 (uint32 Tile, uint32 Offset, uint32 StartPixel, uint32 Wi
                         uint32 StartLine, uint32 LineCount);
 
 #include "../tile_ref.h"
+
+typedef void (*LinesDrawer) (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+extern "C"
+{
+    void DrawTileLines16_n (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+    void DrawTileLines16_h (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+    void DrawTileLines16_v (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+    void DrawTileLines16_hv (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+    void DrawTileLines16_un (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+    void DrawTileLines16_uh (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+    void DrawTileLines16_uv (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+    void DrawTileLines16_uhv (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+}
 
 extern "C" bool8 S9xInitUpdate () { return TRUE; }
 extern "C" uint32 S9xReadJoypad (int) { return 0; }
@@ -148,7 +164,41 @@ int main (int argc, char **argv)
     }
     printf ("asm: %d and %d of %d cases differ (DrawTile16, DrawClippedTile16); C: %d and %d\n",
             failed [1], clipped_failed [1], cases, failed [0], clipped_failed [0]);
-    bool pass = !failed [0] && !failed [1] && !clipped_failed [0] && !clipped_failed [1];
+
+    /* The untested drawers: every depth below Z1, so the tested ones draw
+     * every pixel that isn't 0 too */
+    static const LinesDrawer tested [4] = { DrawTileLines16_n, DrawTileLines16_h, DrawTileLines16_v,
+                                            DrawTileLines16_hv };
+    static const LinesDrawer untested [4] = { DrawTileLines16_un, DrawTileLines16_uh, DrawTileLines16_uv,
+                                              DrawTileLines16_uhv };
+    int untested_failed = 0;
+    for (int i = 0; i < cases; i++)
+    {
+        GFX.PPL = rnd (3) == 0 ? 256 + 8 * rnd (33) : 320;
+        GFX.Z1 = (uint8) (1 + rnd (255));
+        GFX.Z2 = rnd (2) ? GFX.Z1 : (uint8) rnd (256);
+        for (int j = 0; j < MAX_PITCH * LINES; j++)
+        {
+            screen [0] [j] = (uint16) rnd (0x10000);
+            depth [0] [j] = (uint8) rnd (GFX.Z1);
+        }
+        memcpy (screen [1], screen [0], sizeof (screen [0]));
+        memcpy (depth [1], depth [0], sizeof (depth [0]));
+        uint32 t = rnd (TILES), flips = rnd (4), line = rnd (8), count = rnd (9 - line);
+        const uint8 *bp = tile_cache + t * 64 + ((flips & 2) ? 56 - line * 8 : line * 8);
+        const uint16 *colors = IPPU.ScreenColors + 16 * rnd (8);
+        uint32 offset = (1 + rnd (LINES - 10)) * GFX.PPL + 8 + rnd (GFX.PPL - 24);
+        tested [flips] (screen [0] + offset, depth [0] + offset, bp, colors, count, 0xffffffff, 0xffffffff);
+        untested [flips] (screen [1] + offset, depth [1] + offset, bp, colors, count, 0xffffffff, 0xffffffff);
+        if (memcmp (screen [1], screen [0], sizeof (screen [0])) || memcmp (depth [1], depth [0], sizeof (depth [0])))
+        {
+            if (untested_failed++ < 5)
+                printf ("untested drawer %u: tile %u, offset %u (PPL %u), line %u, %u lines, Z1 %u, Z2 %u\n",
+                        flips, t, offset, GFX.PPL, line, count, GFX.Z1, GFX.Z2);
+        }
+    }
+    printf ("untested drawers: %d of %d cases differ from the tested ones\n", untested_failed, cases);
+    bool pass = !failed [0] && !failed [1] && !clipped_failed [0] && !clipped_failed [1] && !untested_failed;
     printf ("%s: %d cases\n", pass ? "PASS" : "FAIL", cases);
     return pass ? 0 : 1;
 }

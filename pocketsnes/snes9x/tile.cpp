@@ -794,10 +794,16 @@ extern "C"
 	void DrawTileLines16_hm (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
 	void DrawTileLines16_vm (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
 	void DrawTileLines16_hvm (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_un (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_uh (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_uv (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_uhv (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
 }
-static const TileLines16Asm DrawTileLines16Asm [8] = {
+/* ... and from 8 on the untested ones (no depth test: DrawBGTiles16) */
+static const TileLines16Asm DrawTileLines16Asm [12] = {
 	DrawTileLines16_n, DrawTileLines16_h, DrawTileLines16_v, DrawTileLines16_hv,
-	DrawTileLines16_nm, DrawTileLines16_hm, DrawTileLines16_vm, DrawTileLines16_hvm
+	DrawTileLines16_nm, DrawTileLines16_hm, DrawTileLines16_vm, DrawTileLines16_hvm,
+	DrawTileLines16_un, DrawTileLines16_uh, DrawTileLines16_uv, DrawTileLines16_uhv
 };
 
 /* What gfx_arm.s reads from GFX (its GFX_ offsets) */
@@ -837,14 +843,18 @@ static inline void DrawTileLines16 (uint16 *Screen, uint8 *Depth, const uint8 *b
  * setting: DrawTile16's work for a run of Count tiles with everything in
  * locals, and blank tiles left before any of it. t is the map entry of
  * column Quot, b1 and b2 the two halves of the map row; t moves on and
- * wraps as in DrawBackground and is returned for the next column. The
+ * wraps as in DrawBackground and is returned for the next column. A tile
+ * whose depth is above Ceiling (no depth already on the row's lines is as
+ * high: gfx.cpp's LineMaxDepth) can't be hidden, so it's drawn without the
+ * depth test. *Drawn gets the highest depth drawn (0: nothing). The
  * pixels, depths and GFX.Z1/Z2 come out as from DrawBackground's own loop
  * calling DrawTile16 (tests/asm/run.sh compares every frame with the C
  * setting's). */
 const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2, uint32 s,
 			     uint32 Quot, int Count, uint32 StartLine, uint32 LineCount,
-			     uint32 t1, uint32 t2, const uint8 *depths)
+			     uint32 t1, uint32 t2, const uint8 *depths, uint32 Ceiling, uint32 *Drawn)
 {
+    uint32 HighestDrawn = 0;
     const bool Big = BG.TileSize != 8;
     const uint32 TileShift = BG.TileShift, TileAddress = BG.TileAddress, NameSelect = BG.NameSelect;
     uint8 *const Buffer = BG.Buffer;
@@ -897,14 +907,28 @@ const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2
 	    GFX.Z1 = GFX.Z2 = (uint8) Z;
 	    SetZ = Z;
 	}
-	DrawTileLines16Asm [(Tile >> 14) & 3] (Screen, Depth,
+	if (Z > HighestDrawn)
+	    HighestDrawn = Z;
+	DrawTileLines16Asm [((Tile >> 14) & 3) + (Z > Ceiling ? 8 : 0)] (Screen, Depth,
 	    pCache + ((Tile & V_FLIP) ? 56 - StartLine : StartLine),
 	    Colors + (((Tile >> 10) & PaletteMask) << PaletteShift), LineCount, 0xffffffff, 0xffffffff);
     }
     /* (DrawBackground set them for every tile, the last one included) */
     if (Z != 0x100 && Z != SetZ)
 	GFX.Z1 = GFX.Z2 = (uint8) Z;
+    *Drawn = HighestDrawn;
     return t;
+}
+
+/* Whether DrawTile16 or DrawClippedTile16 drew anything of Tile (as passed
+ * to it): not a blank tile in the cache (asked after drawing it). */
+bool8 TileWasDrawn (uint32 Tile)
+{
+    uint32 TileAddr = BG.TileAddress + ((Tile & 0x3ff) << BG.TileShift);
+    if ((Tile & 0x1ff) >= 256)
+	TileAddr += BG.NameSelect;
+    TileAddr &= 0xffff;
+    return BG.Buffered [TileAddr >> BG.TileShift] != BLANK_TILE;
 }
 #endif
 

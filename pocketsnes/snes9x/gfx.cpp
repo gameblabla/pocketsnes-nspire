@@ -119,7 +119,57 @@ extern NormalTileRenderer DrawTilePtr;
 #ifdef ARM_ASM_GFX
 const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2, uint32 s,
 			     uint32 Quot, int Count, uint32 StartLine, uint32 LineCount,
-			     uint32 t1, uint32 t2, const uint8 *depths);
+			     uint32 t1, uint32 t2, const uint8 *depths, uint32 Ceiling, uint32 *Drawn);
+bool8 TileWasDrawn (uint32 Tile);
+
+/* With the ARM CPU core setting: for each line of the depth buffers
+ * ([0] GFX.ZBuffer, [1] GFX.SubZBuffer), a depth at least as high as any
+ * depth on the line: set when the line is cleared, and raised by whatever
+ * draws on it since (sprites for their lines, background rows for theirs
+ * by the depth of the tiles they drew, everything else for all the lines it
+ * draws). A background tile with a depth above it on all its lines can't
+ * be hidden, so DrawBGTiles16 draws it without the depth test. Not used for
+ * interlaced or double-height pictures. */
+uint8 LineMaxDepth [2][512];
+
+static inline uint8 *DepthCeilings (void)
+{
+    if (!Settings.AsmCPU || IPPU.Interlace || IPPU.DoubleHeightPixels)
+	return NULL;
+    if (GFX.DB == GFX.ZBuffer)
+	return LineMaxDepth [0];
+    if (GFX.DB == GFX.SubZBuffer)
+	return LineMaxDepth [1];
+    return NULL;
+}
+
+static inline uint32 HighestDepth (const uint8 *c, uint32 first, uint32 last)
+{
+    uint32 h = 0;
+    for (uint32 y = first; y <= last; y++)
+	if (c [y] > h)
+	    h = c [y];
+    return h;
+}
+
+static inline void RaiseDepth (uint8 *c, uint32 first, uint32 last, uint32 z)
+{
+    for (uint32 y = first; y <= last; y++)
+	if (c [y] < z)
+	    c [y] = (uint8) z;
+}
+
+/* After a drawer that didn't keep LineMaxDepth itself: all the lines it may
+ * have drawn on, to the highest depth it uses (or to 255 if the frame is
+ * one LineMaxDepth isn't kept for, where it doesn't matter). */
+static inline void RaiseDepthForLayer (uint32 z)
+{
+    if (!Settings.AsmCPU)
+	return;
+    uint8 *c = GFX.DB == GFX.ZBuffer ? LineMaxDepth [0] : GFX.DB == GFX.SubZBuffer ? LineMaxDepth [1] : NULL;
+    if (c)
+	RaiseDepth (c, GFX.StartY, GFX.EndY < 511 ? GFX.EndY : 511, z);
+}
 #endif
 extern ClippedTileRenderer DrawClippedTilePtr;
 extern NormalTileRenderer DrawHiResTilePtr;
@@ -1377,6 +1427,9 @@ if(Settings.BGLayering) {
 #endif
 	}
 	GFX.Z1 = D + 2;
+#ifdef ARM_ASM_GFX
+	uint8 *Ceilings = DepthCeilings ();
+#endif
 
 	for(uint32 Y=GFX.StartY, Offset=Y*GFX.PPL; Y<=GFX.EndY; Y++, Offset+=GFX.PPL){
 #ifdef MK_DEBUG_RTO
@@ -1426,6 +1479,10 @@ if(Settings.BGLayering) {
 			}
 
 			GFX.Z2 = (PPU.OBJ[S].Priority + 1) * 4 + D;
+#ifdef ARM_ASM_GFX
+			if (Ceilings && Ceilings [Y] < GFX.Z2)
+				Ceilings [Y] = GFX.Z2;
+#endif
 
 			bool8 WinStat=TRUE;
 			int WinIdx=0, NextPos=-1000;
@@ -2398,6 +2455,9 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
     if (PPU.BGMosaic [bg] && PPU.Mosaic > 1)
     {
 		DrawBackgroundMosaic (BGMode, bg, Z1, Z2);
+#ifdef ARM_ASM_GFX
+		RaiseDepthForLayer (Z1 > Z2 ? Z1 : Z2);
+#endif
 		return;
 		
     }
@@ -2406,6 +2466,9 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
     case 2:
     case 4: // Used by Puzzle Bobble
         DrawBackgroundOffset (BGMode, bg, Z1, Z2);
+#ifdef ARM_ASM_GFX
+		RaiseDepthForLayer (Z1 > Z2 ? Z1 : Z2);
+#endif
 		return;
 		
     case 5:
@@ -2415,6 +2478,9 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 			if (!Settings.SupportHiRes)
 				SelectTileRenderer(TRUE /* normal */);
 			DrawBackgroundMode5 (BGMode, bg, Z1, Z2);
+#ifdef ARM_ASM_GFX
+			RaiseDepthForLayer (Z1 > Z2 ? Z1 : Z2);
+#endif
 			return;
 //		}
 		break;
@@ -2475,6 +2541,9 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 		OffsetMask = 0x1ff;
 		OffsetShift = 3;
     }
+#ifdef ARM_ASM_GFX
+    uint8 *Ceilings = DepthCeilings ();
+#endif
 	
     for (uint32 Y = GFX.StartY; Y <= GFX.EndY; Y += Lines)
     {
@@ -2515,6 +2584,12 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 			
 			b1 += (ScreenLine & 0x1f) << 5;
 			b2 += (ScreenLine & 0x1f) << 5;
+#ifdef ARM_ASM_GFX
+			/* the row's lines' LineMaxDepth (DrawBGTiles16), and the
+			 * highest depth the row draws, to raise it by */
+			uint32 RowCeiling = Ceilings ? HighestDepth (Ceilings, Y, Y + Lines - 1) : 255;
+			uint32 RowDrawn = 0;
+#endif
 			
 			int clipcount = GFX.pCurrentClip->Count [bg];
 			if (!clipcount)
@@ -2608,6 +2683,12 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 									Offset, Count, VirtAlign, Lines);
 							}
 					}
+#ifdef ARM_ASM_GFX
+					if (Ceilings && GFX.Z2 > RowDrawn &&
+					    TileWasDrawn (BG.TileSize == 8 ? Tile : Tile + (Tile & V_FLIP ? t2 : t1) +
+							  (Tile & H_FLIP ? 1 - (Quot & 1) : (Quot & 1))))
+						RowDrawn = GFX.Z2;
+#endif
 					
 					if (BG.TileSize == 8)
 					{
@@ -2638,10 +2719,21 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 				if (Settings.AsmCPU && Middle > 0 && DrawTilePtr == DrawTile16 &&
 				    !BG.DirectColourMode && !IPPU.HalfWidthPixels)
 				{
-					t = (uint16 *) DrawBGTiles16 (t, b1, b2, s, Quot, Middle, VirtAlign, Lines, t1, t2, depths);
+					uint32 Drawn;
+					t = (uint16 *) DrawBGTiles16 (t, b1, b2, s, Quot, Middle, VirtAlign, Lines, t1, t2, depths,
+								      RowCeiling, &Drawn);
+					if (Drawn > RowDrawn)
+						RowDrawn = Drawn;
 					s += Middle * 8;
 					Quot += Middle;
 					Middle = 0;
+				}
+				/* (drawn below with some other drawer: its depths may be anywhere) */
+				if (Middle > 0 && Ceilings)
+				{
+					uint32 z = depths [0] > depths [1] ? depths [0] : depths [1];
+					if (z > RowDrawn)
+						RowDrawn = z;
 				}
 #endif
 				for (int C = Middle; C > 0; s += (IPPU.HalfWidthPixels ? 4 : 8) * GFX.PixSize, Quot++, C--)
@@ -2750,8 +2842,18 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 								Lines);
 						}
 					}
+#ifdef ARM_ASM_GFX
+					if (Ceilings && GFX.Z2 > RowDrawn &&
+					    TileWasDrawn (BG.TileSize == 8 ? Tile : Tile + (Tile & V_FLIP ? t2 : t1) +
+							  (Tile & H_FLIP ? 1 - (Quot & 1) : (Quot & 1))))
+						RowDrawn = GFX.Z2;
+#endif
 				}
 		}
+#ifdef ARM_ASM_GFX
+		if (Ceilings && RowDrawn)
+			RaiseDepth (Ceilings, Y, Y + Lines - 1, RowDrawn);
+#endif
     }
 }
 
@@ -3562,6 +3664,9 @@ static void RenderScreen (uint8 *Screen, bool8 sub, bool8 force_no_add, uint8 D)
 					}
 				}
 			}
+#ifdef ARM_ASM_GFX
+			RaiseDepthForLayer (255);
+#endif
 		}
 		break;
 	default:
@@ -3819,6 +3924,10 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 				{
 					FillDepth (GFX.SubZBuffer + y * GFX.ZPitch, 0, IPPU.RenderedScreenWidth);
 					FillDepth (GFX.ZBuffer + y * GFX.ZPitch, 0, IPPU.RenderedScreenWidth);
+#ifdef ARM_ASM_GFX
+					LineMaxDepth [0][y] = 0;
+					LineMaxDepth [1][y] = pClip->Count [5] ? 1 : 0;	/* (1 in the windows, below) */
+#endif
 
 					if (IPPU.Clip [0].Count [5])
 					{
@@ -3860,6 +3969,10 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 				{
 					FillDepth (GFX.ZBuffer + y * GFX.ZPitch, 0, IPPU.RenderedScreenWidth);
 					FillDepth (GFX.SubZBuffer + y * GFX.ZPitch, 1, IPPU.RenderedScreenWidth);
+#ifdef ARM_ASM_GFX
+					LineMaxDepth [0][y] = 0;
+					LineMaxDepth [1][y] = 1;
+#endif
 					if (backdrop_from_sub)
 						FillLine16 ((uint16 *) (sub_screen + y * GFX.Pitch2),
 							    (uint16) FixedColourOfLine (y), 256 * x2);
@@ -4193,7 +4306,12 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 			if (!PPU.ForcedBlanking)
 			{
 				for (uint32 y = starty; y <= endy; y++)
+				{
 					FillDepth (GFX.ZBuffer + y * GFX.ZPitch, 0, IPPU.RenderedScreenWidth);
+#ifdef ARM_ASM_GFX
+					LineMaxDepth [0][y] = 0;
+#endif
+				}
 				GFX.DB = GFX.ZBuffer;
 				RenderScreen (GFX.Screen, FALSE, TRUE, SUB_SCREEN_DEPTH);
 			}
