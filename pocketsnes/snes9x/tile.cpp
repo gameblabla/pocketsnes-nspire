@@ -839,85 +839,166 @@ static inline void DrawTileLines16 (uint16 *Screen, uint8 *Depth, const uint8 *b
 }
 
 #ifdef ARM_ASM_GFX
+/* DrawBGTiles16's two passes in pocketsnes/arm/gfx_arm.s: ListBGTiles16
+ * lists the row's tiles to draw, DrawBGCommands16 draws them. */
+struct BGTileCommand
+{
+    const uint8 *bp;		/* the first line to draw in the cache (not flipped) */
+    const uint16 *Colors;
+    uint32 How;			/* column << 16 | a BGRowList How */
+};
+struct BGRowList
+{
+    uint32 How [8];		/* by the map entry's bits 13-15 (priority, flips): depth << 8 |
+				 * 8 low priority, 16 high | 4 untested | flips (1 h, 2 v) */
+    const uint16 *Colors [8];	/* by bits 10-12 (palette) */
+    const uint16 *t, *b1, *b2;
+    uint32 Quot, Count;
+    uint8 *Buffered;		/* BG.Buffered */
+    const uint8 *Buffer;	/* BG.Buffer + the first line to draw */
+    uint32 FirstTile, TileMask;
+    int32 t1;			/* 16x16 tiles: the half, 0 (top) or 16; 8x8: -1 */
+    struct BGTileCommand *Commands;
+    uint32 Last, Drawn;		/* out: the last map entry, the commands' hows ORed */
+};
+struct BGRowDraw
+{
+    uint16 *Screen;
+    uint8 *Depth;
+    uint32 LineCount;
+    int32 VFlip;		/* bp to the first line drawn when flipped vertically, + 4 */
+    uint32 PPL;
+};
+static_assert (sizeof (struct BGTileCommand) == 12, "BGTileCommand: update pocketsnes/arm/gfx_arm.s");
+static_assert (offsetof (struct BGRowList, t) == 64 && offsetof (struct BGRowList, Count) == 80 &&
+	       offsetof (struct BGRowList, Buffered) == 84 && offsetof (struct BGRowList, t1) == 100 &&
+	       offsetof (struct BGRowList, Drawn) == 112, "BGRowList moved: update pocketsnes/arm/gfx_arm.s");
+static_assert (offsetof (struct BGRowDraw, VFlip) == 12 && offsetof (struct BGRowDraw, PPL) == 16,
+	       "BGRowDraw moved: update pocketsnes/arm/gfx_arm.s");
+
+extern "C"
+{
+    struct BGTileCommand *ListBGTiles16 (struct BGRowList *L);
+    void DrawBGCommands16 (const struct BGTileCommand *c, const struct BGTileCommand *end,
+			   const struct BGRowDraw *row);
+    uint32 ConvertBGTile (uint32 TileNumber);
+}
+
+/* A tile into the cache, for ListBGTiles16: TRUE or BLANK_TILE */
+uint32 ConvertBGTile (uint32 TileNumber)
+{
+    return BG.Buffered [TileNumber] = ConvertTile (&BG.Buffer [TileNumber << 6], TileNumber << BG.TileShift);
+}
+
+/* For tests/asm/tile_test.cpp: the rows listed by ListBGTilesC */
+bool8 BGListInC = FALSE;
+
+/* ListBGTiles16's work in C, for any row: DrawBackground's own sums (for
+ * 16x16 tiles the map entry plus the quarter, carries into the flips and
+ * palette and all) */
+static struct BGTileCommand *ListBGTilesC (struct BGRowList &L)
+{
+    struct BGTileCommand *c = L.Commands;
+    const uint16 *t = L.t;
+    uint32 Quot = L.Quot;
+    for (uint32 Column = 0; Column < L.Count; Column++, Quot++)
+    {
+	uint32 Tile = L.Last = *t;
+	if (L.t1 >= 0)
+	{
+	    uint32 q = Quot & 1;
+	    Tile += (Tile & V_FLIP ? 16 - L.t1 : L.t1) + (Tile & H_FLIP ? 1 - q : q);
+	    t += q;
+	    if (Quot == 63)
+		t = L.b2;
+	    else if (Quot == 127)
+		t = L.b1;
+	}
+	else
+	{
+	    t++;
+	    if (Quot == 31)
+		t = L.b2;
+	    else if (Quot == 63)
+		t = L.b1;
+	}
+	uint32 TileNumber = (L.FirstTile + (Tile & 0x3ff)) & L.TileMask;
+	uint32 Cached = L.Buffered [TileNumber];
+	if (!Cached)
+	    Cached = ConvertBGTile (TileNumber);
+	if (Cached == BLANK_TILE)
+	    continue;
+	/* (the depth by the map entry's priority, the flips as added up) */
+	uint32 How = Column << 16 | L.How [((L.Last >> 13) & 1) | ((Tile >> 13) & 6)];
+	c->bp = L.Buffer + (TileNumber << 6);
+	c->Colors = L.Colors [(Tile >> 10) & 7];
+	c->How = How;
+	L.Drawn |= How;
+	c++;
+    }
+    L.t = t;
+    return c;
+}
+
 /* DrawBackground's unclipped tiles of one row, with the ARM CPU core
- * setting: DrawTile16's work for a run of Count tiles with everything in
- * locals, and blank tiles left before any of it. t is the map entry of
- * column Quot, b1 and b2 the two halves of the map row; t moves on and
+ * setting, in two passes: ListBGTiles16 works out each tile with
+ * everything in registers (tables by the map entry's bits, blank tiles
+ * left out), DrawBGCommands16 draws the ones listed. t is the map entry
+ * of column Quot, b1 and b2 the two halves of the map row; t moves on and
  * wraps as in DrawBackground and is returned for the next column. A tile
  * whose depth is above Ceiling (no depth already on the row's lines is as
  * high: gfx.cpp's LineMaxDepth) can't be hidden, so it's drawn without the
  * depth test. *Drawn gets the highest depth drawn (0: nothing). The
  * pixels, depths and GFX.Z1/Z2 come out as from DrawBackground's own loop
  * calling DrawTile16 (tests/asm/run.sh compares every frame with the C
- * setting's). */
+ * setting's, tests/asm/tile_test.cpp rows of random tiles with Snes9x
+ * 1.43's loop). Needs BG.NameSelect 0, BG.TileAddress a whole number of
+ * tiles (as DrawBackground sets them) and Count 1-64. */
 const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2, uint32 s,
 			     uint32 Quot, int Count, uint32 StartLine, uint32 LineCount,
 			     uint32 t1, uint32 t2, const uint8 *depths, uint32 Ceiling, uint32 *Drawn)
 {
-    uint32 HighestDrawn = 0;
-    const bool Big = BG.TileSize != 8;
-    const uint32 TileShift = BG.TileShift, TileAddress = BG.TileAddress, NameSelect = BG.NameSelect;
-    uint8 *const Buffer = BG.Buffer;
-    uint8 *const Buffered = BG.Buffered;
-    const uint32 PaletteMask = BG.PaletteMask, PaletteShift = BG.PaletteShift;
-    const uint16 *const Colors = &IPPU.ScreenColors [BG.StartPalette];
-    uint16 *Screen = (uint16 *) GFX.S + (int32) s;
-    uint8 *Depth = GFX.DB + (int32) s;
-    uint32 SetZ = 0x100, Z = 0x100;
-
-    for (; Count > 0; Count--, Quot++, Screen += 8, Depth += 8)
+    struct BGTileCommand Commands [64];
+    struct BGRowList L;
+    for (uint32 i = 0; i < 8; i++)
     {
-	uint32 Tile = READ_2BYTES (t);
-	Z = depths [(Tile & 0x2000) >> 13];
-	if (Big)
-	{
-	    /* the 8x8 quarter: top or bottom by the line (t1, t2 when flipped
-	     * vertically), left or right by the column (swapped when flipped) */
-	    uint32 q = Quot & 1;
-	    Tile += (Tile & V_FLIP ? t2 : t1) + (Tile & H_FLIP ? 1 - q : q);
-	    t += q;
-	    if (Quot == 63)
-		t = b2;
-	    else if (Quot == 127)
-		t = b1;
-	}
-	else
-	{
-	    t++;
-	    if (Quot == 31)
-		t = b2;
-	    else if (Quot == 63)
-		t = b1;
-	}
-
-	uint32 TileAddr = TileAddress + ((Tile & 0x3ff) << TileShift);
-	if ((Tile & 0x1ff) >= 256)
-	    TileAddr += NameSelect;
-	TileAddr &= 0xffff;
-	uint32 TileNumber = TileAddr >> TileShift;
-	uint8 *pCache = &Buffer [TileNumber << 6];
-	uint8 Cached = Buffered [TileNumber];
-	if (!Cached)
-	    Cached = Buffered [TileNumber] = ConvertTile (pCache, TileAddr);
-	if (Cached == BLANK_TILE)
-	    continue;
-
-	if (Z != SetZ)
-	{
-	    GFX.Z1 = GFX.Z2 = (uint8) Z;
-	    SetZ = Z;
-	}
-	if (Z > HighestDrawn)
-	    HighestDrawn = Z;
-	DrawTileLines16Asm [((Tile >> 14) & 3) + (Z > Ceiling ? 8 : 0)] (Screen, Depth,
-	    pCache + ((Tile & V_FLIP) ? 56 - StartLine : StartLine),
-	    Colors + (((Tile >> 10) & PaletteMask) << PaletteShift), LineCount, 0xffffffff, 0xffffffff);
+	uint32 Z = depths [i & 1];
+	L.How [i] = Z << 8 | (i & 1 ? 16 : 8) | (Z > Ceiling ? 4 : 0) | i >> 1;
+	L.Colors [i] = &IPPU.ScreenColors [BG.StartPalette] + ((i & BG.PaletteMask) << BG.PaletteShift);
+    }
+    L.t = t;
+    L.b1 = b1;
+    L.b2 = b2;
+    L.Quot = Quot;
+    L.Count = (uint32) Count;
+    L.Buffered = BG.Buffered;
+    L.Buffer = BG.Buffer + StartLine;
+    L.FirstTile = BG.TileAddress >> BG.TileShift;
+    L.TileMask = 0xffff >> BG.TileShift;
+    L.t1 = BG.TileSize == 8 ? -1 : (int32) t1;	/* (t2 is 16 - t1) */
+    L.Commands = Commands;
+    L.Drawn = 0;
+    struct BGTileCommand *End = BGListInC ? NULL : ListBGTiles16 (&L);
+    if (!End)
+    {
+	L.t = t;
+	L.Quot = Quot;
+	L.Count = (uint32) Count;
+	End = ListBGTilesC (L);
+    }
+    if (End != Commands)
+    {
+	struct BGRowDraw Row = { (uint16 *) GFX.S + (int32) s, GFX.DB + (int32) s, LineCount,
+				 (int32) (56 + 4 - 2 * StartLine), GFX.PPL };
+	DrawBGCommands16 (Commands, End, &Row);
     }
     /* (DrawBackground set them for every tile, the last one included) */
-    if (Z != 0x100 && Z != SetZ)
-	GFX.Z1 = GFX.Z2 = (uint8) Z;
-    *Drawn = HighestDrawn;
-    return t;
+    GFX.Z1 = GFX.Z2 = depths [(L.Last & 0x2000) >> 13];
+    uint32 Highest = L.Drawn & 8 ? depths [0] : 0;
+    if ((L.Drawn & 16) && depths [1] > Highest)
+	Highest = depths [1];
+    *Drawn = Highest;
+    return L.t;
 }
 
 /* Whether DrawTile16 or DrawClippedTile16 drew anything of Tile (as passed

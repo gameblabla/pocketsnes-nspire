@@ -2716,8 +2716,9 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 				Count &= 7;
 #ifdef ARM_ASM_GFX
 				// ... with the ARM CPU core setting, in one go (tile.cpp)
-				if (Settings.AsmCPU && Middle > 0 && DrawTilePtr == DrawTile16 &&
-				    !BG.DirectColourMode && !IPPU.HalfWidthPixels)
+				if (Settings.AsmCPU && Middle > 0 && Middle <= 64 && DrawTilePtr == DrawTile16 &&
+				    !BG.DirectColourMode && !IPPU.HalfWidthPixels && !BG.NameSelect &&
+				    !(BG.TileAddress & ((1u << BG.TileShift) - 1)))
 				{
 					uint32 Drawn;
 					t = (uint16 *) DrawBGTiles16 (t, b1, b2, s, Quot, Middle, VirtAlign, Lines, t1, t2, depths,

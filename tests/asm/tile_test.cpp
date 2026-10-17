@@ -7,7 +7,13 @@
  * screen and depth buffers must come out the same. Then the drawers
  * without the depth test (DrawTileLines16_un and the others, for tiles
  * nothing on their lines can hide) against the tested ones, on depths all
- * below Z1, where they must do the same.
+ * below Z1, where they must do the same. Then DrawBackground's rows of
+ * unclipped tiles (tile.cpp's DrawBGTiles16, listed in ARM assembler and in
+ * C) against Snes9x 1.43's loop: random map rows (8x8 and 16x16 tiles, the
+ * tile numbers now and then where 16x16 quarters carry into the palette),
+ * runs across the halves of the map row, tile data anywhere in VRAM (tile
+ * numbers wrapping), 2, 4 and 8 bits a pixel, tiles still to be converted,
+ * depths with ceilings.
  *   tile_test [CASES] [SEED]
  * Prints the first differences and PASS or FAIL. Runs on ARM (under
  * qemu-arm on a PC, tests/asm/run.sh). */
@@ -24,6 +30,10 @@
 void DrawTile16 (uint32 Tile, uint32 Offset, uint32 StartLine, uint32 LineCount);
 void DrawClippedTile16 (uint32 Tile, uint32 Offset, uint32 StartPixel, uint32 Width,
                         uint32 StartLine, uint32 LineCount);
+const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2, uint32 s,
+                             uint32 Quot, int Count, uint32 StartLine, uint32 LineCount,
+                             uint32 t1, uint32 t2, const uint8 *depths, uint32 Ceiling, uint32 *Drawn);
+extern bool8 BGListInC;
 
 #include "../tile_ref.h"
 
@@ -52,7 +62,7 @@ static uint32 rnd (uint32 n)
 
 #define MAX_PITCH 512
 #define LINES     24
-#define TILES     2048
+#define TILES     4096
 
 static uint8 tile_cache [TILES * 64] __attribute__ ((aligned (8)));
 static uint8 tile_cached [TILES];
@@ -89,6 +99,168 @@ static void setup_tiles (void)
     }
     for (int i = 0; i < 256; i++)
         IPPU.ScreenColors [i] = (uint16) rnd (0x10000);
+}
+
+/* DrawBackground's unclipped tiles of a row as Snes9x 1.43 draws them (its
+ * gfx.cpp loop, with tests/tile_ref.h's drawer): returns t after the row,
+ * *Drawn the highest depth of a tile drawn (0: none) */
+static const uint16 *RefBGRow (const uint16 *t, const uint16 *b1, const uint16 *b2, uint32 s, uint32 Quot,
+                               int Count, uint32 StartLine, uint32 LineCount, uint32 t1, uint32 t2,
+                               const uint8 *depths, uint32 *Drawn)
+{
+    *Drawn = 0;
+    for (int C = Count; C > 0; s += 8, Quot++, C--)
+    {
+        uint32 Tile = *t;
+        GFX.Z1 = GFX.Z2 = depths [(Tile & 0x2000) >> 13];
+        if (BG.TileSize != 8)
+            Tile += (Tile & V_FLIP ? t2 : t1) + (Tile & H_FLIP ? 1 - (Quot & 1) : (Quot & 1));
+        RefDrawTile16 (Tile, s, StartLine, LineCount);
+        uint32 TileAddr = (BG.TileAddress + ((Tile & 0x3ff) << BG.TileShift)) & 0xffff;
+        if (BG.Buffered [TileAddr >> BG.TileShift] != BLANK_TILE && GFX.Z2 > *Drawn)
+            *Drawn = GFX.Z2;
+        if (BG.TileSize == 8)
+        {
+            t++;
+            if (Quot == 31)
+                t = b2;
+            else if (Quot == 63)
+                t = b1;
+        }
+        else
+        {
+            t += Quot & 1;
+            if (Quot == 63)
+                t = b2;
+            else if (Quot == 127)
+                t = b1;
+        }
+    }
+    return t;
+}
+
+#define ROW_PITCH 640
+#define ROW_LINES 10
+
+static uint16 row_screen [3] [ROW_PITCH * ROW_LINES];
+static uint8 row_depth [3] [ROW_PITCH * ROW_LINES];
+static uint16 map_rows [2] [128];
+static uint8 vram [0x10000 + 64];
+
+static uint16 map_entry (void)
+{
+    uint32 number = rnd (4) == 0 ? 1000 + rnd (24) : rnd (0x400);
+    return (uint16) (number | rnd (8) << 10 | rnd (2) << 13 | rnd (4) << 14);
+}
+
+/* DrawBGTiles16 (1: its tiles listed in ARM assembler, 2: in C) against
+ * RefBGRow: the screen, the depths, t after the row, GFX.Z1/Z2 and Drawn
+ * must come out the same. Returns the cases that differ. */
+static int test_bg_rows (int cases, int *failed)
+{
+    S9xGraphicsInit ();		/* (ConvertTile's tables) */
+    Memory.VRAM = vram;
+    for (uint32 i = 0; i < sizeof (vram); i++)
+        vram [i] = rnd (3) ? (uint8) rnd (256) : 0;
+    for (int i = 0; i < cases; i++)
+    {
+        uint32 depth_bits = rnd (3);		/* 2, 4 or 8 bits a pixel */
+        BG.TileShift = 4 + depth_bits;
+        BG.BitShift = 2 << depth_bits;
+        BG.TileAddress = rnd (0x10000 >> BG.TileShift) << BG.TileShift;
+        BG.NameSelect = 0;
+        BG.TileSize = rnd (2) ? 8 : 16;
+        BG.PaletteShift = depth_bits == 0 ? 2 : depth_bits == 1 ? 4 : 0;
+        BG.PaletteMask = depth_bits == 2 ? 0 : 7;
+        BG.StartPalette = depth_bits == 0 ? 32 * rnd (8) : 0;
+        BG.DirectColourMode = FALSE;
+        GFX.PPL = ROW_PITCH;
+        for (int r = 0; r < 2; r++)
+            for (int k = 0; k < 128; k++)
+                map_rows [r] [k] = map_entry ();
+        const uint16 *b1 = map_rows [0], *b2 = map_rows [1], *t;
+        uint32 Quot;
+        if (BG.TileSize == 8)
+        {
+            Quot = rnd (8) == 0 ? 64 : rnd (64);
+            t = Quot == 64 ? b1 : Quot > 31 ? b2 + (Quot & 31) : b1 + Quot;
+        }
+        else
+        {
+            Quot = rnd (8) == 0 ? 128 : rnd (128);
+            t = Quot == 128 ? b1 : Quot > 63 ? b2 + ((Quot >> 1) & 31) : b1 + (Quot >> 1);
+        }
+        int Count = 1 + (int) rnd (rnd (2) ? 64 : 34);
+        uint32 line = rnd (8), lines = 1 + rnd (8 - line);
+        uint32 t1 = 16 * rnd (2), t2 = 16 - t1;
+        uint8 depths [2];
+        depths [0] = (uint8) (1 + rnd (100));
+        depths [1] = rnd (4) ? (uint8) (depths [0] + 1 + rnd (50)) : (uint8) (1 + rnd (100));
+        /* every depth on the row's lines at most Ceiling */
+        uint32 Ceiling = rnd (4) == 0 ? 0 : rnd (160);
+        for (int j = 0; j < ROW_PITCH * ROW_LINES; j++)
+        {
+            row_screen [0] [j] = (uint16) rnd (0x10000);
+            row_depth [0] [j] = (uint8) rnd (Ceiling + 1);
+        }
+        for (int k = 1; k < 3; k++)
+        {
+            memcpy (row_screen [k], row_screen [0], sizeof (row_screen [0]));
+            memcpy (row_depth [k], row_depth [0], sizeof (row_depth [0]));
+        }
+        uint32 s = ROW_PITCH + rnd (ROW_PITCH - 8 * Count - 8);
+        /* a few tiles to be converted (by each run but the reference, last) */
+        uint32 unconverted [8];
+        for (int k = 0; k < 8; k++)
+            unconverted [k] = rnd (TILES);
+
+        const uint16 *t_after [3];
+        uint32 drawn [3], z [3];
+        for (int k = 1; k < 3; k++)
+        {
+            for (int u = 0; u < 8; u++)
+                tile_cached [unconverted [u]] = 0;
+            GFX.S = (uint8 *) row_screen [k];
+            GFX.DB = row_depth [k];
+            GFX.Z1 = GFX.Z2 = 0;
+            BGListInC = k == 2;
+            t_after [k] = DrawBGTiles16 (t, b1, b2, s, Quot, Count, line * 8, lines, t1, t2, depths, Ceiling,
+                                         &drawn [k]);
+            z [k] = GFX.Z1 | GFX.Z2 << 8;
+        }
+        BGListInC = FALSE;
+        GFX.S = (uint8 *) row_screen [0];
+        GFX.DB = row_depth [0];
+        GFX.Z1 = GFX.Z2 = 0;
+        t_after [0] = RefBGRow (t, b1, b2, s, Quot, Count, line * 8, lines, t1, t2, depths, &drawn [0]);
+        z [0] = GFX.Z1 | GFX.Z2 << 8;
+
+        for (int k = 1; k < 3; k++)
+        {
+            if (memcmp (row_screen [k], row_screen [0], sizeof (row_screen [0])) == 0 &&
+                memcmp (row_depth [k], row_depth [0], sizeof (row_depth [0])) == 0 &&
+                t_after [k] == t_after [0] && drawn [k] == drawn [0] && z [k] == z [0])
+                continue;
+            if (failed [k - 1]++ < 5)
+            {
+                printf ("%s DrawBGTiles16: %ux%u tiles, %u bits, tiles at %04x, Quot %u, %d columns, line %u, "
+                        "%u lines, t1 %u, depths %u %u, ceiling %u\n", k == 1 ? "asm" : "C",
+                        BG.TileSize, BG.TileSize, BG.BitShift, BG.TileAddress, Quot, Count, line, lines,
+                        t1, depths [0], depths [1], Ceiling);
+                printf ("  t after: %+d, original %+d; drawn %u, original %u; Z1/Z2 %04x, original %04x\n",
+                        (int) (t_after [k] - b1), (int) (t_after [0] - b1), drawn [k], drawn [0], z [k], z [0]);
+                int shown = 0;
+                for (int j = 0; j < ROW_PITCH * ROW_LINES && shown < 8; j++)
+                    if (row_screen [k] [j] != row_screen [0] [j] || row_depth [k] [j] != row_depth [0] [j])
+                    {
+                        printf ("  at %d: screen %04x depth %u, original %04x depth %u\n", j,
+                                row_screen [k] [j], row_depth [k] [j], row_screen [0] [j], row_depth [0] [j]);
+                        shown++;
+                    }
+            }
+        }
+    }
+    return failed [0] + failed [1];
 }
 
 int main (int argc, char **argv)
@@ -198,7 +370,13 @@ int main (int argc, char **argv)
         }
     }
     printf ("untested drawers: %d of %d cases differ from the tested ones\n", untested_failed, cases);
-    bool pass = !failed [0] && !failed [1] && !clipped_failed [0] && !clipped_failed [1] && !untested_failed;
+    int rows_failed [2] = {0, 0};
+    int row_cases = cases / 4;
+    test_bg_rows (row_cases, rows_failed);
+    printf ("background rows: %d (assembler list) and %d (C) of %d differ from Snes9x 1.43's loop\n",
+            rows_failed [0], rows_failed [1], row_cases);
+    bool pass = !failed [0] && !failed [1] && !clipped_failed [0] && !clipped_failed [1] && !untested_failed &&
+                !rows_failed [0] && !rows_failed [1];
     printf ("%s: %d cases\n", pass ? "PASS" : "FAIL", cases);
     return pass ? 0 : 1;
 }
