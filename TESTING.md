@@ -93,7 +93,11 @@ the save manager uncompressing and deleting), and files from older versions
 moving into `zPocketSNES_saves` in My Documents (the `snesfolder` test sets
 out the calculator's layout, program and ROMs in one folder, and checks the
 folder has no folder left in it; `docsfolder` moves the earlier
-My Documents/`PocketSNES_saves` over and checks it's gone).
+My Documents/`PocketSNES_saves` over and checks it's gone), and full screen
+(*Screen size*: each size and smooth setting, turned as on the CX II and
+shown whole with `--landscape` as on other calculators; `tests/scale_check.py`
+works out every stretched pixel from the original size's screenshot by its
+own reading of the definition and compares).
 `make unit-tests` also checks the settings kept inside the program file
 and *Reset all settings*.
 Results and screenshots go to
@@ -107,7 +111,9 @@ Unit tests
 
 `tests/unit_tests.cpp`: the tile drawers against the original Snes9x 1.43
 ones on 20,000 random tiles (flips, clipping, depths, line ranges), the
-frame turning for the CX II LCD, the settings files (defaults, old files,
+frame turning for the CX II LCD, the full screen stretch (`scale_turn` and
+`scale_frame` against `scale_reference` at every height from 120 to 240
+lines, sharp and smooth), the settings files (defaults, old files,
 key combinations, settings for one game, the CPU speed reset after a
 freeze) and the key bindings. tests/run.sh runs them first.
 
@@ -127,11 +133,11 @@ not from the emulator's. run.sh plays it, and plays it again loading the
 state it saved when it closed (which only stays green if loading a state
 restores the S-DD1 banks); tests/asm/run.sh plays it on both CPU cores.
 
-The Super FX interpreters
--------------------------
+The Super FX interpreters and translator
+----------------------------------------
 
     make fx-test                # PC: the C interpreter
-    tests/asm/run.sh            # ARM, under qemu: the C one and the ARM assembler one
+    tests/asm/run.sh            # ARM, under qemu: the C one, the ARM assembler one, the translator
 
 `tests/fx_test.cpp` runs every one of the 1024 opcode and ALT mode
 combinations as a single instruction from random GSU states (all registers,
@@ -140,10 +146,21 @@ random programs of up to 200 instructions, once on the interpreter being
 tested and once on `fx_run_reference` (the original Snes9x loop, a call
 through `fx_apfOpcodeTable` per instruction, built only for the test), and
 compares the whole GSU struct, its RAM and the register space byte for
-byte. On ARM it tests `fx_run` (the C interpreter) and `fx_run_arm_counted`
-(the assembler one built to stop after a given number of instructions).
-Planting a bug in either interpreter (a flag, an order of reads, the ROM
-buffer, the careful table) makes it fail.
+byte. On ARM it tests `fx_run` (the C interpreter), `fx_run_arm_counted`
+(the assembler one built to stop after a given number of instructions)
+and, with `jit`, the translator (`fxjit.cpp`): parts 1 and 2 through
+`fx_jit_run_counted`, which translates blocks that stop after the given
+number of instructions, and a part 3 that runs programs until the GSU
+stops, as games do, with the blocks kept and linked. Part 3 runs each
+program from 6 states and shrinks the block table's hash now and then
+(`fx_jit_test_hash_bits` 0 or 1) so blocks collide, plus directed programs
+for what random ones rarely hit: loops, branches into code already
+translated, delay slots, iwt/ibt operands after a jump, computed jumps
+(`add r15`, `lms r15`), calls and returns. Planting a bug in either
+interpreter (a flag, an order of reads, the ROM buffer, the careful table)
+makes it fail; bugs planted in the translator showed where random programs
+weren't enough, which is what the shrunken hash and the directed programs
+are for.
 
 Estimating the speed on the calculator
 --------------------------------------
@@ -165,7 +182,9 @@ the ARM instructions per frame by part of the emulator (drawing, Super FX,
 CPU, PPU/DMA) and the estimated milliseconds and fps at 396 MHz. Like the
 calculator's speed test it starts from the state with no keys pressed;
 `game_test`'s `-timing` input draws every frame without printing checksums,
-and `timing_frame_mark` marks the frames.
+and `timing_frame_mark` marks the frames. The Super FX's translated code has
+no symbols, so its instructions are counted as `fx_jit_code` (the code
+buffer), under Super FX.
 
 The milliseconds come from instruction counts with numbers fitted to the
 calculator's own speed tests of Super Mario World (2026-10-10, 396 MHz:
@@ -242,11 +261,12 @@ picture:
   registers and cycle count, for every frame. run.sh runs it on both cores
   for the homebrew demos and, when they're in `~/nspire/build/testroms`,
   Super Mario World, Chrono Trigger, Zelda: A Link to the Past and Yoshi's
-  Island (Super FX), and the lines must be identical. The CPU core setting
-  also picks the Super FX interpreter, the tile drawers' and line fills'
-  ARM assembler (`pocketsnes/arm/gfx_arm.s`) and the word-at-a-time VRAM
-  DMA loop, against the C versions with *C*, so the games compare those
-  too.
+  Island (Super FX; also from the owner's two saves, `yi_1_1` and
+  `yi_bubble`), and the lines must be identical. The CPU core setting also
+  picks the Super FX translator, the tile drawers' and line fills' ARM
+  assembler (`pocketsnes/arm/gfx_arm.s`), the background rows' two passes,
+  the depth ceilings, the VRAM DMA copy and the brightness rebuilt when
+  used, against the C code with *C*, so the games compare those too.
 * **tile_test** draws random tiles with `DrawTile16` and
   `DrawClippedTile16` on both settings (the assembler's inner loop and the
   C one) and with Snes9x 1.43's drawers (`tests/tile_ref.h`, which the PC
@@ -256,7 +276,22 @@ picture:
   and line lengths of 256 to 512 pixels. run.sh runs 20000 cases;
   `tile_test 100000 1` runs more. Each of 12 bugs planted in the assembler
   (a condition, the compare's order, a byte's shift, a mask, a flip, the
-  next line's depth, Z2, the line count) made it fail.
+  next line's depth, Z2, the line count) made it fail. Then the untested
+  drawers (`DrawTileLines16_u*`) against the tested ones on depths all
+  below Z1, where they must draw the same. Then a quarter as many rows of
+  background tiles: `DrawBGTiles16` (its assembler lister and, with
+  `BGListInC`, the C one) against Snes9x 1.43's loop from `DrawBackground`
+  with the reference drawer: random map rows, 8x8 and 16x16 tiles (tile
+  numbers often near 1023, where a 16x16 quarter carries into the palette),
+  runs across the halves of the map row, tile data anywhere in VRAM (tile
+  numbers wrapping), 2, 4 and 8 bits a pixel, tiles still to be converted
+  from VRAM, depths under a ceiling; the screen, depths, t after the row,
+  GFX.Z1/Z2 and the highest depth drawn must match. Each of 11 planted bugs
+  (in the run logic, the quarters, the wraps, the carry check, converted
+  tiles, the ceiling, the flipped line, the highest depth) made it fail.
+* **scale_test** checks the full screen loops in ARM assembler
+  (`frontend/scale_arm.S`) against `scale_reference`, turned, on random
+  pictures at every height from 120 to 240 lines, sharp and smooth.
 * **game_trace** is game_test printing every opcode of chosen frames with
   the registers, on either core, so the first instruction where the two
   differ can be found with `diff`:

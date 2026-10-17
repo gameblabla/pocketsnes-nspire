@@ -212,6 +212,17 @@ Screen and speed:
   don't overclock: the right speed differs per calculator.
 * **SRAM rendering is off** (`SRAM_RENDERING 0`): both tries froze the
   calculator. The MMU page table at 0xA4004000 is the likely reason.
+* **Full screen is a setting, the original size the default** (*Screen
+  size*, 2026-10-15). Stretching 4 pixels to 5 and 224 lines to 240 can't
+  keep every pixel the same size, so *smooth stretching* (on by default)
+  makes the doubled column and line averages of their neighbours instead
+  of copies. Output line y shows source line (2y+1)·lines/480, which
+  spreads the repeated lines evenly. *Full, crop edges* drops 8 lines at
+  the top and bottom first (Yoshi's Island blanks 16 of its own). The
+  stretch and the turn for the portrait LCD are one pass into the
+  portrait buffer, so a stretched frame is always shown that way; the DMA
+  output, which copies a landscape frame, only applies at the original
+  size.
 
 Keys and settings:
 
@@ -339,6 +350,42 @@ Emulation core:
   interpreter. That leaves *C* as a fallback with the original code, and
   lets `tests/asm/run.sh` compare every frame of the test games with and
   without them (the C setting's run is the reference).
+* **The Super FX translator** (`fxjit.cpp`, 2026-10-15) replaced the
+  assembler interpreter for *CPU core: ARM*; *C* runs the C interpreter,
+  and the translator falls back to it (`fx_step`) an instruction at a time.
+  The assembler interpreter is no longer called by the emulator
+  (`fx_run_arm_interpreter` is left in; `tests/fx_test.cpp` still checks
+  it). Blocks are keyed
+  by bank, address and prefix state, so the prefixes cost nothing when a
+  block runs; R15 is a constant in each instruction; a flag is stored only
+  if something can read it before it's set again (a block's end reads
+  them all). Exits are patched into direct branches once their target is
+  translated; computed jumps look the target up in the block table from
+  the translated code. What it doesn't do goes to `fx_step` (code in the
+  GSU's RAM, ljmp, a delay slot holding a jump, the C functions with R15 as
+  destination, the first instruction of a run whose pipe isn't the byte
+  before R15), and an address that failed is remembered. On the
+  calculator the new code is written back from the data cache and the
+  instruction cache invalidated (`FX_JIT_CACHE_OPS`); under qemu the buffer
+  is made executable with `mprotect` (`FX_JIT_MPROTECT`).
+* **Depth ceilings** (`LineMaxDepth`, gfx.cpp, 2026-10-15): for each line
+  of the main and sub screen, a depth at least as high as anything drawn
+  on it so far (the clears set 0 and 1). `DrawOBJS` and `DrawBackground`
+  raise it as they draw (by what each row really drew; mosaic, offset-per-
+  tile and mode 7 raise it by their highest depth), and a background tile
+  above every ceiling on its lines is drawn with the untested drawers
+  (`DrawTileLines16_u*`, no depth compare: the result is the same). Off
+  for interlace and double-height pixels.
+* **Background rows in two passes** (`ListBGTiles16` and
+  `DrawBGCommands16` in `gfx_arm.s`, `DrawBGTiles16` in tile.cpp,
+  2026-10-16): the first lists a row's unclipped tiles with everything in
+  registers (tables by the map entry's bits for depth, flips and palette;
+  blank tiles dropped; 16x16 quarters; tile numbers wrapping past the last
+  tile), the second draws the list. One pass in assembler ran out of
+  registers and reloaded the row's values for every tile; in C, GCC
+  spilled them. A row where a 16x16 quarter's sum may carry into the
+  palette bits (DrawBackground adds the quarter to the whole map entry) is
+  listed by the C lister instead, which adds as DrawBackground does.
 * **The tile drawers' assembler** (`DrawTileLines16_*`, 8 versions: flips,
   clipped or not) gets each pixel's palette index already doubled with one
   `ands` (mask 0x1fe, shifted), which also says whether it's 0; the depth
@@ -348,6 +395,14 @@ Emulation core:
   the ARM926). `DrawTile16`'s C part (the tile cache lookup and palette)
   calls it through a table indexed by the flip bits; it reads Z1, Z2 and
   PPL from GFX itself (offsets checked with `static_assert` in tile.cpp).
+* **A new brightness rebuilds the colours only when they're drawn with**
+  (*CPU core: ARM*, 2026-10-16): `S9xUpdateScreen` does it, and not at all
+  if the brightness is back to what they were built with; CGRAM writes in
+  between use the old brightness and are rebuilt with the rest. Yoshi's
+  Island turns it down and up in every V-blank.
+* **VRAM DMA with source and address both moving on by one is a
+  `memcpy`** (*CPU core: ARM*), with the tile caches marked a block at a
+  time; anything that would wrap goes through the word loop.
 
 
 Gotchas
@@ -476,6 +531,10 @@ History
 | 2026-10-14 | | S-DD1 (Star Ocean, Street Fighter Alpha 2) and its test cartridge (not pushed) |
 | 2026-10-15 | 82d4db8 | Super FX assembler: R14 destination table, plot, merge, color (not pushed) |
 | 2026-10-15 | 71bef17..ee6d762 | Tile drawing and line fills in ARM assembler, VRAM DMA a word at a time, `calc_speed.sh` FUNCS/ANNOTATE (not pushed) |
+| 2026-10-15 | 042079c | Screen size: full screen, full with the edges cropped, sharp or smooth (not pushed) |
+| 2026-10-15 | 30c3a33, 8465004 | The Super FX translated into ARM code (not pushed) |
+| 2026-10-15 | 0e3c338 | Background tiles nothing on their lines can hide drawn without the depth test (not pushed) |
+| 2026-10-16 | b61b1c2, 3129554 | Background rows in two assembler passes; VRAM DMA a copy; brightness rebuilt when used (not pushed) |
 
 `git log` has the details; every commit message says what changed and why.
 
@@ -486,10 +545,12 @@ Open items and ideas
 Waiting on the owner:
 
 * A speed test of Yoshi's Island on the calculator from the owner's save
-  (state 10, copied to `build/calc-saves/yi/`) with the 2026-10-15 build
-  (uploaded 2026-10-15, 460,768 bytes with the owner's settings).
-  `tests/calc_speed.sh` estimates 65.3 fps with no speed limit and the DMA
-  output (`SHOW_MS=0.5`); the build before measured 53.0 (estimate 53.3).
+  (state 10, copied to `build/calc-saves/yi/`) with the 2026-10-16 build.
+  `tests/calc_speed.sh` estimates 92.1 fps with no speed limit and the DMA
+  output (`SHOW_MS=0.5`). The 2026-10-15 build (estimate 65.3) wasn't
+  measured; the one before measured 53.0 (estimate 53.3). The translated
+  Super FX code's cycles per instruction on the calculator are unknown (the
+  interpreter's were 3.2 against the script's 2.58).
 
 * Run v4.0's `_PocketSNES.tns` on the calculator (uploaded 2026-10-11):
   settings, keys and saves still there; `_PocketSNES` first in `snes`; how
@@ -497,14 +558,26 @@ Waiting on the owner:
 
 Ideas, most promising first (see README → Future steps):
 
-* More of the tile drawing in ARM assembly: `DrawTile16`'s C part (tile
-  cache lookup, palette, the call) is 48 instructions a tile, and in Yoshi's
-  Island 1300 of its 3000 calls a frame are for blank tiles, which
-  `DrawBackground` could skip itself. `DrawBackground` is another 134K
-  instructions a frame there.
-* A lighter HBlank sync for the ARM core (`doHBlank` save/load of registers
-  is about 8% of an ARM frame), and calling `S9xGetPPU`/`S9xGetCPU`
-  directly for I/O.
+* Sprites: `DrawOBJS` calls `DrawTile16` for every 8 pixels of a sprite on
+  a line, about 150 instructions each with the setup per sprite and line
+  (Yoshi's Island sv010: 465 calls, about 100K instructions a frame). A loop
+  over a sprite's tiles in assembler.
+* Opaque lines: 89% of the untested background lines Yoshi's Island draws
+  have no pixel 0 (FINDINGS.md). A per-tile flag from `ConvertTile` could
+  pick drawers without the per-pixel test that store the depths 2 or 4 at
+  a time (the row's alignment decides).
+* The Super FX translator: GSU registers kept in ARM registers across
+  blocks, flags dropped across jumps (its code is 260K instructions a frame
+  in sv010).
+* Idle frames: Yoshi's Island waits for the next frame in a two-instruction
+  loop that the core's idle loop detection skips, but every H-blank event
+  wakes it and it runs twice before skipping again (`WaitCounter`), plus
+  the events themselves: about 50K instructions a frame between
+  `doHBlank`, `S9xDoHBlankProcessing_SFX` and the loop.
+* H-DMA: Yoshi's Island writes the fixed colour on every line through
+  `S9xSetPPU` (about 30K instructions a frame with the H-DMA loop).
+* A lighter HBlank sync for the ARM core (`doHBlank` save/load of
+  registers), and calling `S9xGetPPU`/`S9xGetCPU` directly for I/O.
 * Profile-guided optimisation.
 * SRAM rendering again, leaving the first 32 KB alone.
 * The SPC7110 chip.

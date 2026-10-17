@@ -13,9 +13,10 @@
 #    random registers and memory; registers, cycles and memory must match.
 # 2. game_test: games run once on each core setting with the same scripted
 #    input; every frame's RAM, VRAM, palette, sprites, I/O registers, picture
-#    and registers must match. The ARM core setting also uses the ARM Super
-#    FX interpreter, tile drawers and line fills and the word-at-a-time VRAM
-#    DMA loop, so those are checked against the C ones too. Uses the
+#    and registers must match. The ARM core setting also uses the Super FX
+#    translator, the ARM assembler tile drawers, line fills and background
+#    rows, the depth ceilings, the VRAM DMA copy and the brightness rebuilt
+#    when used, so those are checked against the C code too. Uses the
 #    homebrew demos tests/run.sh downloads and, if they are there, the
 #    commercial ROMs in ~/nspire/build/testroms.
 # Needs the Ndless toolchain (. ~/nspire/build/env.sh) and qemu-arm (QEMU=,

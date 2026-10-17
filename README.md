@@ -194,8 +194,11 @@ Speed and overclocking
 On a CX II at its normal 396 MHz, Super Mario World runs at a full 60 frames
 per second with every frame drawn. Games with extra chips (Super FX like
 Yoshi's Island and Star Fox, or SA-1) are heavier: Yoshi's Island measured
-53 fps in a busy spot of its first world, and the changes since are
-estimated to bring that to about 65 (see *How it got faster*).
+53 fps in a busy spot of its first world (2026-10-14), and the changes since
+are estimated to bring that spot to about 92 with no speed limit and the DMA
+screen output, and lighter spots to 110–127 (see *How it got faster*; not
+yet measured on the calculator). The no-tearing output and full screen each
+cost about 1.5 ms a frame more, about 80 fps in that spot.
 
 To help a slow game:
 
@@ -286,7 +289,9 @@ whenever that game runs.
 | Frameskip | automatic, manual, **off** | Automatic skips drawing only when the game falls behind, so the game keeps full speed. Manual draws 1 frame in every N+1. Off draws every frame; the game slows down if drawing can't keep up. |
 | Frames to skip | **5** (0–9) | Automatic: the most frames skipped in a row. Manual: N. |
 | FPS counter | off, **on**, detailed | Frames drawn per second over the most there can be: 60/60 is full speed. Detailed adds how long each part of a frame takes and logs it to `pocketsnes_perf.txt.tns`. |
-| Screen output (CX II) | **no tearing**, DMA | No tearing shows every frame whole. DMA is a little faster but can show a split line when the picture scrolls fast. |
+| Screen size | **original**, full screen, full, crop edges | Original shows the SNES picture pixel for pixel (256×224 in the middle of the screen). Full screen stretches it to the whole 320×240 screen, as a TV did: every 4 pixels across become 5 and 224 lines become 240. *Full, crop edges* first leaves out the 8 lines at the top and bottom, which TVs hid and some games (Yoshi's Island) blank, so those fill the screen too. Showing a stretched frame takes about 2 ms, like the no-tearing output at the original size. |
+| Smooth stretching | **on**, off | Full screen only: on makes each doubled column and line the average of its two neighbours, so all pixels look the same size; off copies them (sharp, a little faster). |
+| Screen output (CX II) | **no tearing**, DMA | No tearing shows every frame whole. DMA is a little faster but can show a split line when the picture scrolls fast. DMA is only used at the original size; a stretched picture is always shown without tearing. |
 | Brightness (CX II) | **calculator's**, 1 (dimmest) … 10 (brightest) | The screen's backlight while PocketSNES runs; the calculator's own comes back when PocketSNES closes. The + and − keys (Hotkeys) change it anywhere, a level at a time. |
 | CPU speed (CX II) | **normal**, highest tested, 408 … 504 MHz | Experimental, not reliable: overclocks while a game runs. See [Overclocking](#overclocking). |
 | Overclock test (CX II) | | In a game: plays it at 408 to 504 MHz until it runs differently from normal speed (or freezes), and keeps the highest that worked. About 3 minutes. See [Overclocking](#overclocking). |
@@ -376,9 +381,11 @@ What runs
 * There's no sound emulation at all, which also saves time.
 * Yoshi's Island's top line no longer flickers (fixed 2026-10-13; the
   original port and v4.0 have the flicker).
-* The Super FX interpreter, the tile drawing and the line clearing in ARM
-  assembler and the faster VRAM DMA loop go with *CPU core: ARM*; with
-  *CPU core: C* those run the C code too.
+* The Super FX translator (the GSU's code turned into ARM code as it
+  runs), the tile drawing and the line clearing in ARM assembler, the
+  background rows' fast path and the faster VRAM DMA go with *CPU core:
+  ARM*; with *CPU core: C* those run the original C code, which draws the
+  same pixels.
 * ROMs can be up to 8 MB, if the calculator has the memory free.
 * Calculators without a colour screen aren't supported.
 
@@ -455,6 +462,40 @@ that save, same output, estimated:
   VRAM by DMA. Each byte went through a function that worked out its
   address again and marked its tiles as changed in three caches; both bytes
   of a word now go together, with the tiles marked once.
+
+From the owner's save again, same output, estimated (2026-10-16):
+
+| Version | Frames per second (no speed limit) |
+|---|---:|
+| The build uploaded 2026-10-15 | 65.3 |
+| The Super FX's code translated into ARM code as it runs | 76 |
+| The translator also follows computed jumps; faster plot; background rows in one go | 80.1 |
+| Background tiles nothing can hide drawn without the depth test | 85.8 |
+| Background rows in two passes in ARM assembler | 90.3 |
+| VRAM copies in one go; colours rebuilt for a new brightness only when used | 92.1 |
+
+* **The Super FX translated into ARM code.** Even the assembler
+  interpreter spent most of its 17 instructions per GSU instruction finding
+  and decoding the next one. Now each run of GSU code (up to a jump) is
+  turned into ARM code the first time it runs and kept: the GSU's registers
+  stay in ARM registers, flags nobody reads aren't worked out, and runs that
+  jump to each other are linked straight together. GSU code that's written
+  to or does unusual things still goes to the interpreter. Yoshi's Island's
+  Super FX work went from 630K to about 260K ARM instructions a frame.
+* **Tiles nothing can hide.** Every pixel used to be checked against the
+  depth of what was already drawn there. For each line the renderer now
+  keeps the highest depth drawn so far, and a background tile above that
+  on all its lines is drawn without the checks. In Yoshi's Island that's
+  most of them.
+* **Background rows in two passes.** A row of tiles is first listed (which
+  tile, palette, flips and whether it's blank, with everything in
+  registers and blank tiles dropped), then drawn line by line. Working the
+  tiles out took more than drawing their pixels in C; it's now about a
+  third of that.
+* **Brightness.** Yoshi's Island turns the screen's brightness down and up
+  again in every frame's vertical blank, and each change recomputed all 256
+  colours. They're now recomputed only when a line is drawn, and not at all
+  if the brightness is back by then.
 
 * **Drawing straight into the frame.** The original drew into one buffer,
   copied it to another, and then had Ndless's `lcd_blit` copy it again.
@@ -559,6 +600,34 @@ controller (a PL111 at 0xC0000000). With DMA output, the DMA controller (an
 FTDMAC020 at 0xBC000000) copies the landscape frame to the OS's LCD memory
 at 0xA8000000 instead. Other calculators use Ndless's `lcd_blit`.
 
+**A stretched frame** (*Screen size: full screen*). `frontend/scale.cpp`
+first picks the source line for each of the 240 output lines (output line
+y shows line (2y+1)·lines/480, so the repeated ones are spread evenly;
+with smooth stretching a repeated line is the average of its two
+neighbours, made into a spare buffer). Then it stretches and turns in one
+pass, straight into the portrait buffer the LCD shows: 4 output lines at a
+time, each 4 source pixels across making 5 portrait lines (a b c X d, X
+being c or the average of c and d, two pixels at once with
+`(p & q) + (((p ^ q) & 0xF7DE) >> 1)`). On the calculator that loop is ARM
+assembler (`frontend/scale_arm.S`, one paired store per portrait line).
+
+**The Super FX translator** (`pocketsnes/snes9x/fxjit.cpp`, *CPU core:
+ARM*). A block is the GSU code from an address up to a jump (with its
+delay slot), translated for the prefix state it starts in (ALT1/ALT2, the
+B flag, Sreg/Dreg) and kept in a 256 KB code buffer under that key. The
+GSU's registers live in ARM registers while a block runs, flags that the
+next instructions overwrite before anyone reads them aren't computed, and
+the exits to blocks already translated are patched into direct branches;
+other exits look the target up in a hash table without leaving the
+translated code. Instructions the translator doesn't know, code that
+reads R15 in odd ways, and anything run from the GSU's RAM go to the
+interpreter (`fx_step`), and an address that couldn't be translated is
+remembered so it isn't tried again. The buffer is emptied when it fills
+up and at a reset (the GSU's code is in ROM, so nothing else changes it).
+`tests/fx_test.cpp` runs every opcode and thousands of random
+programs through it and compares every register and byte of memory with
+the original interpreter.
+
 **Timing.** The first SP804 timer (0x900C0000) runs free at 32768 Hz.
 `emu.cpp` paces frames in 16.16 fixed-point ticks and decides for each frame
 whether to draw it. Interrupts stay off while PocketSNES runs.
@@ -658,8 +727,20 @@ Future steps
 
 Ideas that haven't been done yet, roughly from most to least promising:
 
-* **Tile drawing in ARM assembly.** Drawing is still the biggest part of a
-  frame. snes9x2002 has an ARM assembly tile renderer that could be ported.
+* **Sprites in one go.** Each 8 pixels of a sprite on a line is a separate
+  call through `DrawTile16` (tile lookup, palette, the drawer's setup):
+  about 150 instructions for 8 pixels. A loop over a sprite's tiles in
+  ARM assembler could take a third of that (Yoshi's Island: about 100K
+  instructions a frame now).
+* **Opaque tile lines.** Most background lines Yoshi's Island draws have
+  no transparent pixel; knowing that from the tile cache would let them be
+  drawn without the per-pixel checks and with the depths stored 2 or 4 at
+  a time.
+* **The Super FX translator** could keep more GSU registers in ARM
+  registers across blocks and skip flags across jumps.
+* **Idle loops**: while the game waits for the next frame, each scanline
+  still runs the waiting loop twice and two H-blank events (about 50K
+  instructions a frame in Yoshi's Island).
 * **Profile-guided optimisation**: compile, record a run, compile again
   using the recording.
 * **Rendering into the on-chip SRAM**, which is several times faster than
