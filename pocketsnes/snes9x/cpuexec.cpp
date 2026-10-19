@@ -119,6 +119,13 @@ void S9xMainLoop_NoSA1_NoSFX (void);
  */
 void S9xMainLoop (void)
 {
+#ifdef ARM_ASM_CPU
+	if (Settings.AsmCPU && !Settings.SA1)
+	{
+		S9xMainLoop_Asm ();
+		return;
+	}
+#endif
 	if (Settings.SA1)
 	{
 		if (Settings.SuperFX)             S9xMainLoop_SA1_SFX   ();

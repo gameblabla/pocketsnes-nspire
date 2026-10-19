@@ -1,72 +1,89 @@
+# PC test build: the same core and frontend as the calculator build, with
+# frontend/platform_host.cpp standing in for the calculator. See TESTING.md.
+#   make                 window (SDL2) + headless script mode
+#   make SDL=0           headless script mode only
+# The calculator build is Makefile.nspire.
 
-# Define the applications properties here:
+TARGET = pocketsnes-host
+BUILD  = build/host
 
-TARGET = PocketSNES
+CXX = g++
 
-CC  := gcc
-CXX := g++
-STRIP := strip
+# SDL2 headers: the system ones, or the libsdl2-dev package unpacked into
+# ~/nspire/build/hostdeps (needs no root). Links against the installed runtime.
+SDL ?= 1
+SDL_INCLUDE ?= $(firstword $(wildcard /usr/include/SDL2/SDL.h $(HOME)/nspire/build/hostdeps/root/usr/include/SDL2/SDL.h))
+SDL_LIB ?= $(firstword $(wildcard /usr/lib/x86_64-linux-gnu/libSDL2-2.0.so.0 /usr/lib/libSDL2-2.0.so.0))
 
-SYSROOT := $(shell $(CC) --print-sysroot)
-SDL_CFLAGS := $(shell $(SYSROOT)/usr/bin/sdl-config --cflags)
-SDL_LIBS := $(shell $(SYSROOT)/usr/bin/sdl-config --libs)
+INCLUDE = -Ipocketsnes -Ipocketsnes/include -Ipocketsnes/linux -Ipocketsnes/snes9x -Ifrontend
+# The frontend sees the core's headers as system headers, so their warnings stay quiet.
+FRONTEND_INCLUDE = -Ifrontend -isystem pocketsnes -isystem pocketsnes/include -isystem pocketsnes/linux
+BENCH ?= 0
 
-ifdef V
-	CMD:=
-	SUM:=@\#
-else
-	CMD:=@
-	SUM:=@echo
+DEFINES = -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM
+ifeq ($(BENCH),1)
+DEFINES += -DAUTO_BENCH
+endif
+OPT     = -O2 -g -fno-strict-aliasing
+LIBS    = -lz
+
+ifeq ($(SDL),1)
+ifneq ($(SDL_INCLUDE),)
+ifneq ($(SDL_LIB),)
+DEFINES += -DHOST_SDL
+SDL_FLAGS = -I$(dir $(SDL_INCLUDE)).. -I$(dir $(SDL_INCLUDE))../x86_64-linux-gnu -D_REENTRANT
+LIBS    += $(SDL_LIB)
+endif
+endif
 endif
 
-INCLUDE = -I pocketsnes \
-		-I sal/linux/include -I sal/include \
-		-I pocketsnes/include \
-		-I menu -I pocketsnes/linux -I pocketsnes/snes9x
+CORE_FLAGS     = $(OPT) $(DEFINES) $(INCLUDE) -w
+FRONTEND_FLAGS = $(OPT) $(DEFINES) $(FRONTEND_INCLUDE) $(SDL_FLAGS) -Wall -Wextra -Wno-unused-parameter
 
-CFLAGS = $(INCLUDE) -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM \
-		 -O3 $(SDL_CFLAGS)
+CORE_SRC     = $(wildcard pocketsnes/snes9x/*.cpp)
+FRONTEND_SRC = frontend/savemanager.cpp frontend/romzip.cpp frontend/paths.cpp frontend/selfstore.cpp frontend/brightness.cpp frontend/keys.cpp frontend/draw.cpp frontend/ui.cpp frontend/config.cpp frontend/states.cpp \
+               frontend/gui.cpp frontend/browser.cpp frontend/menu.cpp frontend/overclock.cpp frontend/emu.cpp \
+               frontend/main.cpp frontend/rotate.cpp frontend/platform_host.cpp
 
-CXXFLAGS = $(CFLAGS)
+CORE_OBJ     = $(patsubst %.cpp,$(BUILD)/%.o,$(CORE_SRC))
+FRONTEND_OBJ = $(patsubst %.cpp,$(BUILD)/%.o,$(FRONTEND_SRC))
 
-LDFLAGS = $(CXXFLAGS) -lm $(SDL_LIBS)
+all: $(TARGET)
 
-# Find all source files
-SOURCE = pocketsnes/snes9x menu sdl/linux sdl
-SRC_CPP = $(foreach dir, $(SOURCE), $(wildcard $(dir)/*.cpp))
-SRC_C   = $(foreach dir, $(SOURCE), $(wildcard $(dir)/*.c))
-OBJ_CPP = $(patsubst %.cpp, %.o, $(SRC_CPP))
-OBJ_C   = $(patsubst %.c, %.o, $(SRC_C))
-OBJS    = $(OBJ_CPP) $(OBJ_C)
+$(BUILD)/pocketsnes/%.o: pocketsnes/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CORE_FLAGS) -MMD -c $< -o $@
 
-.PHONY : all
-all : $(TARGET)
+$(BUILD)/frontend/%.o: frontend/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(FRONTEND_FLAGS) -MMD -c $< -o $@
 
-.PHONY: opk
-opk: $(TARGET).opk
+$(TARGET): $(CORE_OBJ) $(FRONTEND_OBJ)
+	$(CXX) $^ -o $@ $(LIBS)
 
-$(TARGET) : $(OBJS)
-	$(SUM) "  LD      $@"
-	$(CMD)$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) -o $@
+# Unit tests (tests/unit_tests.cpp): the core as a library, so only what the
+# tests use is linked, plus the frontend files they test.
+UNIT_TESTS = tests/unit_tests
+UNIT_OBJ   = $(BUILD)/tests/unit_tests.o $(BUILD)/frontend/config.o $(BUILD)/frontend/keys.o \
+             $(BUILD)/frontend/rotate.o $(BUILD)/frontend/brightness.o $(BUILD)/frontend/paths.o $(BUILD)/frontend/selfstore.o $(BUILD)/frontend/romzip.o
 
-$(TARGET).opk: $(TARGET)
-	$(SUM) "  OPK     $@"
-	$(CMD)rm -rf .opk_data
-	$(CMD)cp -r data .opk_data
-	$(CMD)cp $< .opk_data/pocketsnes.gcw0
-	$(CMD)$(STRIP) .opk_data/pocketsnes.gcw0
-	$(CMD)mksquashfs .opk_data $@ -all-root -noappend -no-exports -no-xattrs -no-progress >/dev/null
+$(BUILD)/libcore.a: $(CORE_OBJ)
+	rm -f $@
+	ar rcs $@ $^
 
-%.o: %.c
-	$(SUM) "  CC      $@"
-	$(CMD)$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/tests/%.o: tests/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(OPT) $(DEFINES) $(INCLUDE) -w -MMD -c $< -o $@
 
-%.o: %.cpp
-	$(SUM) "  CXX     $@"
-	$(CMD)$(CXX) $(CFLAGS) -c $< -o $@
+$(UNIT_TESTS): $(UNIT_OBJ) $(BUILD)/libcore.a
+	$(CXX) $^ -o $@ -lz
 
-.PHONY : clean
-clean :
-	$(SUM) "  CLEAN   ."
-	$(CMD)rm -f $(OBJS) $(TARGET)
-	$(CMD)rm -rf .opk_data $(TARGET).opk
+unit-tests: $(UNIT_TESTS)
+	./$(UNIT_TESTS)
+
+clean:
+	rm -rf $(BUILD) $(TARGET) $(UNIT_TESTS)
+
+.PHONY: all clean unit-tests
+
+-include $(CORE_OBJ:.o=.d) $(FRONTEND_OBJ:.o=.d) $(BUILD)/tests/unit_tests.d

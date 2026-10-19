@@ -1,0 +1,12 @@
+# Picks up the first game, moves it down, then esc puts it back.
+wait 5
+press down
+wait 3
+press tab
+wait 3
+press down
+wait 3
+press esc
+wait 5
+shot cancelled.png
+quit

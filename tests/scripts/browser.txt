@@ -1,0 +1,16 @@
+# Starts in ndless/, goes up, into roms/ and picks the game.
+wait 5
+shot browser.png
+press enter
+wait 5
+press down
+wait 3
+press enter
+wait 5
+press down
+wait 3
+press enter
+wait 60
+shot game.png
+press Q
+wait 10

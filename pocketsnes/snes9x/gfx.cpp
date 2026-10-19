@@ -87,6 +87,8 @@
   Nintendo Co., Limited and its subsidiary companies.
 *******************************************************************************/
 
+#include <stdint.h>
+
 #include "snes9x.h"
 
 #include "memmap.h"
@@ -2053,6 +2055,10 @@ static void DrawBackgroundMode5 (uint32 /* BGMODE */, uint32 bg, uint8 Z1, uint8
 		VOffsetShift = 3;
     }
     int endy = IPPU.Interlace ? 1 + (GFX.EndY << 1) : GFX.EndY;
+    /* Without hi-res support, interlaced lines are still drawn twice as far
+     * down, past the picture; stop where the frontend's buffers end. */
+    if (GFX.RenderRows && endy >= (int) GFX.RenderRows)
+		endy = (int) GFX.RenderRows - 1;
 	
     for (int Y = IPPU.Interlace ? GFX.StartY << 1 : GFX.StartY; Y <= endy; Y += Lines)
     {
@@ -3629,153 +3635,27 @@ static void S9xDisplayString_text (const char *string)
     }
 }
 
-void S9xUpdateScreen ()
+/* Draws lines starty to endy (of the picture, or of the doubled-up picture
+ * in interlaced modes 5 and 6) into GFX.Screen and its depth and sub screen
+ * buffers: everything S9xUpdateScreen does that works line by line. */
+/* Sets 'count' pixels from p on to 'colour', two at a time where it can. */
+static inline void FillLine16 (uint16 *p, uint16 colour, uint32 count)
 {
-    int32 x2 = 1;
-	
-    GFX.S = GFX.Screen;
-    GFX.r2131 = Memory.FillRAM [0x2131];
-    GFX.r212c = Memory.FillRAM [0x212c];
-    GFX.r212d = Memory.FillRAM [0x212d];
-    GFX.r2130 = Memory.FillRAM [0x2130];
-
-#ifdef JP_FIX
-
-    GFX.Pseudo = (Memory.FillRAM [0x2133] & 8) != 0 &&
-				 (GFX.r212c & 15) != (GFX.r212d & 15) &&
-				 (GFX.r2131 == 0x3f);
-
-#else
-
-    GFX.Pseudo = (Memory.FillRAM [0x2133] & 8) != 0 &&
-		(GFX.r212c & 15) != (GFX.r212d & 15) &&
-		(GFX.r2131 & 0x3f) == 0;
-
-#endif
-	
-    if (IPPU.OBJChanged)
-		S9xSetupOBJ ();
-	
-    if (PPU.RecomputeClipWindows)
+    uint32 pair = colour | ((uint32) colour << 16);
+    if (((uintptr_t) p & 2) && count)
     {
-		ComputeClipWindows ();
-		PPU.RecomputeClipWindows = FALSE;
+	*p++ = colour;
+	count--;
     }
-	
-    GFX.StartY = IPPU.PreviousLine;
-    if ((GFX.EndY = IPPU.CurrentLine - 1) >= PPU.ScreenHeight)
-		GFX.EndY = PPU.ScreenHeight - 1;
+    uint32 *q = (uint32 *) p;
+    for (; count >= 2; count -= 2)
+	*q++ = pair;
+    if (count)
+	*(uint16 *) q = colour;
+}
 
-	// XXX: Check ForceBlank? Or anything else?
-	PPU.RangeTimeOver |= GFX.OBJLines[GFX.EndY].RTOFlags;
-	
-    uint32 starty = GFX.StartY;
-    uint32 endy = GFX.EndY;
-	
-    if (Settings.SupportHiRes &&
-		(PPU.BGMode == 5 || PPU.BGMode == 6 || IPPU.Interlace || IPPU.DoubleHeightPixels))
-    {
-		if (PPU.BGMode == 5 || PPU.BGMode == 6|| IPPU.Interlace)
-		{
-			IPPU.RenderedScreenWidth = 512;
-			x2 = 2;
-		}
-
-		if (IPPU.DoubleHeightPixels)
-		{
-			starty = GFX.StartY * 2;
-			endy = GFX.EndY * 2 + 1;
-		}
-
-		if ((PPU.BGMode == 5 || PPU.BGMode == 6) && !IPPU.DoubleWidthPixels)
-		{
-			// The game has switched from lo-res to hi-res mode part way down
-			// the screen. Scale any existing lo-res pixels on screen
-#ifndef FOREVER_16_BIT
-			if (Settings.SixteenBit)
-			{
-#endif
-				for (register uint32 y = 0; y < starty; y++)
-				{
-					register uint16 *p = (uint16 *) (GFX.Screen + y * GFX.Pitch2) + 255;
-					register uint16 *q = (uint16 *) (GFX.Screen + y * GFX.Pitch2) + 510;
-	
-					for (register int x = 255; x >= 0; x--, p--, q -= 2)
-						*q = *(q + 1) = *p;
-				}
-#ifndef FOREVER_16_BIT
-			}
-			else
-			{
-				for (register uint32 y = 0; y < starty; y++)
-				{
-					register uint8 *p = GFX.Screen + y * GFX.Pitch2 + 255;
-					register uint8 *q = GFX.Screen + y * GFX.Pitch2 + 510;
-					for (register int x = 255; x >= 0; x--, p--, q -= 2)
-						*q = *(q + 1) = *p;
-				}
-			}
-#endif
-			IPPU.DoubleWidthPixels = TRUE;
-			IPPU.HalfWidthPixels = FALSE;
-		}
-        // BJ: And we have to change the height if Interlace gets set,
-        //     too.
-		if (IPPU.Interlace && !IPPU.DoubleHeightPixels)
-		{
-			starty = GFX.StartY * 2;
-			endy = GFX.EndY * 2 + 1;
-            IPPU.RenderedScreenHeight = PPU.ScreenHeight << 1;
-            IPPU.DoubleHeightPixels = TRUE;
-            GFX.Pitch2 = GFX.RealPitch;
-            GFX.Pitch = GFX.RealPitch * 2;
-#ifndef FOREVER_16_BIT
-            if (Settings.SixteenBit)
-#endif
-                GFX.PPL = GFX.PPLx2 = GFX.RealPitch;
-#ifndef FOREVER_16_BIT
-            else
-                GFX.PPL = GFX.PPLx2 = GFX.RealPitch << 1;
-#endif
-			
-            // The game has switched from non-interlaced to interlaced mode
-            // part way down the screen. Scale everything.
-            for (register int32 y = (int32) GFX.StartY - 1; y >= 0; y--)
-			{
-				// memmove converted: Same malloc, different addresses, and identical addresses at line 0 [Neb]
-				// DS2 DMA notes: This code path is unused [Neb]
-				memcpy (GFX.Screen + y * 2 * GFX.Pitch2,
-					GFX.Screen + y * GFX.Pitch2,
-					GFX.Pitch2);
-				// memmove converted: Same malloc, different addresses [Neb]
-				memcpy (GFX.Screen + (y * 2 + 1) * GFX.Pitch2,
-					GFX.Screen + y * GFX.Pitch2,
-					GFX.Pitch2);
-			}
-		}
-    }
-    else if (!Settings.SupportHiRes)
-    {
-	if (PPU.BGMode == 5 || PPU.BGMode == 6 || IPPU.Interlace)
-	{
-		if (!IPPU.HalfWidthPixels)
-		{
-			// The game has switched from lo-res to hi-res mode part way down
-			// the screen. Hi-res pixels must now be drawn at half width.
-			IPPU.HalfWidthPixels = TRUE;
-		}
-	}
-	else
-	{
-		if (IPPU.HalfWidthPixels)
-		{
-			// The game has switched from hi-res to lo-res mode part way down
-			// the screen. Lo-res pixels must now be drawn at FULL width.
-			IPPU.HalfWidthPixels = FALSE;
-		}
-	}
-    }
-	
+static void DrawLines (uint32 starty, uint32 endy, int32 x2)
+{
     uint32 black = BLACK | (BLACK << 16);
 
     if (Settings.Transparency
@@ -3802,6 +3682,25 @@ void S9xUpdateScreen ()
 				IPPU.XB [PPU.FixedColourGreen],
 				IPPU.XB [PPU.FixedColourBlue]);
 			
+			/* A common case of the backdrop pass at the end, done before the
+			 * main screen is drawn instead, a whole line at a time: no colour
+			 * windows, and a black backdrop with the sub screen added (Super
+			 * Mario World). The pass would put the sub screen's pixel, or the
+			 * fixed colour where the sub screen is empty, wherever the main
+			 * screen is empty. So the sub screen is filled with the fixed
+			 * colour before it is drawn and copied under the main screen. The
+			 * main screen's drawers never read its own pixels, only the sub
+			 * screen's (and use the fixed colour where it is empty), so the
+			 * result is the same. When nothing on the main screen has colour
+			 * maths either (sub_in_main), its drawers don't read the sub
+			 * screen at all, so the sub screen is drawn straight into the
+			 * main screen's buffer (with its own depth buffer) and the main
+			 * screen on top of it. */
+			bool8 backdrop_from_sub = !IPPU.Clip [1].Count [5] && !IPPU.Clip [0].Count [5] &&
+				SUB_OR_ADD(5) && !(GFX.r2131 & 0xc0) && IPPU.ScreenColors [0] == 0;
+			bool8 sub_in_main = backdrop_from_sub && !(GFX.r2131 & 0x1f);
+			uint8 *sub_screen = sub_in_main ? GFX.Screen : GFX.SubScreen;
+
 			// Clear the z-buffer, marking areas 'covered' by the fixed
 			// colour as depth 1.
 			pClip = &IPPU.Clip [1];
@@ -3854,6 +3753,9 @@ void S9xUpdateScreen ()
 				{
 					ZeroMemory (GFX.ZBuffer + y * GFX.ZPitch, IPPU.RenderedScreenWidth);
 					memset (GFX.SubZBuffer + y * GFX.ZPitch, 1, IPPU.RenderedScreenWidth);
+					if (backdrop_from_sub)
+						FillLine16 ((uint16 *) (sub_screen + y * GFX.Pitch2),
+							    (uint16) GFX.FixedColour, 256 * x2);
 					
 					if (IPPU.Clip [0].Count [5])
 					{
@@ -3875,7 +3777,7 @@ void S9xUpdateScreen ()
 			if (ANYTHING_ON_SUB)
 			{
 				GFX.DB = GFX.SubZBuffer;
-				RenderScreen (GFX.SubScreen, TRUE, TRUE, SUB_SCREEN_DEPTH);
+				RenderScreen (sub_screen, TRUE, TRUE, SUB_SCREEN_DEPTH);
 			}
 
 			if (IPPU.Clip [0].Count [5])
@@ -3898,10 +3800,21 @@ void S9xUpdateScreen ()
 				}
 			}
 
+			if (backdrop_from_sub && !sub_in_main)
+			{
+				for (uint32 y = starty; y <= endy; y++)
+					memcpy (GFX.Screen + y * GFX.Pitch2, GFX.SubScreen + y * GFX.Pitch2,
+						256 * x2 * sizeof (uint16));
+			}
+
 			GFX.DB = GFX.ZBuffer;
 			RenderScreen (GFX.Screen, FALSE, FALSE, MAIN_SCREEN_DEPTH);
 
-			if (SUB_OR_ADD(5))
+			if (backdrop_from_sub)
+			{
+				// Done above.
+			}
+			else if (SUB_OR_ADD(5))
 			{
 				uint32 back = IPPU.ScreenColors [0];
 				uint32 Left = 0;
@@ -4186,6 +4099,165 @@ void S9xUpdateScreen ()
     else
     {
     }
+}
+
+/* Frontend hooks that time the renderer for the detailed FPS display. */
+extern "C" uint32 S9xPerfTicks (void);
+extern "C" void S9xPerfRenderDone (uint32 start);
+/* Frontend hook called before lines up to 'last_line' are drawn, for a
+ * frontend that copies the previous frame out of Screen in the background. */
+extern "C" void S9xBeforeDrawingLines (uint32 last_line);
+
+void S9xUpdateScreen ()
+{
+    uint32 perf_start = S9xPerfTicks ();
+    int32 x2 = 1;
+	
+    GFX.S = GFX.Screen;
+    GFX.r2131 = Memory.FillRAM [0x2131];
+    GFX.r212c = Memory.FillRAM [0x212c];
+    GFX.r212d = Memory.FillRAM [0x212d];
+    GFX.r2130 = Memory.FillRAM [0x2130];
+
+#ifdef JP_FIX
+
+    GFX.Pseudo = (Memory.FillRAM [0x2133] & 8) != 0 &&
+				 (GFX.r212c & 15) != (GFX.r212d & 15) &&
+				 (GFX.r2131 == 0x3f);
+
+#else
+
+    GFX.Pseudo = (Memory.FillRAM [0x2133] & 8) != 0 &&
+		(GFX.r212c & 15) != (GFX.r212d & 15) &&
+		(GFX.r2131 & 0x3f) == 0;
+
+#endif
+	
+    if (IPPU.OBJChanged)
+		S9xSetupOBJ ();
+	
+    if (PPU.RecomputeClipWindows)
+    {
+		ComputeClipWindows ();
+		PPU.RecomputeClipWindows = FALSE;
+    }
+	
+    GFX.StartY = IPPU.PreviousLine;
+    if ((GFX.EndY = IPPU.CurrentLine - 1) >= PPU.ScreenHeight)
+		GFX.EndY = PPU.ScreenHeight - 1;
+    S9xBeforeDrawingLines (GFX.EndY);
+
+	// XXX: Check ForceBlank? Or anything else?
+	PPU.RangeTimeOver |= GFX.OBJLines[GFX.EndY].RTOFlags;
+	
+    uint32 starty = GFX.StartY;
+    uint32 endy = GFX.EndY;
+	
+    if (Settings.SupportHiRes &&
+		(PPU.BGMode == 5 || PPU.BGMode == 6 || IPPU.Interlace || IPPU.DoubleHeightPixels))
+    {
+		if (PPU.BGMode == 5 || PPU.BGMode == 6|| IPPU.Interlace)
+		{
+			IPPU.RenderedScreenWidth = 512;
+			x2 = 2;
+		}
+
+		if (IPPU.DoubleHeightPixels)
+		{
+			starty = GFX.StartY * 2;
+			endy = GFX.EndY * 2 + 1;
+		}
+
+		if ((PPU.BGMode == 5 || PPU.BGMode == 6) && !IPPU.DoubleWidthPixels)
+		{
+			// The game has switched from lo-res to hi-res mode part way down
+			// the screen. Scale any existing lo-res pixels on screen
+#ifndef FOREVER_16_BIT
+			if (Settings.SixteenBit)
+			{
+#endif
+				for (register uint32 y = 0; y < starty; y++)
+				{
+					register uint16 *p = (uint16 *) (GFX.Screen + y * GFX.Pitch2) + 255;
+					register uint16 *q = (uint16 *) (GFX.Screen + y * GFX.Pitch2) + 510;
+	
+					for (register int x = 255; x >= 0; x--, p--, q -= 2)
+						*q = *(q + 1) = *p;
+				}
+#ifndef FOREVER_16_BIT
+			}
+			else
+			{
+				for (register uint32 y = 0; y < starty; y++)
+				{
+					register uint8 *p = GFX.Screen + y * GFX.Pitch2 + 255;
+					register uint8 *q = GFX.Screen + y * GFX.Pitch2 + 510;
+					for (register int x = 255; x >= 0; x--, p--, q -= 2)
+						*q = *(q + 1) = *p;
+				}
+			}
+#endif
+			IPPU.DoubleWidthPixels = TRUE;
+			IPPU.HalfWidthPixels = FALSE;
+		}
+        // BJ: And we have to change the height if Interlace gets set,
+        //     too.
+		if (IPPU.Interlace && !IPPU.DoubleHeightPixels)
+		{
+			starty = GFX.StartY * 2;
+			endy = GFX.EndY * 2 + 1;
+            IPPU.RenderedScreenHeight = PPU.ScreenHeight << 1;
+            IPPU.DoubleHeightPixels = TRUE;
+            GFX.Pitch2 = GFX.RealPitch;
+            GFX.Pitch = GFX.RealPitch * 2;
+#ifndef FOREVER_16_BIT
+            if (Settings.SixteenBit)
+#endif
+                GFX.PPL = GFX.PPLx2 = GFX.RealPitch;
+#ifndef FOREVER_16_BIT
+            else
+                GFX.PPL = GFX.PPLx2 = GFX.RealPitch << 1;
+#endif
+			
+            // The game has switched from non-interlaced to interlaced mode
+            // part way down the screen. Scale everything.
+            for (register int32 y = (int32) GFX.StartY - 1; y >= 0; y--)
+			{
+				// memmove converted: Same malloc, different addresses, and identical addresses at line 0 [Neb]
+				// DS2 DMA notes: This code path is unused [Neb]
+				memcpy (GFX.Screen + y * 2 * GFX.Pitch2,
+					GFX.Screen + y * GFX.Pitch2,
+					GFX.Pitch2);
+				// memmove converted: Same malloc, different addresses [Neb]
+				memcpy (GFX.Screen + (y * 2 + 1) * GFX.Pitch2,
+					GFX.Screen + y * GFX.Pitch2,
+					GFX.Pitch2);
+			}
+		}
+    }
+    else if (!Settings.SupportHiRes)
+    {
+	if (PPU.BGMode == 5 || PPU.BGMode == 6 || IPPU.Interlace)
+	{
+		if (!IPPU.HalfWidthPixels)
+		{
+			// The game has switched from lo-res to hi-res mode part way down
+			// the screen. Hi-res pixels must now be drawn at half width.
+			IPPU.HalfWidthPixels = TRUE;
+		}
+	}
+	else
+	{
+		if (IPPU.HalfWidthPixels)
+		{
+			// The game has switched from hi-res to lo-res mode part way down
+			// the screen. Lo-res pixels must now be drawn at FULL width.
+			IPPU.HalfWidthPixels = FALSE;
+		}
+	}
+    }
+	
+    DrawLines (starty, endy, x2);
 
     if (Settings.SupportHiRes)
     {
@@ -4224,6 +4296,7 @@ void S9xUpdateScreen ()
     }
 
     IPPU.PreviousLine = IPPU.CurrentLine;
+    S9xPerfRenderDone (perf_start);
 }
 
 

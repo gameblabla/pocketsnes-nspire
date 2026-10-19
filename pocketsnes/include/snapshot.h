@@ -89,28 +89,17 @@
 #ifndef _SNAPSHOT_H_
 #define _SNAPSHOT_H_
 
-#include <stdio.h>
 #include "snes9x.h"
 
-#define SNAPSHOT_MAGIC "#!snes9x"
-#define SNAPSHOT_VERSION 1
-
-#define SUCCESS 1
-#define WRONG_FORMAT (-1)
-#define WRONG_VERSION (-2)
-#define FILE_NOT_FOUND (-3)
-#define WRONG_MOVIE_SNAPSHOT (-4)
-#define NOT_A_MOVIE_SNAPSHOT (-5)
-
 START_EXTERN_C
-bool8 S9xFreezeGame (const char *filename);
-bool8 S9xUnfreezeGame (const char *filename);
-bool8 Snapshot (const char *filename);
-bool8 S9xLoadSnapshot (const char *filename);
-bool8 S9xSPCDump (const char *filename);
-void S9xFreezeToStream (STREAM);
-int S9xUnfreezeFromStream (STREAM);
+/* Serializes the emulated machine into a newly malloc'd buffer (free it with
+ * free()). Call it between frames, after S9xMainLoop has returned. */
+bool8 S9xFreezeToMemory (uint8 **data, uint32 *size);
+
+/* Restores a buffer made by S9xFreezeToMemory. Everything is validated before
+ * the running game is touched, so a bad or incompatible buffer changes nothing
+ * and returns FALSE. */
+bool8 S9xUnfreezeFromMemory (const uint8 *data, uint32 size);
 END_EXTERN_C
 
 #endif
-

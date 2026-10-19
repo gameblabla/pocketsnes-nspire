@@ -1,0 +1,4 @@
+wait 120
+press S
+wait 30
+quit

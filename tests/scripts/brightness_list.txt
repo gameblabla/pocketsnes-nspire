@@ -1,0 +1,5 @@
+# In the game list: + (the brightness hotkey works there too), then quit.
+wait 10
+press +
+wait 10
+quit

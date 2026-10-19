@@ -1,0 +1,6 @@
+# The "didn't close normally" message waits for a key, then the game runs.
+wait 10
+shot message.png
+press enter
+wait 60
+quit

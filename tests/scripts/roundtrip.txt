@@ -1,0 +1,10 @@
+# Save, play 150 frames, load, play the same 150 frames: A and B must match.
+wait 240
+shot C.png
+press S
+wait 150
+shot A.png
+press L
+wait 150
+shot B.png
+quit

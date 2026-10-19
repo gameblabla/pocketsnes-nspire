@@ -1,0 +1,19 @@
+# Picks up the first game with tab, moves it down two places, puts it there
+# with enter, then starts the third game with the 3 key and quits.
+wait 5
+press down
+wait 3
+press tab
+wait 3
+press down
+wait 3
+press down
+wait 3
+shot moving.png
+press enter
+wait 5
+shot moved.png
+press 3
+wait 60
+press Q
+wait 10

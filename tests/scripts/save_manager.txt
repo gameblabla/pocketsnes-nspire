@@ -1,0 +1,49 @@
+# The game list: down to the game (".." is first), its menu, Save manager
+# (its eleventh entry). A marks all, U uncompresses them (which clears the
+# marks), del deletes the selected one (slot 001) and enter answers yes.
+wait 5
+press down
+wait 3
+press menu
+wait 5
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+shot list_menu.png
+press enter
+wait 10
+shot manager.png
+press A
+wait 5
+shot marked.png
+press U
+wait 10
+shot uncompressed.png
+press del
+wait 10
+shot confirm.png
+press enter
+wait 10
+shot deleted.png
+press esc
+wait 5
+press esc
+wait 5
+quit

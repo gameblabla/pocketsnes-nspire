@@ -1,62 +1,97 @@
+# Calculator build: produces _PocketSNES.tns for Ndless (the _ puts it first in its folder).
+#   . ~/nspire/build/env.sh && make -f Makefile.nspire
+# Variants need their own BUILD folder, because make doesn't notice changed flags:
+#   OPT_LEVEL=-O2      optimization level (-O3 measured fastest on a CX II)
+#   BUILD_NAME=o3      name written into the speed test results
+#   BENCH=1            speed test build: runs the speed test on Super Mario
+#                      World from its newest save state, then closes
+#   ARM_CPU=0          without the ARM assembler CPU core (C core only)
+# e.g. make -f Makefile.nspire BENCH=1 BUILD_NAME=O3 BUILD=build/bench-O3 TARGET=pocketsnes_speedtest_O3
 
-# Define the applications properties here:
+TARGET  = _PocketSNES
+BUILD   = build/nspire
 
-TARGET = PocketSNES
+CC      = nspire-gcc
+CXX     = nspire-g++
+LD      = nspire-ld
+GENZEHN = genzehn
+MAKEPRG = make-prg
 
-CC  := nspire-gcc
-CXX := nspire-g++
-STRIP := 
+INCLUDE = -Ipocketsnes -Ipocketsnes/include -Ipocketsnes/linux -Ipocketsnes/snes9x -Ifrontend
+# The frontend sees the core's headers as system headers, so their warnings stay quiet.
+FRONTEND_INCLUDE = -Ifrontend -isystem pocketsnes -isystem pocketsnes/include -isystem pocketsnes/linux
+OPT_LEVEL  ?= -O3
+BUILD_NAME ?= dev
+BENCH      ?= 0
 
-ifdef V
-	CMD:=
-	SUM:=@\#
-else
-	CMD:=@
-	SUM:=@echo
+DEFINES = -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -DBUILD_NAME=\"$(BUILD_NAME)\"
+# The SNES CPU in ARM assembler (pocketsnes/arm, from psnes), chosen in the
+# menu; ARM_CPU=0 leaves it out.
+ARM_CPU ?= 1
+ifeq ($(ARM_CPU),1)
+DEFINES += -DARM_ASM_CPU
 endif
+ifeq ($(BENCH),1)
+DEFINES += -DAUTO_BENCH
+endif
+ARCH    = -marm -march=armv5te -mtune=arm926ej-s
+OPT     = $(OPT_LEVEL) -fomit-frame-pointer -fno-strict-aliasing -ffunction-sections -fdata-sections
 
-INCLUDE = -Dndlib -I pocketsnes -Isal/linux/ -Isal/ -I sal/linux/include -I sal/include -I pocketsnes/include -I menu -I pocketsnes/linux -I pocketsnes/snes9x
-CFLAGS = -Os -nostdlib -fdata-sections -ffunction-sections -fomit-frame-pointer -marm -march=armv5te -mtune=arm926ej-s -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -DNO_ROM_BROWSER $(INCLUDE)
+# The Snes9x core is old code with many warnings; keep them for the frontend only.
+CORE_FLAGS     = $(ARCH) $(OPT) $(DEFINES) $(INCLUDE) -w
+FRONTEND_FLAGS = $(ARCH) $(OPT) $(DEFINES) $(FRONTEND_INCLUDE) -Wall -Wextra -Wno-unused-parameter
+LDFLAGS        = -Wl,--gc-sections
 
-CXXFLAGS = $(CFLAGS)
-LDFLAGS = $(CXXFLAGS)  -nostdlib -Wl,--gc-sections -Wl,--as-needed -flto -lm
+# lcd_blit marks the program as supporting the CX II / HW-W screen, so Ndless
+# doesn't show the "compatibility mode" dialog.
+ZEHNFLAGS = --name "PocketSNES" --author "gameblabla (port), nspire QoL frontend" --version 4 \
+            --color-support=true --clickpad-support=false --compress \
+            --ndless-min 31 --ndless-rev-min 2001
 
-# Find all source files
-SOURCE = pocketsnes/snes9x menu sal/linux sal
-SRC_CPP = $(foreach dir, $(SOURCE), $(wildcard $(dir)/*.cpp))
-SRC_C   = $(foreach dir, $(SOURCE), $(wildcard $(dir)/*.c))
-OBJ_CPP = $(patsubst %.cpp, %.o, $(SRC_CPP))
-OBJ_C   = $(patsubst %.c, %.o, $(SRC_C))
-OBJS    = $(OBJ_CPP) $(OBJ_C)
+CORE_SRC     = $(wildcard pocketsnes/snes9x/*.cpp)
+FRONTEND_SRC = frontend/savemanager.cpp frontend/romzip.cpp frontend/paths.cpp frontend/selfstore.cpp frontend/brightness.cpp frontend/keys.cpp frontend/draw.cpp frontend/ui.cpp frontend/config.cpp frontend/states.cpp \
+               frontend/gui.cpp frontend/browser.cpp frontend/menu.cpp frontend/overclock.cpp frontend/emu.cpp \
+               frontend/main.cpp frontend/rotate.cpp frontend/platform_nspire.cpp
 
+# The CPU clock switch, copied into the on-chip SRAM to run (platform_nspire.cpp).
+FRONTEND_ASM = frontend/clock_switch_nspire.S
 
-all: $(TARGET) gen pack removeth
+CORE_ASM     = pocketsnes/arm/os9x_65c816_global.s pocketsnes/arm/os9x_65c816_cpu.s
+CORE_OBJ     = $(patsubst %.cpp,$(BUILD)/%.o,$(CORE_SRC))
+ifeq ($(ARM_CPU),1)
+CORE_OBJ    += $(patsubst %.s,$(BUILD)/%.o,$(CORE_ASM))
+endif
+FRONTEND_OBJ = $(patsubst %.cpp,$(BUILD)/%.o,$(FRONTEND_SRC)) $(patsubst %.S,$(BUILD)/%.o,$(FRONTEND_ASM))
 
+all: $(TARGET).tns
 
-gen :
-	genzehn --input PocketSNES --output pocket.t --compress
-	make-prg pocket.t pocketsnes.tns
-	
-pack:
-	zip -r  PocketSNES-nspire.zip pocketsnes.tns README.md
+$(BUILD)/pocketsnes/%.o: pocketsnes/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CORE_FLAGS) -MMD -c $< -o $@
 
-removeth:
-	rm PocketSNES
-	rm pocket.t
+# The assembler core's files include each other (.include).
+$(BUILD)/pocketsnes/arm/%.o: pocketsnes/arm/%.s $(wildcard pocketsnes/arm/*.s)
+	@mkdir -p $(dir $@)
+	$(CC) $(ARCH) -Ipocketsnes/arm -c $< -o $@
 
-$(TARGET) : $(OBJS)
-	$(SUM) "  LD      $@"
-	$(CMD)$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) -o $@
+$(BUILD)/frontend/%.o: frontend/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(FRONTEND_FLAGS) -MMD -c $< -o $@
 
-%.o: %.c
-	$(SUM) "  CC      $@"
-	$(CMD)$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/frontend/%.o: frontend/%.S
+	@mkdir -p $(dir $@)
+	$(CC) $(ARCH) -c $< -o $@
 
-%.o: %.cpp
-	$(SUM) "  CXX     $@"
-	$(CMD)$(CXX) $(CFLAGS) -c $< -o $@
+$(BUILD)/$(TARGET).elf: $(CORE_OBJ) $(FRONTEND_OBJ)
+	$(LD) $^ -o $@ $(LDFLAGS)
 
-clean :
-	$(SUM) "  CLEAN   ."
-	$(CMD)rm -f $(OBJS) $(TARGET)
-	$(CMD)rm -rf .opk_data $(TARGET).opk
+$(TARGET).tns: $(BUILD)/$(TARGET).elf
+	$(GENZEHN) --input $< --output $(BUILD)/$(TARGET).zehn $(ZEHNFLAGS)
+	$(MAKEPRG) $(BUILD)/$(TARGET).zehn $@
+
+clean:
+	rm -rf $(BUILD) $(TARGET).tns
+
+.PHONY: all clean
+
+-include $(CORE_OBJ:.o=.d) $(FRONTEND_OBJ:.o=.d)

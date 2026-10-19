@@ -1,0 +1,36 @@
+# This game only: settings for the game, then auto-increment back on for it.
+wait 30
+press esc
+wait 5
+# Main menu entry 7 is "Settings for", entry 4 "Saving"
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press right
+wait 3
+press up
+wait 3
+press up
+wait 3
+press up
+wait 3
+press enter
+wait 5
+press right
+wait 3
+press esc
+wait 3
+press esc
+wait 10
+quit

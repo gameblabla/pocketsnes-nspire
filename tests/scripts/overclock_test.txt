@@ -1,0 +1,41 @@
+# In a game: the menu, Graphics & speed (fourth entry), then Overclock test
+# (seventh line). It plays 6 s of the game at normal speed, then each speed
+# gets two rounds of the same frames and 2 s of checks; at most five speeds
+# are tried. Then the results, and back to the game.
+wait 30
+press esc
+wait 5
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press enter
+wait 5
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+press down
+wait 3
+shot graphics_menu.png
+press enter
+wait 1200
+shot testing.png
+wait 6000
+shot done.png
+press enter
+wait 5
+press esc
+wait 3
+press esc
+wait 30
+shot resumed.png
+quit

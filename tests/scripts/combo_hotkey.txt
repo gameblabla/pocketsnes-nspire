@@ -1,0 +1,11 @@
+# S alone: next slot (to 2). shift+S: save, without also moving the slot.
+wait 60
+press S
+wait 10
+down shift
+wait 3
+press S
+wait 3
+up shift
+wait 30
+quit

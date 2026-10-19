@@ -87,9 +87,7 @@
   Nintendo Co., Limited and its subsidiary companies.
 *******************************************************************************/
 
-#ifdef _TINSPIRE
-	#define intptr_t int
-#endif
+#include <stdint.h>
 
 #include "snes9x.h"
 #include "ppu.h"

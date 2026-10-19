@@ -167,6 +167,10 @@ struct SGFX{
     uint8  r2130;
     uint8  r2131;
     bool8  Pseudo;
+
+    /* Set by the frontend: how many lines down from Screen (and the depth
+     * buffers) there is memory for. 0 means no limit. */
+    uint32 RenderRows;
     
 #ifdef GFX_MULTI_FORMAT
     uint32 PixelFormat;

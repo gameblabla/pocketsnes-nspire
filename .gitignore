@@ -8,3 +8,26 @@ sal/*.o
 sal/linux/*.o
 sal/prizm/*.o
 sal/sdl/*.o
+# Build output and test files
+build/
+pocketsnes-host
+pocketsnes-host-*
+pocketsnes-asan
+pocketsnes-cov
+pocketsnes-pg
+pocketsnes.tns
+_PocketSNES.tns
+pocketsnes_*.tns
+build-*.log
+tests/roms/
+tests/out/
+tests/calc/
+tests/unit_tests
+pocketsnes.cfg.tns
+*.gcda
+*.gcno
+*.gcov
+gmon.out
+tools/clocktest/*.elf
+tools/clocktest/*.tns
+tools/clocktest/*.zehn

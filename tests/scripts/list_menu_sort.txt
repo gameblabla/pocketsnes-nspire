@@ -1,0 +1,17 @@
+# On the first game: the game list's menu, then "Sort the list A to Z" (the
+# fourth entry; the 5 key moves down in menus).
+wait 5
+press down
+wait 3
+press menu
+wait 5
+press 5
+wait 3
+press 5
+wait 3
+press 5
+wait 3
+shot list_menu.png
+press enter
+wait 5
+quit

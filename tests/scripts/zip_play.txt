@@ -1,0 +1,4 @@
+# Plays a while without keys and takes a picture, then quits.
+wait 200
+shot game.png
+quit

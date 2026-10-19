@@ -1,0 +1,9 @@
+wait 60
+press S
+wait 30
+press S
+wait 30
+press S
+wait 30
+press Q
+wait 10

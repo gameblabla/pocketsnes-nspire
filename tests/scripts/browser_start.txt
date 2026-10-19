@@ -1,0 +1,14 @@
+# Picks the game in the game list, then a shot 60 frames into it.
+wait 5
+press enter
+wait 5
+press down
+wait 3
+press enter
+wait 5
+press down
+wait 3
+press enter
+wait 60
+shot game.png
+quit

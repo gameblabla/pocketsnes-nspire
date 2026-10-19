@@ -1,0 +1,8 @@
+# The game list in a folder of three games (A to Z: MonsterFarmJump, Rings,
+# RotZoom): the 2 key starts the second one; Q quits it, saving a state.
+wait 5
+shot list.png
+press 2
+wait 60
+press Q
+wait 10

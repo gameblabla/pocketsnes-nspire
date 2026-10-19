@@ -213,32 +213,63 @@ enum {
 #define DELAYED_NMI_FLAG2   (1 << 10)
 #define IRQ_PENDING_FLAG    (1 << 11)
 
+/* The registers as the ARM assembler CPU core keeps them while it runs
+ * (pocketsnes/arm). The C core's are ICPU.Registers; S9xMainLoop copies
+ * them in and out around the assembler core. */
+struct SAsmRegisters{
+    uint8  PB;
+    uint8  DB;
+    uint16 P;
+    uint16 A;
+    uint16 D;
+    uint16 X;
+    uint16 S;
+    uint16 Y;
+    uint16 PC;
+};
+
+/* The ARM assembler CPU core reaches these fields by their offsets, so their
+ * order up to AsmStatus is the one it was written for (psnes 7.2.0); the
+ * offsets are listed in pocketsnes/arm/os9x_65c816_common.s and checked in
+ * os9x_asm_cpu.cpp. The numbers are the offsets on the calculator. */
 struct SCPUState{
-    uint32  Flags;
-    bool8   BranchSkip;
-    bool8   NMIActive;
-    bool8   IRQActive;
-    bool8   WaitingForInterrupt;
-    bool8   InDMA;
-    uint8   WhichEvent;
-    uint8   *PC;
-    uint8   *PCBase;
-    uint8   *PCAtOpcodeStart;
-    uint8   *WaitAddress;
-    uint32  WaitCounter;
-    long   Cycles;
-    long   NextEvent;
-    long   V_Counter;
-    long   MemSpeed;
-    long   MemSpeedx2;
-    long   FastROMSpeed;
-    uint32 AutoSaveTimer;
-    bool8  SRAMModified;
-    uint32 NMITriggerPoint;
-    bool8  BRKTriggered;
-    bool8  TriedInterleavedMode2;
-    uint32 NMICycleCount;
-    uint32 IRQCycleCount;
+    uint32  Flags;                  /*   0 */
+    bool8   BranchSkip;             /*   4 */
+    bool8   NMIActive;              /*   5 */
+    bool8   IRQActive;              /*   6 */
+    bool8   WaitingForInterrupt;    /*   7 */
+    struct SAsmRegisters AsmRegisters; /* 8; with PC, Cycles and PCBase it is loaded in one go */
+    uint8   *PC;                    /*  24 */
+    long   Cycles;                  /*  28 */
+    uint8   *PCBase;                /*  32 */
+    uint8   *PCAtOpcodeStart;       /*  36 */
+    uint8   *WaitAddress;           /*  40 */
+    uint32  WaitCounter;            /*  44 */
+    long   NextEvent;               /*  48 */
+    long   V_Counter;               /*  52 */
+    long   MemSpeed;                /*  56 */
+    long   MemSpeedx2;              /*  60 */
+    long   FastROMSpeed;            /*  64 */
+    uint32 AutoSaveTimer;           /*  68 */
+    uint32 NMITriggerPoint;         /*  72 */
+    uint32 NMICycleCount;           /*  76 */
+    uint32 IRQCycleCount;           /*  80 */
+    bool8   InDMA;                  /*  84 */
+    uint8   WhichEvent;             /*  85 */
+    bool8  SRAMModified;            /*  86 */
+    bool8  BRKTriggered;            /*  87 */
+    const void *AsmOpcodes;         /*  88: the opcode table for the M and X flags */
+    bool8  TriedInterleavedMode2;   /*  92 */
+    /* 93: the byte last on the data bus, OpenBus, kept here where the
+     * assembler core can reach it (globals.cpp makes OpenBus this byte) */
+    uint8  AsmOpenBus;
+    uint8  AsmPadding[2];
+    uint8  *const *AsmMap;          /*  96: Memory.Map */
+    uint8  *const *AsmWriteMap;     /* 100: Memory.WriteMap */
+    const uint8 *AsmMemorySpeed;    /* 104: Memory.MemorySpeed */
+    const uint8 *AsmBlockIsRAM;     /* 108: Memory.BlockIsRAM */
+    void   (*AsmHBlank) (void);     /* 112: the HBlank processor for this game */
+    int32  AsmStatus;               /* 116: in test builds, stray register bits after an opcode */
 #ifdef DEBUG_MAXCOUNT
     unsigned long GlobalLoopCount;
 #endif
@@ -259,6 +290,9 @@ struct SSettings{
     long   HBlankStart;
     long   CyclesPercentage;
     bool8  DisableIRQ;
+    /* Run the CPU with the ARM assembler core where the build has it
+     * (ARM_ASM_CPU) and the game allows it (no SA-1). */
+    bool8  AsmCPU;
     bool8  Paused;
     bool8  ForcedPause;
     bool8  StopEmulation;

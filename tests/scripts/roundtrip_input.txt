@@ -1,0 +1,14 @@
+# Like roundtrip.txt with the d-pad and A held, so the demos move.
+wait 120
+down up
+down left
+down ctrl
+wait 60
+shot C.png
+press S
+wait 150
+shot A.png
+press L
+wait 150
+shot B.png
+quit

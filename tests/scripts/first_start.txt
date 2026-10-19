@@ -1,0 +1,7 @@
+# Starts in the game list (or the welcome screen before it), then a key.
+wait 20
+shot start.png
+press enter
+wait 20
+shot list.png
+quit
