@@ -115,8 +115,14 @@ static enum Step load_state(void)
     return STEP_STAY;
 }
 
+/* The picture of the state shown at Load state (draw_state_picture). */
+static int picture_slot = -1;   /* the slot in picture_pixels, -1 for none read */
+static int picture_found;
+static uint16_t picture_pixels[STATE_PICTURE_W * STATE_PICTURE_H];
+
 static enum Step save_state(void)
 {
+    picture_slot = -1;   /* it may go over the slot whose picture is shown */
     int slot = emu_save_target();
     if (!slot)
         set_status("All 999 slots are used.");
@@ -168,6 +174,7 @@ static enum Step open_save_manager(void)
         states_open_game(rom);
     game_name(rom, title, sizeof(title));
     save_manager_run(title);
+    picture_slot = -1;   /* the shown state may be gone */
     return STEP_STAY;
 }
 
@@ -347,9 +354,12 @@ static struct Option savestate_options[] =
     CHOICE("Compress saves",
            "On: new states and in-game saves take less space. Off: in-game saves copy straight to a PC.",
            6, &cfg.compress_saves, off_on, 1, ICON_NONE),
+    CHOICE("State pictures",
+           "On: each new state keeps a small picture of the game, shown when you pick a slot to load.",
+           7, &cfg.state_pictures, off_on, 1, ICON_NONE),
     ACTION("Save manager", "This game's saves and their sizes: compress, uncompress or delete them.",
-           7, open_save_manager, ICON_DISK),
-    BACK_OPTION(9),
+           8, open_save_manager, ICON_DISK),
+    BACK_OPTION(10),
 };
 
 #define BINDING_HELP "Left/right: key 1 or 2. Enter: set it (hold one key, press another: a combo). Del: clear."
@@ -592,6 +602,31 @@ static int layout(const struct Menu *menu, int *pos)
 
 static void draw_controls_page(void);
 
+/* Save state pictures (Saving > State pictures): the selected slot's
+ * picture on a card at the right, under the Load state row (at row_bottom),
+ * over the values of the rows below it. */
+#define PICTURE_CARD_W (STATE_PICTURE_W + 6)
+#define PICTURE_CARD_H (STATE_PICTURE_H + 6)
+
+static void draw_state_picture(int slot, int row_bottom)
+{
+    int x = 309 - PICTURE_CARD_W, y = row_bottom + 2;
+    if (y + PICTURE_CARD_H > UI_HELP_Y - 2)
+        return;
+    if (slot != picture_slot)
+    {
+        picture_found = states_read_picture(slot, picture_pixels);
+        picture_slot = slot;
+    }
+    draw_round_rect(x, y, PICTURE_CARD_W, PICTURE_CARD_H, 4, COLOR_PANEL);
+    draw_round_frame(x, y, PICTURE_CARD_W, PICTURE_CARD_H, 4, COLOR_PANEL_EDGE);
+    if (picture_found)
+        draw_pixels(x + 3, y + 3, STATE_PICTURE_W, STATE_PICTURE_H, picture_pixels);
+    else
+        draw_string_center(FONT_SMALL, states_exists(slot) ? "No picture" : "Empty slot", x + PICTURE_CARD_W / 2,
+                           y + (PICTURE_CARD_H - TEXT_H) / 2, COLOR_TEXT_FAINT);
+}
+
 static void draw_menu(const struct Menu *menu, int selected, int *scroll)
 {
     char title[64], right[64], value[48];
@@ -667,6 +702,8 @@ static void draw_menu(const struct Menu *menu, int selected, int *scroll)
                    option->label, value, option_flags(option, i == selected));
         }
         ui_scrollbar(*scroll, view, height, UI_LIST_Y + top, view);
+        if (in_game && current->type == OPTION_LOAD_SLOT && cfg.state_pictures)
+            draw_state_picture(emu_slot(), UI_LIST_Y + top + pos[selected] - *scroll + UI_ROW_H);
     }
 
     /* The help panel, or what just happened. */
@@ -1059,6 +1096,7 @@ enum MenuResult menu_run(void)
 {
     in_game = 1;
     list_rom = NULL;
+    picture_slot = -1;
     enum Step step = run(&main_menu);
     return step == STEP_NEW_GAME ? MENU_LOAD_NEW_GAME : step == STEP_EXIT ? MENU_EXIT : MENU_RESUME;
 }

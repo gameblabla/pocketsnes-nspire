@@ -87,6 +87,7 @@ static void default_settings_into(struct Config *c)
     c->load_on_start = 1;
     c->sram_autosave = 1;
     c->compress_saves = 1;
+    c->state_pictures = 1;
     c->screen_dma = 0;
     c->screen_size = SCREEN_SIZE_ORIGINAL;
     c->smooth = 1;
@@ -118,6 +119,7 @@ static void copy_settings(struct Config *to, const struct Config *from)
     to->load_on_start = from->load_on_start;
     to->sram_autosave = from->sram_autosave;
     to->compress_saves = from->compress_saves;
+    to->state_pictures = from->state_pictures;
     to->screen_dma = from->screen_dma;
     to->screen_size = from->screen_size;
     to->smooth = from->smooth;
@@ -297,6 +299,8 @@ static void read_text(const char *text, struct Config *c, struct FileInfo *info)
             c->sram_autosave = clamp(number, 1);
         else if (strcmp(line, "compress_saves") == 0)
             c->compress_saves = clamp(number, 1);
+        else if (strcmp(line, "state_pictures") == 0)
+            c->state_pictures = clamp(number, 1);
         else if (strcmp(line, "screen_dma") == 0)
             c->screen_dma = clamp(number, 1);
         else if (strcmp(line, "screen_size") == 0)
@@ -393,6 +397,7 @@ static void write_settings(FILE *f, const struct Config *c)
     fprintf(f, "load_on_start=%u\n", (unsigned) c->load_on_start);
     fprintf(f, "sram_autosave=%u\n", (unsigned) c->sram_autosave);
     fprintf(f, "compress_saves=%u\n", (unsigned) c->compress_saves);
+    fprintf(f, "state_pictures=%u\n", (unsigned) c->state_pictures);
     fprintf(f, "screen_dma=%u\n", (unsigned) c->screen_dma);
     fprintf(f, "screen_size=%u\n", (unsigned) c->screen_size);
     fprintf(f, "smooth=%u\n", (unsigned) c->smooth);

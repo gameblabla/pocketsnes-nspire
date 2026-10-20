@@ -84,8 +84,8 @@ README.md → Building has the full list.
 
 ### Test (before every calculator build)
 
-    tests/run.sh          # 98 checks: scripted runs of the PC build, screenshots in tests/out/
-    make unit-tests       # 101 checks: tile drawing, frame turning, settings, program-file settings, ndless.cfg.tns, file list
+    tests/run.sh          # 103 checks: scripted runs of the PC build, screenshots in tests/out/
+    make unit-tests       # 102 checks: tile drawing, frame turning, settings, program-file settings, ndless.cfg.tns, file list
     tests/asm/run.sh      # ARM core vs C core under qemu-arm: every opcode, 12 games x 3600 frames, replays
     tests/render_compare.sh   # pixel compare against ./pocketsnes-host-ref (old renderer)
 
@@ -283,6 +283,20 @@ Files and launching:
   Documents starts PocketSNES. Other consoles' ROMs inside a zip never
   count as the ROM; a GBA one says "It's a GBA game: start it in gpSP."
   (Before 7834655 the .gba ran as a SNES game and saved junk states.)
+* **Save state pictures** (*Saving → State pictures*, on by default; asked
+  for 2026-10-19, "like RetroArch or TI-Boy CE"). A state file can carry a
+  112x98 RGB565 picture after the snapshot (header flag `STATE_PICTURE`,
+  then `struct PictureHeader` "PSPC" and the pixels, zlib unless Compress
+  saves is off); older versions read only the header and snapshot, so they
+  still load these states (checked with the pre-picture PC build). The
+  save manager carries the picture along. The picture is the SNES picture's
+  middle 224 lines shrunk to 7/16 with a box filter (`take_picture`), taken
+  in `S9xDeinitUpdate` before the FPS counter and messages are drawn over
+  it: a save, the menu or quitting has one more frame drawn first (forced
+  even with frameskip), so a hotkey save now happens on the frame after
+  the key, the frame its picture shows (`roundtrip*.txt` wait 151). The
+  menu draws the selected slot's picture on a card under *Load state*
+  (`draw_state_picture`), over the values of the rows below.
 * **File associations:** PocketSNES registers sfc, smc, fig, swc and zip
   with Ndless, and points existing PocketSNES associations at its current
   name, so opening a ROM in My Documents starts that game. It edits
@@ -550,6 +564,7 @@ History
 | 2026-10-16 | b61b1c2, 3129554 | Background rows in two assembler passes; VRAM DMA a copy; brightness rebuilt when used (not pushed) |
 =======
 | 2026-10-19 | | Issue #11: no folder walk at start (ndless.cfg.tns edited directly), OS file list refreshed only after file changes |
+| 2026-10-19 | | Save state pictures, shown at Load state (not pushed) |
 
 `git log` has the details; every commit message says what changed and why.
 

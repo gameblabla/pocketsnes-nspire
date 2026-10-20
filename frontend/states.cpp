@@ -18,7 +18,9 @@
 
 /* A state file is this header followed by the snapshot, zlib-compressed,
  * or as it is when the header's flags say STATE_STORED (Saving > Compress
- * saves off, or the save manager). */
+ * saves off, or the save manager). With STATE_PICTURE a picture follows the
+ * snapshot (struct PictureHeader and its pixels); older versions read only
+ * the header and the snapshot, so they still load such states. */
 #define STATE_MAGIC     "PSST"
 #define STATE_VERSION   1
 #define MAX_RAW_SIZE    (4 * 1024 * 1024)
@@ -35,7 +37,21 @@ struct StateHeader
     uint32_t reserved;
 };
 
-#define STATE_STORED 1
+#define STATE_STORED  1
+#define STATE_PICTURE 2
+
+#define PICTURE_MAGIC  "PSPC"
+#define PICTURE_BYTES  (STATE_PICTURE_W * STATE_PICTURE_H * 2)
+
+struct PictureHeader
+{
+    char     magic[4];
+    uint16_t width, height;
+    uint32_t packed_size;
+    uint32_t flags;        /* STATE_STORED: the pixels as they are, not zlib-compressed */
+};
+
+static const uint16_t *picture_to_save;
 
 static char save_dir[512];
 static char base_name[256];   /* ROM file name without its last extension */
@@ -228,11 +244,46 @@ int states_next_new_slot(void)
     return 0;
 }
 
+void states_set_picture(const uint16_t *pixels)
+{
+    picture_to_save = pixels;
+}
+
+/* The picture block for a state (compressed along with it); NULL without a
+ * picture. */
+static uint8_t *picture_block(int compress, size_t *size)
+{
+    if (!picture_to_save)
+        return NULL;
+    uLongf packed_size = compress ? compressBound(PICTURE_BYTES) : PICTURE_BYTES;
+    uint8_t *block = (uint8_t *) malloc(sizeof(struct PictureHeader) + packed_size);
+    if (!block)
+        return NULL;
+    struct PictureHeader header;
+    memcpy(header.magic, PICTURE_MAGIC, 4);
+    header.width = STATE_PICTURE_W;
+    header.height = STATE_PICTURE_H;
+    header.flags = compress ? 0 : STATE_STORED;
+    uint8_t *pixels = block + sizeof(header);
+    if (!compress)
+        memcpy(pixels, picture_to_save, PICTURE_BYTES);
+    else if (compress2(pixels, &packed_size, (const Bytef *) picture_to_save, PICTURE_BYTES, Z_BEST_SPEED) != Z_OK)
+    {
+        free(block);
+        return NULL;
+    }
+    header.packed_size = (uint32_t) packed_size;
+    memcpy(block, &header, sizeof(header));
+    *size = sizeof(header) + packed_size;
+    return block;
+}
+
 int states_save(int slot)
 {
-    uint8 *raw = NULL, *packed = NULL;
+    uint8 *raw = NULL, *packed = NULL, *picture = NULL;
     uint32 raw_size = 0;
     uLongf packed_size;
+    size_t picture_size = 0;
     char path[800], temp_path[820];
     struct StateHeader header;
     int ok = 0;
@@ -254,6 +305,10 @@ int states_save(int slot)
         header.flags = STATE_STORED;
     }
 
+    picture = picture_block(cfg.compress_saves, &picture_size);
+    if (picture)
+        header.flags |= STATE_PICTURE;
+
     memcpy(header.magic, STATE_MAGIC, 4);
     header.version = STATE_VERSION;
     header.raw_size = raw_size;
@@ -273,7 +328,8 @@ int states_save(int slot)
         if (!f)
             goto done;
         int written = fwrite(&header, sizeof(header), 1, f) == 1 &&
-                      fwrite(packed ? packed : raw, 1, packed_size, f) == packed_size;
+                      fwrite(packed ? packed : raw, 1, packed_size, f) == packed_size &&
+                      (!picture || fwrite(picture, 1, picture_size, f) == picture_size);
         if (fclose(f) != 0 || !written)
         {
             remove(temp_path);
@@ -292,8 +348,43 @@ int states_save(int slot)
     ok = 1;
 
 done:
+    free(picture);
     free(packed);
     free(raw);
+    return ok;
+}
+
+int states_read_picture(int slot, uint16_t *pixels)
+{
+    char path[800];
+    struct StateHeader header;
+    struct PictureHeader picture;
+    if (!states_exists(slot))
+        return 0;
+    state_path(slot, path, sizeof(path));
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return 0;
+    int ok = 0;
+    uint8_t *packed = NULL;
+    if (fread(&header, sizeof(header), 1, f) == 1 && memcmp(header.magic, STATE_MAGIC, 4) == 0 &&
+        header.version == STATE_VERSION && (header.flags & STATE_PICTURE) &&
+        header.packed_size <= MAX_RAW_SIZE &&
+        fseek(f, (long) (sizeof(header) + header.packed_size), SEEK_SET) == 0 &&
+        fread(&picture, sizeof(picture), 1, f) == 1 && memcmp(picture.magic, PICTURE_MAGIC, 4) == 0 &&
+        picture.width == STATE_PICTURE_W && picture.height == STATE_PICTURE_H &&
+        picture.packed_size <= compressBound(PICTURE_BYTES) &&
+        (packed = (uint8_t *) malloc(picture.packed_size ? picture.packed_size : 1)) != NULL &&
+        fread(packed, 1, picture.packed_size, f) == picture.packed_size)
+    {
+        uLongf size = PICTURE_BYTES;
+        if (picture.flags & STATE_STORED)
+            ok = picture.packed_size == PICTURE_BYTES && (memcpy(pixels, packed, PICTURE_BYTES), 1);
+        else
+            ok = uncompress((Bytef *) pixels, &size, packed, picture.packed_size) == Z_OK && size == PICTURE_BYTES;
+    }
+    free(packed);
+    fclose(f);
     return ok;
 }
 
@@ -592,8 +683,11 @@ int states_set_compressed(int slot, int compress)
     memcpy(&header, data, sizeof(header));
     const uint8_t *payload = data + sizeof(header);
     int stored = (header.flags & STATE_STORED) != 0;
+    /* What follows the snapshot: the picture, kept as it is. */
+    size_t after = size - sizeof(header) - header.packed_size;
     if (memcmp(header.magic, STATE_MAGIC, 4) != 0 || header.version != STATE_VERSION ||
-        header.packed_size != size - sizeof(header) || header.raw_size > MAX_RAW_SIZE)
+        header.packed_size > size - sizeof(header) || (after && !(header.flags & STATE_PICTURE)) ||
+        header.raw_size > MAX_RAW_SIZE)
     {
         free(data);
         return 0;
@@ -605,7 +699,7 @@ int states_set_compressed(int slot, int compress)
     }
 
     uLongf out_size = compress ? compressBound(header.raw_size) : header.raw_size;
-    uint8_t *out = (uint8_t *) malloc(sizeof(header) + out_size);
+    uint8_t *out = (uint8_t *) malloc(sizeof(header) + out_size + after);
     int ok = out != NULL;
     if (ok && compress)
         ok = compress2(out + sizeof(header), &out_size, payload, header.raw_size, Z_BEST_SPEED) == Z_OK;
@@ -617,7 +711,8 @@ int states_set_compressed(int slot, int compress)
         header.packed_size = (uint32_t) out_size;
         header.flags = compress ? header.flags & ~STATE_STORED : header.flags | STATE_STORED;
         memcpy(out, &header, sizeof(header));
-        ok = write_whole(path, out, sizeof(header) + out_size);
+        memcpy(out + sizeof(header) + out_size, payload + (size - sizeof(header) - after), after);
+        ok = write_whole(path, out, sizeof(header) + out_size + after);
     }
     free(out);
     free(data);

@@ -377,7 +377,8 @@ echo "== Save manager"
 setup manager MonsterFarmJump.sfc config_version=3
 play manager tests/scripts/save3_quit.txt MonsterFarmJump.sfc
 s=$OUT/manager/zPocketSNES_saves/MonsterFarmJump.sfc
-flags() { xxd -s 24 -l 1 -p "$1" 2>/dev/null; }
+# A state's "stored" flag (not compressed) as 00 or 01.
+flags() { local v; v=$(xxd -s 24 -l 1 -p "$1" 2>/dev/null) && printf '%02x' $((0x$v & 1)); }
 check "$(flags "$s.sv001.tns")$(flags "$s.sv004.tns")" 0000 "new states are compressed by default"
 size_before=$(stat -c %s "$s.sv002.tns")
 echo "rom_dir=$(realpath "$OUT")/manager/roms" >> "$OUT/manager/zPocketSNES_saves/pocketsnes.cfg.tns"
@@ -391,6 +392,28 @@ play storedrt tests/scripts/roundtrip.txt MonsterFarmJump.sfc
 d=$OUT/storedrt/shots
 check "$(same "$d/A.png" "$d/B.png")$(flags "$OUT/storedrt/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns")" same01 \
     "with Compress saves off a state is stored as it is, and loads back exactly"
+
+echo "== Save state pictures"
+# tests/state_picture.py reads a state's picture; the card's pixels start at
+# 194, 79 (menu.cpp draw_state_picture under the Load state row).
+pic() { python3 tests/state_picture.py "$@"; }
+setup pic MonsterFarmJump.sfc config_version=3 show_fps=0 save_on_exit=0 load_on_start=0
+play pic tests/scripts/state_picture.txt MonsterFarmJump.sfc
+p=$OUT/pic/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns
+check "$(pic has "$p")$(pic frame "$p" "$OUT/pic/shots/saved.png")" yessame \
+    "a state keeps a picture of the frame it was saved at, shrunk to 112x98"
+check "$(pic card "$p" "$OUT/pic/shots/card.png" 194 79)" same "... and Load state in the menu shows it for that slot"
+setup picfps MonsterFarmJump.sfc config_version=3 show_fps=1 save_on_exit=0 load_on_start=0
+play picfps tests/scripts/state_picture.txt MonsterFarmJump.sfc
+pic png "$p" "$OUT/pic/picture.png"
+pic png "$OUT/picfps/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns" "$OUT/picfps/picture.png"
+check "$(same "$OUT/pic/picture.png" "$OUT/picfps/picture.png")" same \
+    "with the FPS counter on the picture is the same: what's drawn over the game isn't in it"
+setup picoff MonsterFarmJump.sfc config_version=3 state_pictures=0 save_on_exit=0 load_on_start=0
+play picoff tests/scripts/state_picture.txt MonsterFarmJump.sfc
+check "$(pic has "$OUT/picoff/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns")" no "with State pictures off a state has none"
+check "$(pic has "$s.sv002.tns")$(pic has "$OUT/storedrt/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns")" yesyes \
+    "the save manager kept the pictures when it uncompressed the states; Compress saves off stores one too"
 
 echo "== S-DD1 (Star Ocean, Street Fighter Alpha 2)"
 # backdrop NAME: green, red or other, from the centre of shots/end.png

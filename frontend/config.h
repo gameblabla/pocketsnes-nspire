@@ -121,6 +121,7 @@ struct Config
     uint32_t load_on_start;     /* starting a game loads its newest state */
     uint32_t sram_autosave;
     uint32_t compress_saves;    /* new states and in-game saves are compressed */
+    uint32_t state_pictures;    /* states keep a small picture, shown when picking one to load */
     uint32_t screen_dma;        /* game frames by DMA (faster, can tear) */
     uint32_t screen_size;       /* enum ScreenSize */
     uint32_t smooth;            /* stretched: repeated pixels blended (scale.h) */

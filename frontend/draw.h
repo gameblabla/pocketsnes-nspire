@@ -55,6 +55,8 @@ void draw_round_rect(int x, int y, int w, int h, int r, uint16_t color);
 void draw_round_frame(int x, int y, int w, int h, int r, uint16_t color);
 /* Darkens what's there: to a half (1) or a quarter (2). */
 void draw_shade(int x, int y, int w, int h, int amount);
+/* A picture of w x h RGB565 pixels, its top left at x, y. */
+void draw_pixels(int x, int y, int w, int h, const uint16_t *pixels);
 
 /* Text is UTF-8; characters the font lacks show as spaces. Only the pixels
  * of the letters are drawn. draw_string returns the x after the text. */

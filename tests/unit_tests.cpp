@@ -381,6 +381,7 @@ static void test_config(void)
     CHECK(cfg.keys[ACTION_LOAD_NEWEST][0].key == KEY_N && cfg.keys[ACTION_SHOW_FPS][0].key == 0,
           "defaults: Load newest on N, the FPS counter hotkey has no key");
     CHECK(cfg.frameskip_type == FRAMESKIP_OFF && cfg.show_fps == 1, "defaults: frameskip off, FPS counter on");
+    CHECK(cfg.state_pictures == 1, "defaults: save state pictures on");
     CHECK(cfg.auto_slot == 0 && cfg.quit_new_save == 1 && cfg.brightness == 0,
           "defaults: no auto slot, a new save on quit, the calculator's own brightness");
     CHECK(cfg.keys[ACTION_BRIGHTER][0].key == KEY_PLUS && cfg.keys[ACTION_DIMMER][0].key == KEY_MINUS,
