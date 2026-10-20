@@ -193,6 +193,26 @@ s=$OUT/quitold/zPocketSNES_saves/MonsterFarmJump.sfc
 check "$(exists "$s.sv001.tns")$(exists "$s.sv002.tns")$(grep -c '^quit_new_save=0$' "$OUT/quitold/zPocketSNES_saves/pocketsnes.cfg.tns")" \
     yesno1 "an older settings file with auto-increment off gets New save on quit off"
 
+echo "== Leaving: the OS's file list"
+# On the calculator the OS reads all its files again at exit (slow with many
+# files), only when PocketSNES added, removed or renamed one; the PC build
+# logs "file list refreshed" there.
+refreshed() { cat "$1" 2>/dev/null | grep -c '^file list refreshed$'; }
+setup listnone MonsterFarmJump.sfc
+play_logged listnone tests/scripts/wait_quit.txt -
+check "$(refreshed "$OUT/listnone/log.txt")" 0 "opening the game list and leaving: no new files, no refresh"
+setup liststate MonsterFarmJump.sfc config_version=3 auto_increment=0 save_on_exit=1 quit_new_save=0 load_on_start=0
+play_logged liststate tests/scripts/wait_quit.txt MonsterFarmJump.sfc
+s=$OUT/liststate/zPocketSNES_saves/MonsterFarmJump.sfc
+check "$(exists "$s.sv001.tns")$(refreshed "$OUT/liststate/log.txt")" yes1 "a game saved a new state when it closed: refresh"
+rm "$OUT/liststate/log.txt"
+play_logged liststate tests/scripts/wait_quit.txt MonsterFarmJump.sfc
+check "$(exists "$s.sv002.tns")$(refreshed "$OUT/liststate/log.txt")" no0 "... saved over it the next time: no refresh"
+setup listold MonsterFarmJump.sfc
+mv "$OUT/listold/zPocketSNES_saves/pocketsnes.cfg.tns" "$OUT/listold/ndless/"
+play_logged listold tests/scripts/wait_quit.txt -
+check "$(refreshed "$OUT/listold/log.txt")" 1 "an older version's file moved into the saves folder: refresh"
+
 echo "== Brightness"
 # The pretend calculator's own backlight is 112 (level 6); levels 7, 8, 3
 # are 75, 50 and 175 (0 brightest, 225 darkest).

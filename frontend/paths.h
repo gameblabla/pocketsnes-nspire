@@ -39,4 +39,16 @@ void paths_move_old_files(const char *dir, int with_program_files);
  * (pocketsnes*.tns, _pocketsnes*.tns) or its old files. Not shown as games. */
 int paths_is_pocketsnes_name(const char *name);
 
+/* The OS's list of the files in My Documents is a copy it keeps, and it
+ * doesn't see files a program adds, removes or renames. platform_shutdown
+ * has it read them all again, which takes a while on a calculator with many
+ * files, so only when PocketSNES changed a name. Its files are in the saves
+ * folder: paths_file_list_start (at start) notes the names there and
+ * paths_file_list_changed (at exit) compares. A file written over keeps its
+ * name and doesn't count. Names changed elsewhere (old files moved in,
+ * ndless.cfg.tns) call paths_file_list_touched. */
+void paths_file_list_start(void);
+void paths_file_list_touched(void);
+int paths_file_list_changed(void);
+
 #endif

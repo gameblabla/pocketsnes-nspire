@@ -18,6 +18,8 @@
 #include "brightness.h"
 #include "config.h"
 #include "selfstore.h"
+#include "paths.h"
+#include "romtypes.h"
 #include "platform.h"
 #include "rotate.h"
 
@@ -559,6 +561,100 @@ static void test_selfstore(void)
     program_file[0] = 0;
 }
 
+/* ---- ROM file associations in ndless.cfg.tns (romtypes.h) ---- */
+
+static char *read_whole(const char *path, size_t *len)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    static char buffer[4096];
+    *len = fread(buffer, 1, sizeof(buffer) - 1, f);
+    buffer[*len] = 0;
+    fclose(f);
+    return buffer;
+}
+
+/* romtypes_update on a C string; "" for no change. */
+static const char *updated(const char *text, const char *program)
+{
+    static char result[2048];
+    size_t len = 0;
+    char *out = romtypes_update(text, text ? strlen(text) : 0, program, &len);
+    if (!out)
+        return "";
+    snprintf(result, sizeof(result), "%.*s", (int) len, out);
+    free(out);
+    return result;
+}
+
+#define ALL_TYPES(name) "ext.sfc=" name "\next.smc=" name "\next.fig=" name "\next.swc=" name "\next.zip=" name "\n"
+
+static void test_romtypes(void)
+{
+    CHECK(strcmp(updated(NULL, "_PocketSNES"), ALL_TYPES("_PocketSNES")) == 0,
+          "no ndless.cfg.tns: a line for each ROM type");
+    CHECK(strcmp(updated("ext.nes=nespire\next.gba=gpsp_launcher", "_PocketSNES"),
+                 "ext.nes=nespire\next.gba=gpsp_launcher\n" ALL_TYPES("_PocketSNES")) == 0,
+          "other programs' lines stay, ours go after them (on a new line)");
+    CHECK(strcmp(updated("ext.nes=nespire\n" ALL_TYPES("_PocketSNES"), "_PocketSNES"), "") == 0,
+          "already there: nothing to write");
+    CHECK(strcmp(updated(" ext.sfc = pocketsnes  # old\r\next.smc=snes9x\r\n#ext.fig=_PocketSNES\r\n"
+                         "ext.swc=_pocketsnes_old\next.zip=_PocketSNES\n", "_PocketSNES"),
+                 " ext.sfc = _PocketSNES  # old\r\next.smc=snes9x\r\n#ext.fig=_PocketSNES\r\n"
+                 "ext.swc=_PocketSNES\next.zip=_PocketSNES\next.fig=_PocketSNES\n") == 0,
+          "older PocketSNES names renamed in place, another program's type kept, a commented line not counted");
+    CHECK(strcmp(updated("ext.sfcx=pocketsnes\next.sfc=\n", "_PocketSNES"),
+                 "ext.sfcx=pocketsnes\next.sfc=\next.smc=_PocketSNES\next.fig=_PocketSNES\n"
+                 "ext.swc=_PocketSNES\next.zip=_PocketSNES\n") == 0,
+          "only exact keys count; an empty value keeps its type, as Ndless sees it");
+
+    char ndless_dir[600], cfg_path[700];
+    size_t len;
+    snprintf(ndless_dir, sizeof(ndless_dir), "%s/ndless", documents_dir);
+    snprintf(cfg_path, sizeof(cfg_path), "%s/ndless.cfg.tns", ndless_dir);
+    CHECK(romtypes_register(cfg_path, "_PocketSNES") == 0, "no ndless folder: nothing written");
+    mkdir(ndless_dir, 0755);
+    FILE *f = fopen(cfg_path, "wb");
+    fputs("ext.nes=nespire\n", f);
+    fclose(f);
+    CHECK(romtypes_register(cfg_path, "_PocketSNES") == 1, "missing types: the file is written");
+    const char *text = read_whole(cfg_path, &len);
+    CHECK(text && strcmp(text, "ext.nes=nespire\n" ALL_TYPES("_PocketSNES")) == 0, "... with the lines added");
+    CHECK(romtypes_register(cfg_path, "_PocketSNES") == 0, "the next start doesn't write it again");
+}
+
+/* ---- Whether the OS's file list needs reading again (paths.h) ---- */
+
+static void test_file_list(void)
+{
+    char state[800], other[800];
+    paths_save_dir_make();
+    paths_save_file(state, sizeof(state), "Game.sfc.sv001.tns");
+    paths_save_file(other, sizeof(other), "Game.sfc.sv002.tns");
+    FILE *f = fopen(state, "wb");
+    fputs("1", f);
+    fclose(f);
+
+    paths_file_list_start();
+    CHECK(!paths_file_list_changed(), "nothing changed: no refresh");
+    f = fopen(state, "wb");
+    fputs("22", f);
+    fclose(f);
+    CHECK(!paths_file_list_changed(), "a state written over (same name): no refresh");
+    f = fopen(other, "wb");
+    fclose(f);
+    CHECK(paths_file_list_changed(), "a new state: refresh");
+    remove(other);
+    CHECK(!paths_file_list_changed(), "... gone again: the same names as at start");
+    rename(state, other);
+    CHECK(paths_file_list_changed(), "a state renamed: refresh");
+    rename(other, state);
+    paths_file_list_touched();
+    CHECK(paths_file_list_changed(), "a name changed outside the saves folder: refresh");
+    remove(state);
+}
+
 static void test_reset_all(void)
 {
     config_load();
@@ -673,6 +769,8 @@ int main(void)
     test_brightness();
     test_selfstore();
     test_reset_all();
+    test_romtypes();
+    test_file_list();
     test_bindings();
 
     char command[700];

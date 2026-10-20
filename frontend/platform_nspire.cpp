@@ -7,6 +7,7 @@
 
 #include "paths.h"
 #include "platform.h"
+#include "romtypes.h"
 #include "rotate.h"
 
 static void register_rom_types(const char *program_path);
@@ -465,6 +466,7 @@ int platform_init(int *argc, char **argv)
 
     touchpad = is_touchpad;
 
+    paths_file_list_start();
     register_rom_types(argv[0]);
 
     backlight_init();
@@ -521,9 +523,11 @@ void platform_shutdown(void)
     *TIMER_CLOCK = saved_clock;
     *TIMER_LOAD = saved_load;
     *TIMER_CONTROL = saved_control;
-    /* The OS's file list doesn't see files a program moves or writes (the
-     * saves folder, states): it showed folders that were gone until this. */
-    refresh_osscr();
+    /* The OS's file list doesn't see files a program adds, moves or removes
+     * (the saves folder, states): it showed folders that were gone until
+     * this. Reading them all takes a while with many files (paths.h). */
+    if (paths_file_list_changed())
+        refresh_osscr();
 }
 
 uint16_t *platform_screen(void)
@@ -1612,14 +1616,11 @@ void platform_wait_until(uint32_t tick)
 }
 
 /* ROMs named like game.sfc.tns (or game.zip.tns) then open in PocketSNES
- * straight from the calculator's documents. Ndless keeps file associations
- * in ndless.cfg.tns as "ext.sfc=<program name without .tns>" and finds the
- * program by that name anywhere in the documents. Ones naming another
+ * straight from the calculator's documents (romtypes.h). Ndless finds the
+ * program by its name anywhere in the documents. Lines naming another
  * program are left alone; ones naming a PocketSNES (an older name, such as
  * pocketsnes, or another copy) are pointed at this one, so renaming it
  * (_PocketSNES.tns sorts first in its folder) keeps them working. */
-static const char *const rom_types[] = { "sfc", "smc", "fig", "swc", "zip" };
-
 static void register_rom_types(const char *program_path)
 {
     char name[128], path[300];
@@ -1631,57 +1632,9 @@ static void register_rom_types(const char *program_path)
     if (!name[0])
         return;
 
-    /* The file is short: read it whole, change the lines, write it back. */
     snprintf(path, sizeof(path), "%sndless/ndless.cfg.tns", get_documents_dir());
-    FILE *f = fopen(path, "rb");
-    if (f)
-    {
-        static char text[8192], out[8192 + 1024];
-        size_t len = fread(text, 1, sizeof(text) - 1, f);
-        int whole = feof(f);
-        fclose(f);
-        text[len] = 0;
-        size_t out_len = 0;
-        int changed = 0;
-        for (char *line = text; whole && *line; )
-        {
-            char *end = strchr(line, '\n');
-            size_t line_len = end ? (size_t) (end - line + 1) : strlen(line);
-            const char *value = NULL;
-            for (size_t i = 0; i < sizeof(rom_types) / sizeof(rom_types[0]); i++)
-            {
-                char key[16];
-                snprintf(key, sizeof(key), "ext.%s=", rom_types[i]);
-                if (strncmp(line, key, strlen(key)) == 0)
-                    value = line + strlen(key);
-            }
-            size_t value_len = value ? strcspn(value, "\r\n") : 0;
-            int ours = value && value_len < 64 &&
-                       (strncasecmp(value, "pocketsnes", 10) == 0 || strncasecmp(value, "_pocketsnes", 11) == 0) &&
-                       !(value_len == strlen(name) && strncmp(value, name, value_len) == 0);
-            if (ours && out_len + (value - line) + strlen(name) + 1 < sizeof(out))
-            {
-                memcpy(out + out_len, line, value - line);
-                out_len += value - line;
-                out_len += snprintf(out + out_len, sizeof(out) - out_len, "%s\n", name);
-                changed = 1;
-            }
-            else if (out_len + line_len < sizeof(out))
-            {
-                memcpy(out + out_len, line, line_len);
-                out_len += line_len;
-            }
-            line += line_len;
-        }
-        if (changed && (f = fopen(path, "wb")) != NULL)
-        {
-            fwrite(out, 1, out_len, f);
-            fclose(f);
-        }
-    }
-    /* The types that have no program yet. */
-    for (size_t i = 0; i < sizeof(rom_types) / sizeof(rom_types[0]); i++)
-        cfg_register_fileext(rom_types[i], name);
+    if (romtypes_register(path, name))
+        paths_file_list_touched();
 }
 
 const char *platform_program_path(void)
