@@ -1,6 +1,5 @@
 PocketSNES for the TI-Nspire: developer notes
-============================================
-
+=====================================
 The working notes for this port: where everything is, how to build, test
 and put a build on the calculator, the decisions made along the way and
 why, what has and hasn't been seen working on real hardware, and what's
@@ -85,8 +84,8 @@ README.md → Building has the full list.
 
 ### Test (before every calculator build)
 
-    tests/run.sh          # 83 checks: scripted runs of the PC build, screenshots in tests/out/
-    make unit-tests       # 75 checks: tile drawing, frame turning, settings, program-file settings
+    tests/run.sh          # 98 checks: scripted runs of the PC build, screenshots in tests/out/
+    make unit-tests       # 101 checks: tile drawing, frame turning, settings, program-file settings, ndless.cfg.tns, file list
     tests/asm/run.sh      # ARM core vs C core under qemu-arm: every opcode, 12 games x 3600 frames, replays
     tests/render_compare.sh   # pixel compare against ./pocketsnes-host-ref (old renderer)
 
@@ -274,14 +273,28 @@ Files and launching:
   old saves in `/gba`, all gone. `platform_shutdown` calls Ndless's
   `refresh_osscr()` last (gpSP too, in `nspire_restore`). Its syscalls are
   in Ndless's table for OS 6.4.0.74; whether it redraws the list there is
-  waiting on the first quit with 7834655.
+  waiting on the first quit with 7834655. The OS reads every file again for
+  it, which is slow on a calculator with many files (issue #11: slow to
+  close), so it only runs when PocketSNES added, removed or renamed a file:
+  `paths_file_list_start` notes the names in the saves folder at start,
+  `paths_file_list_changed` compares at exit (a file written over doesn't
+  count), and moves of older files call `paths_file_list_touched`.
 * **GBA zips:** PocketSNES owns `.zip`, so a GBA zip opened from My
   Documents starts PocketSNES. Other consoles' ROMs inside a zip never
   count as the ROM; a GBA one says "It's a GBA game: start it in gpSP."
   (Before 7834655 the .gba ran as a SNES game and saved junk states.)
 * **File associations:** PocketSNES registers sfc, smc, fig, swc and zip
   with Ndless, and points existing PocketSNES associations at its current
-  name, so opening a ROM in My Documents starts that game.
+  name, so opening a ROM in My Documents starts that game. It edits
+  `My Documents/ndless/ndless.cfg.tns` itself (`romtypes.cpp`), reading it
+  once and writing only when a line changes. Ndless's
+  `cfg_register_fileext` finds the file with `locate()`, which walks every
+  folder of My Documents (stat on each file, A to Z by strcmp, so
+  capitalised folders before `ndless`) on every call; five calls at every
+  start froze a calculator with many files for most of a minute (issue
+  #11, CX II CAS-T). Opening a ROM from the OS list still makes Ndless
+  walk the files to find the program (`ploaderhook.c`, every associated
+  program has that).
 * **Zipped ROMs:** rename `Game.zip` to `Game.zip.tns`. A zip that replaces
   the unzipped ROM takes over its saves.
 * **Number keys 1-9, 0 start the first ten games** in the game list; tab
@@ -535,6 +548,8 @@ History
 | 2026-10-15 | 30c3a33, 8465004 | The Super FX translated into ARM code (not pushed) |
 | 2026-10-15 | 0e3c338 | Background tiles nothing on their lines can hide drawn without the depth test (not pushed) |
 | 2026-10-16 | b61b1c2, 3129554 | Background rows in two assembler passes; VRAM DMA a copy; brightness rebuilt when used (not pushed) |
+=======
+| 2026-10-19 | | Issue #11: no folder walk at start (ndless.cfg.tns edited directly), OS file list refreshed only after file changes |
 
 `git log` has the details; every commit message says what changed and why.
 

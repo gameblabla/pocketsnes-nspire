@@ -19,7 +19,9 @@
  * key number. The script quits when it runs out of lines.
  *
  * For the tests, --log FILE appends a line to FILE for every CPU clock
- * change asked for and every message shown in the game, --stuck-clock acts
+ * change asked for and every message shown in the game, and "file list
+ * refreshed" at exit where the calculator would have the OS read its file
+ * list again (paths.h), --stuck-clock acts
  * like a calculator whose clock doesn't change when asked, --clock-limit N
  * like one that doesn't go past multiplier N (12N MHz), --glitch-above N
  * like one that runs games wrongly above multiplier N (the overclock test's
@@ -42,6 +44,7 @@
 #include <SDL2/SDL.h>
 #endif
 
+#include "paths.h"
 #include "platform.h"
 #include "rotate.h"
 #include "scale.h"
@@ -333,6 +336,7 @@ int platform_init(int *argc, char **argv)
     }
     if (realpath(documents_dir, absolute))
         snprintf(documents_dir, sizeof(documents_dir), "%s", absolute);
+    paths_file_list_start();
 
     if (script_path)
     {
@@ -372,6 +376,9 @@ int platform_init(int *argc, char **argv)
 void platform_shutdown(void)
 {
     platform_set_backlight(-1);
+    /* Where the calculator has the OS read its file list again (paths.h). */
+    if (paths_file_list_changed())
+        platform_log("file list refreshed");
     if (script)
         fclose(script);
 #ifdef HOST_SDL
