@@ -96,6 +96,13 @@ than the tests do.
 
 ### Put a build on the calculator
 
+`tools/deploy.sh` does all of the below in one step and prints a few
+lines: PC tests (`--no-test` skips them), the build (named after the
+commit), a backup of the calculator's copy in `tests/calc/versions/`, its
+settings area carried over, the upload and an md5 read-back.
+`tools/deploy.sh --check` only reads the copy back again. Details go to
+`build/deploy.log`.
+
 `~/nspire/build/tools/nspire-link` talks to the calculator over USB
 (libnspire, no root needed):
 
