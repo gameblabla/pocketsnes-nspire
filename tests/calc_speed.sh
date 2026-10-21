@@ -84,9 +84,10 @@ for l in open(symfile):
         syms.append((int(p[0], 16), p[2]))
 syms.sort(); addrs = [a for a, _ in syms]
 lines = open(out).read().split('\n')
-frames = [int(x) for x in lines[3].split()[1:]]   # instructions per frame
+row = {l.split()[0]: l.split()[1:] for l in lines[:lines.index('pcs')] if l.strip()}
+frames = [int(x) for x in row['frame_insns']]   # instructions per frame
 per_pc = []
-for l in lines[4:]:
+for l in lines[lines.index('pcs') + 1:]:
     if l.strip():
         pc, n, c = l.split()
         per_pc.append((int(pc, 16), int(n)))
@@ -147,9 +148,10 @@ for sym in $ANNOTATE; do
     python3 -c '
 import sys, re
 lines = open(sys.argv[1]).read().split("\n")
-nframes = len(lines[3].split()) - 1
+start = lines.index("pcs")
+nframes = len([l for l in lines[:start] if l.startswith("frame_insns ")][0].split()) - 1
 counts = {}
-for l in lines[4:]:
+for l in lines[start + 1:]:
     if l.strip():
         pc, n, c = l.split()
         counts[int(pc, 16)] = int(n)

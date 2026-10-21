@@ -1760,10 +1760,15 @@ void fx_run(uint32 nInstructions)
 {
 #ifdef ARM_ASM_FX
     /* Until the GSU stops (FxEmulate's usual ~0), with the ARM CPU core set:
-     * translated into ARM code (fxjit.cpp) */
+     * translated into ARM code (fxjit.cpp), or with FX_INTERPRET run by the
+     * assembler interpreter (for speed comparisons) */
     if (nInstructions == ~0u && Settings.AsmCPU)
     {
+#ifdef FX_INTERPRET
+	fx_run_arm_interpreter ();
+#else
 	fx_jit_run ();
+#endif
 	return;
     }
 #endif

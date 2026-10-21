@@ -26,10 +26,29 @@
  *   mark=ADDR    address (hex) of a function called at the start of every
  *                frame: only cycles after its first call count, and the
  *                cycles between calls are listed per frame
+ *   imap=FILE    where the code is in the calculator build: lines of "start end
+ *                calc_start" (hex), a function's addresses here and in the
+ *                calculator's ELF; the instruction cache is modelled at the
+ *                calculator's addresses (functions not listed are put far away)
+ *   repl=rr|counter|random   which line a fill replaces: round-robin per set
+ *                (the default), one round-robin counter per cache, or
+ *                pseudo-random; the calculator's (CP15 control register bit
+ *                14, random after reset) isn't known
+ *   ibase=N      added to the calculator's addresses: where Ndless loaded the
+ *                program (only N modulo 4096 matters to the caches)
+ *   rstart=ADDR rend=ADDR    addresses (hex) of the functions called at the
+ *                start and the end of what the calculator's speed test times
+ *                as drawing (S9xPerfTicks, S9xPerfRenderDone): the cycles and
+ *                instructions between them are listed per frame too
  *   fill=N write=N word=N writeback=N    memory timings (cycles)
+ *   fastlo=ADDR fasthi=ADDR fastfill=N    instruction fetches from calculator
+ *                addresses (hex) in [fastlo, fasthi) take fastfill cycles a
+ *                line (default 30): code moved to the on-chip SRAM
  * The output lists the totals, the model's cycles and the instructions of
- * every frame, and the instructions and cycles of every instruction address
- * (for per-function sums by tests/calc_speed.sh). */
+ * every frame (lines "frames", "frame_insns", "render_cycles",
+ * "render_insns"), then after a line "pcs" the instructions and cycles of
+ * every instruction address (for per-function sums by tests/calc_speed.sh).
+ * FILE.misses lists each address's instruction and data cache misses. */
 #include <glib.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -41,13 +60,20 @@
 QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 
 static uint64_t p_fill = 26, p_write = 10, p_word = 2, p_writeback = 20;
-static uint64_t mark_addr;
+/* Instruction fetches from calculator addresses in [fast_lo, fast_hi) (code
+ * moved to the on-chip SRAM) take p_fast_fill cycles for a line */
+static uint64_t fast_lo, fast_hi, p_fast_fill = 30;
+static uint64_t mark_addr, render_start_addr, render_end_addr;
+static uint64_t ibase;
+static uint64_t *imap;		/* start, end, calculator start; sorted by start */
+static int imap_len;
 static const char *out_path = "arm926.out";
 
 /* What the timing needs to know about an instruction */
 struct insn
 {
     uint64_t pc;
+    uint64_t ipc;	/* its address in the calculator build, for the instruction cache */
     uint32_t reads;	/* registers the instruction reads (bit n = rn) */
     uint8_t base;	/* cycles when it runs and nothing stalls */
     uint8_t taken;	/* extra cycles if the next instruction isn't pc + 4 */
@@ -55,6 +81,7 @@ struct insn
     uint8_t load_lat;	/* cycles its result isn't ready for the next instruction */
     uint8_t thumb;
     uint64_t count, cycles;
+    uint64_t imiss, dmiss;
 };
 
 /* State, all on one vCPU */
@@ -71,6 +98,10 @@ static uint8_t pending_rd = 0xff;	/* a byte/half load two instructions back */
 static int counting;			/* after the first frame mark */
 static GArray *frame_cycles;		/* cycles at each frame mark */
 static GArray *frame_insns;		/* instructions run at each frame mark */
+static GArray *frame_render_cycles;	/* drawing's cycles and instructions so far, at each mark */
+static GArray *frame_render_insns;
+static int in_render;			/* between rstart and rend */
+static uint64_t render_cycles, render_insns, render_since_cycles, render_since_insns;
 static uint64_t stat_insns, stat_imiss, stat_dmiss, stat_smiss, stat_wbstall, stat_fill_wait;
 static uint64_t stat_cycles_start;
 static GPtrArray *all_insns;
@@ -86,6 +117,7 @@ struct cache
 };
 
 static struct cache icache, dcache;
+static int p_repl;	/* 0 round-robin per set, 1 one counter per cache, 2 pseudo-random */
 
 static void cache_init(struct cache *c, int bytes, int ways)
 {
@@ -113,9 +145,26 @@ static int cache_find(struct cache *c, uint64_t addr, int *set_out)
 /* Puts the line in; returns 1 if a dirty line was thrown out */
 static int cache_fill(struct cache *c, uint64_t addr, int set)
 {
-    int w = c->victim[set];
+    static uint32_t lfsr = 0x12345678;
+    int w;
+    if (p_repl == 2)
+    {
+	lfsr ^= lfsr << 13;
+	lfsr ^= lfsr >> 17;
+	lfsr ^= lfsr << 5;
+	w = lfsr % c->ways;
+    }
+    else if (p_repl == 1)
+    {
+	w = c->victim[0];
+	c->victim[0] = (w + 1) % c->ways;
+    }
+    else
+    {
+	w = c->victim[set];
+	c->victim[set] = (w + 1) % c->ways;
+    }
     int was_dirty = c->dirty[set * c->ways + w] && c->tag[set * c->ways + w] != ~(uint64_t) 0;
-    c->victim[set] = (w + 1) % c->ways;
     c->tag[set * c->ways + w] = addr >> LINE_SHIFT;
     c->dirty[set * c->ways + w] = 0;
     return was_dirty;
@@ -144,7 +193,7 @@ static void wb_retire(void)
 
 /* A line fill (instruction or data read miss): the write buffer is emptied
  * first, then the line comes in. */
-static void line_fill(struct insn *in)
+static void line_fill(struct insn *in, uint64_t cost)
 {
     uint64_t start = now;
     if (wb_count && wb_done[wb_count - 1] > start)
@@ -152,7 +201,7 @@ static void line_fill(struct insn *in)
     if (bus_free > start)
 	start = bus_free;
     stat_fill_wait += start - now;
-    stall_to(start + p_fill, in);
+    stall_to(start + cost, in);
     bus_free = now;
     wb_count = 0;
 }
@@ -213,7 +262,8 @@ static void vcpu_mem(unsigned int vcpu, qemu_plugin_meminfo_t info, uint64_t vad
 	if (way < 0)
 	{
 	    stat_dmiss++;
-	    line_fill(in);
+	    in->dmiss++;
+	    line_fill(in, p_fill);
 	    if (cache_fill(&dcache, vaddr, set))
 		bus_free += p_writeback;
 	}
@@ -231,11 +281,32 @@ static void vcpu_insn(unsigned int vcpu, void *udata)
 	    counting = 1;
 	    stat_cycles_start = now;
 	}
+	if (in_render)
+	{
+	    render_cycles += now - render_since_cycles;
+	    render_insns += stat_insns - render_since_insns;
+	    render_since_cycles = now;
+	    render_since_insns = stat_insns;
+	}
 	g_array_append_val(frame_cycles, now);
 	g_array_append_val(frame_insns, stat_insns);
+	g_array_append_val(frame_render_cycles, render_cycles);
+	g_array_append_val(frame_render_insns, render_insns);
     }
     if (!counting)
 	return;
+    if (in->pc == render_start_addr && !in_render)
+    {
+	in_render = 1;
+	render_since_cycles = now;
+	render_since_insns = stat_insns;
+    }
+    else if (in->pc == render_end_addr && in_render)
+    {
+	in_render = 0;
+	render_cycles += now - render_since_cycles;
+	render_insns += stat_insns - render_since_insns;
+    }
 
     if (prev)
     {
@@ -262,11 +333,12 @@ static void vcpu_insn(unsigned int vcpu, void *udata)
     /* Instruction fetch */
     {
 	int set;
-	if (cache_find(&icache, in->pc, &set) < 0)
+	if (cache_find(&icache, in->ipc, &set) < 0)
 	{
 	    stat_imiss++;
-	    line_fill(in);
-	    cache_fill(&icache, in->pc, set);
+	    in->imiss++;
+	    line_fill(in, in->ipc >= fast_lo && in->ipc < fast_hi ? p_fast_fill : p_fill);
+	    cache_fill(&icache, in->ipc, set);
 	}
     }
 
@@ -432,6 +504,51 @@ static void decode_arm(struct insn *in, uint32_t w)
     }
 }
 
+/* An instruction's address in the calculator build */
+static uint64_t calc_address(uint64_t pc)
+{
+    int lo = 0, hi = imap_len - 1;
+    if (!imap_len)
+	return pc + ibase;
+    while (lo <= hi)
+    {
+	int mid = (lo + hi) / 2;
+	if (pc < imap[mid * 3])
+	    hi = mid - 1;
+	else if (pc >= imap[mid * 3 + 1])
+	    lo = mid + 1;
+	else
+	    return imap[mid * 3 + 2] + (pc - imap[mid * 3]) + ibase;
+    }
+    return pc + 0x40000000;	/* the harness's own code: somewhere else */
+}
+
+static void load_imap(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    unsigned long long a, b, c;
+    int cap = 1024;
+    if (!f)
+    {
+	fprintf(stderr, "arm926: can't read %s\n", path);
+	exit(1);
+    }
+    imap = g_new(uint64_t, cap * 3);
+    while (fscanf(f, "%llx %llx %llx", &a, &b, &c) == 3)
+    {
+	if (imap_len == cap)
+	{
+	    cap *= 2;
+	    imap = g_renew(uint64_t, imap, cap * 3);
+	}
+	imap[imap_len * 3] = a;
+	imap[imap_len * 3 + 1] = b;
+	imap[imap_len * 3 + 2] = c;
+	imap_len++;
+    }
+    fclose(f);
+}
+
 static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 {
     size_t n = qemu_plugin_tb_n_insns(tb);
@@ -451,6 +568,7 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 	{
 	    in = g_new0(struct insn, 1);
 	    in->pc = pc;
+	    in->ipc = calc_address(pc);
 	    size = qemu_plugin_insn_data(qi, &w, sizeof w);
 	    if (qemu_plugin_insn_size(qi) == 4 && size == 4)
 		decode_arm(in, w);
@@ -474,8 +592,8 @@ static void plugin_exit(qemu_plugin_id_t id, void *p)
     FILE *f = fopen(out_path, "w");
     if (!f)
 	return;
-    fprintf(f, "model fill %" PRIu64 " write %" PRIu64 " word %" PRIu64 " writeback %" PRIu64 "\n",
-	    p_fill, p_write, p_word, p_writeback);
+    fprintf(f, "model fill %" PRIu64 " write %" PRIu64 " word %" PRIu64 " writeback %" PRIu64 " repl %d ibase %" PRIu64
+	    " imap %d\n", p_fill, p_write, p_word, p_writeback, p_repl, ibase, imap_len);
     fprintf(f, "cycles %" PRIu64 " instructions %" PRIu64 " imiss %" PRIu64 " dmiss %" PRIu64
 	    " storemiss %" PRIu64 " wbstall %" PRIu64 " fillwait %" PRIu64 "\n",
 	    now - stat_cycles_start, stat_insns, stat_imiss, stat_dmiss, stat_smiss, stat_wbstall,
@@ -490,11 +608,36 @@ static void plugin_exit(qemu_plugin_id_t id, void *p)
 	fprintf(f, " %" PRIu64, g_array_index(frame_insns, uint64_t, i) -
 		g_array_index(frame_insns, uint64_t, i - 1));
     fprintf(f, "\n");
+    fprintf(f, "render_cycles");
+    for (guint i = 1; i < frame_render_cycles->len; i++)
+	fprintf(f, " %" PRIu64, g_array_index(frame_render_cycles, uint64_t, i) -
+		g_array_index(frame_render_cycles, uint64_t, i - 1));
+    fprintf(f, "\n");
+    fprintf(f, "render_insns");
+    for (guint i = 1; i < frame_render_insns->len; i++)
+	fprintf(f, " %" PRIu64, g_array_index(frame_render_insns, uint64_t, i) -
+		g_array_index(frame_render_insns, uint64_t, i - 1));
+    fprintf(f, "\n");
+    fprintf(f, "pcs\n");
     for (guint i = 0; i < all_insns->len; i++)
     {
 	struct insn *in = g_ptr_array_index(all_insns, i);
 	if (in->count)
 	    fprintf(f, "%" PRIx64 " %" PRIu64 " %" PRIu64 "\n", in->pc, in->count, in->cycles);
+    }
+    fclose(f);
+    /* The cache misses of every instruction address, beside the results */
+    char *mpath = g_strconcat(out_path, ".misses", NULL);
+    f = fopen(mpath, "w");
+    g_free(mpath);
+    if (!f)
+	return;
+    fprintf(f, "pc imiss dmiss\n");
+    for (guint i = 0; i < all_insns->len; i++)
+    {
+	struct insn *in = g_ptr_array_index(all_insns, i);
+	if (in->imiss || in->dmiss)
+	    fprintf(f, "%" PRIx64 " %" PRIu64 " %" PRIu64 "\n", in->pc, in->imiss, in->dmiss);
     }
     fclose(f);
 }
@@ -513,6 +656,22 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_
 	    out_path = g_strdup(v);
 	else if (!strcmp(argv[i], "mark"))
 	    mark_addr = strtoull(v, NULL, 16);
+	else if (!strcmp(argv[i], "repl"))
+	    p_repl = !strcmp(v, "random") ? 2 : !strcmp(v, "counter") ? 1 : 0;
+	else if (!strcmp(argv[i], "imap"))
+	    load_imap(v);
+	else if (!strcmp(argv[i], "ibase"))
+	    ibase = strtoull(v, NULL, 0);
+	else if (!strcmp(argv[i], "rstart"))
+	    render_start_addr = strtoull(v, NULL, 16);
+	else if (!strcmp(argv[i], "rend"))
+	    render_end_addr = strtoull(v, NULL, 16);
+	else if (!strcmp(argv[i], "fastlo"))
+	    fast_lo = strtoull(v, NULL, 16);
+	else if (!strcmp(argv[i], "fasthi"))
+	    fast_hi = strtoull(v, NULL, 16);
+	else if (!strcmp(argv[i], "fastfill"))
+	    p_fast_fill = strtoull(v, NULL, 0);
 	else if (!strcmp(argv[i], "fill"))
 	    p_fill = strtoull(v, NULL, 0);
 	else if (!strcmp(argv[i], "write"))
@@ -533,6 +692,8 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_
     cache_init(&dcache, 8 * 1024, 4);
     frame_cycles = g_array_new(FALSE, FALSE, sizeof(uint64_t));
     frame_insns = g_array_new(FALSE, FALSE, sizeof(uint64_t));
+    frame_render_cycles = g_array_new(FALSE, FALSE, sizeof(uint64_t));
+    frame_render_insns = g_array_new(FALSE, FALSE, sizeof(uint64_t));
     all_insns = g_ptr_array_new();
     qemu_plugin_register_vcpu_tb_trans_cb(id, vcpu_tb_trans);
     qemu_plugin_register_atexit_cb(id, plugin_exit, NULL);
