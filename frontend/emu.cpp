@@ -1150,8 +1150,16 @@ void emu_speed_test(int close_after_seconds)
     /* At the speed the game runs at (the menu runs at normal speed). */
     game_speed();
     uint32_t mhz = platform_cpu_mhz();
-    char clock_report[200];
+    char clock_report[400];
     platform_clock_report(clock_report, sizeof(clock_report));
+    {
+        size_t len = strlen(clock_report);
+        if (len + 2 < sizeof(clock_report))
+        {
+            strcpy(clock_report + len, "\n");
+            platform_code_report(clock_report + len + 1, sizeof(clock_report) - len - 1);
+        }
+    }
 
     if (!S9xFreezeToMemory(&snapshot, &snapshot_size))
     {

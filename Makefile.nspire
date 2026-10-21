@@ -45,7 +45,12 @@ OPT     = $(OPT_LEVEL) -fomit-frame-pointer -fno-strict-aliasing -ffunction-sect
 # The Snes9x core is old code with many warnings; keep them for the frontend only.
 CORE_FLAGS     = $(ARCH) $(OPT) $(DEFINES) $(INCLUDE) -w
 FRONTEND_FLAGS = $(ARCH) $(OPT) $(DEFINES) $(FRONTEND_INCLUDE) -Wall -Wextra -Wno-unused-parameter
-LDFLAGS        = -Wl,--gc-sections
+# frontend/pocketsnes.ld (Ndless's linker script, through tools/ndless-ld)
+# puts the code that misses the instruction cache most in one stretch
+# (frontend/hot_sections.ld, from tools/calc_speed/hot_sections.py), which
+# the program runs from the on-chip SRAM (platform_nspire.cpp, "Code in the
+# SRAM").
+LDFLAGS        = -Wl,--gc-sections -B tools/ndless-ld/
 
 # lcd_blit marks the program as supporting the CX II / HW-W screen, so Ndless
 # doesn't show the "compatibility mode" dialog.
@@ -89,8 +94,8 @@ $(BUILD)/frontend/%.o: frontend/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(ARCH) -c $< -o $@
 
-$(BUILD)/$(TARGET).elf: $(CORE_OBJ) $(FRONTEND_OBJ)
-	$(LD) $^ -o $@ $(LDFLAGS)
+$(BUILD)/$(TARGET).elf: $(CORE_OBJ) $(FRONTEND_OBJ) frontend/pocketsnes.ld frontend/hot_sections.ld
+	$(LD) $(filter %.o,$^) -o $@ $(LDFLAGS)
 
 $(TARGET).tns: $(BUILD)/$(TARGET).elf
 	$(GENZEHN) --input $< --output $(BUILD)/$(TARGET).zehn $(ZEHNFLAGS)

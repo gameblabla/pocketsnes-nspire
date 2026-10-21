@@ -31,7 +31,8 @@
 
 	.syntax unified
 	.arm
-	.text
+	@ its own section, for frontend/hot_sections.txt
+	.section .text.gfx_arm,"ax",%progbits
 
 @ struct SGFX (pocketsnes/include/gfx.h; tile.cpp checks the offsets)
 	.equ GFX_PPL,	48

@@ -184,6 +184,9 @@ int platform_cpu_multiplier(void);
 /* A line about the clock register and the last change, for the speed test
  * results. */
 void platform_clock_report(char *text, size_t size);
+/* Where the busiest code runs from (the CX II's on-chip SRAM or normal
+ * memory, and why), for the speed test results. */
+void platform_code_report(char *text, size_t size);
 /* For the PC tests: 1 when the PC build is acting like a calculator that
  * runs games wrongly at the clock set now (--glitch-above). Always 0 on the
  * calculator. */

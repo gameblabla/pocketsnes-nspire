@@ -10,7 +10,8 @@
 @ The block number is (Address >> 12) & 0xFFF and the offset Address &
 @ 0xFFFF, as in getset.h, so stray bits above the bank don't matter.
 
-	.text
+	@ its own section, for frontend/hot_sections.txt
+	.section .text.os9x_global,"ax",%progbits
 	.align	4
 	.include	"os9x_65c816_common.s"
 

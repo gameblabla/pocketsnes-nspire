@@ -354,6 +354,10 @@ static void sram_restore(void)
     sram_used = 0;
 }
 
+/* Code in the SRAM (further down) */
+static void sram_code_init(void);
+static void sram_code_restore(void);
+
 /* Where the DMA controller reads the frame being shown. */
 static uint32_t frame_physical(void)
 {
@@ -502,6 +506,7 @@ int platform_init(int *argc, char **argv)
         if (SRAM_RENDERING)
             sram_init();
     }
+    sram_code_init();
     platform_present();
     return 1;
 }
@@ -524,6 +529,7 @@ void platform_shutdown(void)
     *TIMER_CLOCK = saved_clock;
     *TIMER_LOAD = saved_load;
     *TIMER_CONTROL = saved_control;
+    sram_code_restore();
     /* The OS's file list doesn't see files a program adds, moves or removes
      * (the saves folder, states): it showed folders that were gone until
      * this. Reading them all takes a while with many files (paths.h). */
@@ -998,6 +1004,287 @@ void platform_clock_report(char *text, size_t size)
 uint32_t platform_cpu_mhz(void)
 {
     return measure_mhz(20000000);   /* 80 million cycles */
+}
+
+/* ---- Code in the SRAM ----
+ *
+ * The emulator runs far more code each frame than the 16 KB instruction
+ * cache holds (Yoshi's Island: 160 KB at least once a frame), and a cache
+ * line from normal memory costs about 120 cycles; from the on-chip SRAM about
+ * a quarter of that (FINDINGS.md). The build puts the code that misses the
+ * cache most in one stretch (frontend/hot_sections.txt, between
+ * sram_code_begin and sram_code_end). At startup its pages are copied into
+ * the SRAM and the MMU is pointed at the copies: the megabyte they are in
+ * gets a second-level table (in the SRAM) with the same physical memory as
+ * before everywhere else (64 KB pages, 4 KB ones around the moved pages), so
+ * the code keeps its addresses and nothing else moves. platform_shutdown puts
+ * the section descriptors back, and the SRAM's old contents.
+ *
+ * SRAM use: the tables and a record of what was changed in the page at
+ * SRAM_CODE_TABLES, the code from SRAM_CODE_FIRST up, leaving out the page
+ * of the clock switch (SWITCH_SRAM). The record lets the next start undo a
+ * run that ended without platform_shutdown. A marker file is there while the
+ * code runs from the SRAM; if it is still there at the next start, the code
+ * stays in normal memory from then on (SRAM_CODE_OFF names that). */
+#define SRAM_CODE_TABLES 0xA4008000u
+#define SRAM_CODE_RECORD (SRAM_CODE_TABLES + 0x800)
+#define SRAM_CODE_FIRST  0xA4009000u
+#define SRAM_CODE_END    0xA4040000u
+#define SRAM_CODE_MAGIC  0x31435350u   /* "PSC1" */
+#define SRAM_CODE_PAGES  64
+#define SRAM_CODE_MARKER "pocketsnes_sramcode.tns"
+#define SRAM_CODE_OFF    "pocketsnes_sramcode_off.tns"
+
+struct sram_code_record
+{
+    uint32_t magic;
+    uint32_t sections;              /* megabytes with a second-level table: 1 or 2 */
+    uint32_t mb[2];                 /* their first-level table entries */
+    uint32_t original[2];           /* and the section descriptors they had */
+    uint32_t va, pages;             /* the moved pages */
+    uint32_t sram[SRAM_CODE_PAGES]; /* where each one is in the SRAM */
+};
+#define RECORD ((volatile struct sram_code_record *) SRAM_CODE_RECORD)
+
+/* The ends of the stretch (frontend/hot_sections.txt lists their sections
+ * first and last). */
+extern "C" __attribute__ ((section (".text.sram_code_begin"), noinline)) void sram_code_begin(void)
+{
+    __asm__ volatile ("");
+}
+extern "C" __attribute__ ((section (".text.sram_code_end"), noinline)) void sram_code_end(void)
+{
+    __asm__ volatile ("");
+}
+
+static uint8_t *sram_code_backup;
+static int sram_code_pages;         /* moved, 0 if none */
+static char sram_code_state[96] = "code in normal memory";
+
+static uint32_t *first_level_table(void)
+{
+    uint32_t ttb;
+    __asm__ volatile ("mrc p15, 0, %0, c2, c0, 0" : "=r" (ttb));
+    return (uint32_t *) (ttb & 0xFFFFC000);
+}
+
+/* Writes back and drops the whole data cache, then drains the write
+ * buffer. */
+static void clean_flush_all_dcache(void)
+{
+    __asm__ volatile ("1: mrc p15, 0, r15, c7, c14, 3\n\t"
+                      "bne 1b\n\t"
+                      "mcr p15, 0, %0, c7, c10, 4" : : "r" (0) : "cc", "memory");
+}
+
+/* After the tables changed: the TLBs and the instruction cache start over. */
+static void mmu_changed(void)
+{
+    __asm__ volatile ("mcr p15, 0, %0, c7, c10, 4\n\t"   /* drain the write buffer */
+                      "mcr p15, 0, %0, c8, c7, 0\n\t"    /* invalidate the TLBs */
+                      "mcr p15, 0, %0, c7, c5, 0"        /* invalidate the instruction cache */
+                      : : "r" (0) : "memory");
+}
+
+/* The SRAM page for the n-th moved page. */
+static uint32_t sram_code_page(int n)
+{
+    uint32_t page = SRAM_CODE_FIRST + (uint32_t) n * 4096;
+    if (page >= ((uint32_t) SWITCH_SRAM & ~0xFFFu))
+        page += 4096;
+    return page;
+}
+
+/* Puts the section descriptors back. With copy_back, the moved pages'
+ * contents (whatever is there now) go back to normal memory first: after a
+ * run that didn't end cleanly the OS may have used them. */
+static void sram_code_undo(int copy_back)
+{
+    volatile struct sram_code_record *r = RECORD;
+    uint32_t *table = first_level_table();
+    uint32_t cpsr = interrupts_off();
+    clean_flush_all_dcache();
+    for (uint32_t i = 0; i < r->sections && i < 2; i++)
+        table[r->mb[i]] = r->original[i];
+    mmu_changed();
+    if (copy_back)
+    {
+        for (uint32_t n = 0; n < r->pages && n < SRAM_CODE_PAGES; n++)
+            memcpy((void *) (r->va + n * 4096), (const void *) r->sram[n], 4096);
+        clean_flush_all_dcache();
+        mmu_changed();
+    }
+    r->magic = 0;
+    interrupts_restore(cpsr);
+}
+
+/* A second-level table entry: a 4 KB page (type 2) or one of the 16 for a
+ * 64 KB page (type 1), with the section's access and cache bits. */
+static uint32_t page_entry(uint32_t pa, uint32_t section, int small)
+{
+    uint32_t ap = (section >> 10) & 3;
+    return pa | (ap * 0x55u) << 4 | (section & 0xC) | (small ? 2u : 1u);
+}
+
+static int sram_code_mapped_here(const uint32_t *table)
+{
+    volatile struct sram_code_record *r = RECORD;
+    if (r->magic != SRAM_CODE_MAGIC || r->sections < 1 || r->sections > 2)
+        return 0;
+    for (uint32_t i = 0; i < r->sections; i++)
+        if (r->mb[i] >= 4096 || (table[r->mb[i]] & 0xFFFFFC00) != SRAM_CODE_TABLES + i * 0x400)
+            return 0;
+    return 1;
+}
+
+static void sram_code_init(void)
+{
+    if (!is_cx2 || SRAM_RENDERING)
+        return;
+    uint32_t *table = first_level_table();
+    uint32_t sram_section = table[SRAM_BASE >> 20];
+    /* The SRAM mapped 1:1 in one section, writable */
+    if ((sram_section & 3) != 2 || (sram_section & 0xFFF00000) != SRAM_BASE || !((sram_section >> 10) & 3))
+    {
+        snprintf(sram_code_state, sizeof(sram_code_state), "code in normal memory: SRAM mapped %08lx",
+                 (unsigned long) sram_section);
+        return;
+    }
+    /* A run that ended without putting things back */
+    if (sram_code_mapped_here(table))
+        sram_code_undo(1);
+
+    char marker[600], off[600];
+    paths_data_file(marker, sizeof(marker), SRAM_CODE_MARKER);
+    paths_data_file(off, sizeof(off), SRAM_CODE_OFF);
+    FILE *f = fopen(off, "r");
+    if (f)
+    {
+        fclose(f);
+        snprintf(sram_code_state, sizeof(sram_code_state), "code in normal memory (%s)", SRAM_CODE_OFF);
+        return;
+    }
+    if ((f = fopen(marker, "r")))
+    {
+        /* The last run with it didn't end cleanly */
+        fclose(f);
+        remove(marker);
+        if ((f = fopen(off, "w")))
+        {
+            fprintf(f, "A run with code in the SRAM didn't end cleanly. Delete this file to try it again.\n");
+            fclose(f);
+        }
+        snprintf(sram_code_state, sizeof(sram_code_state), "code in normal memory (the last run didn't end)");
+        return;
+    }
+
+    uint32_t va = (uint32_t) (uintptr_t) sram_code_begin & ~0xFFFu;
+    uint32_t end = ((uint32_t) (uintptr_t) sram_code_end + 0xFFF) & ~0xFFFu;
+    int pages = (int) ((end - va) / 4096);
+    int room = (int) ((SRAM_CODE_END - SRAM_CODE_FIRST) / 4096) - 1;   /* less the clock switch's */
+    if (pages > room)
+        pages = room;
+    if (pages > SRAM_CODE_PAGES)
+        pages = SRAM_CODE_PAGES;
+    uint32_t last = va + (uint32_t) pages * 4096 - 1;
+    uint32_t mb[2] = { va >> 20, last >> 20 };
+    int sections = mb[1] != mb[0] ? 2 : 1;
+    for (int i = 0; i < sections; i++)
+        if ((table[mb[i]] & 3) != 2)
+        {
+            snprintf(sram_code_state, sizeof(sram_code_state), "code in normal memory: its megabyte mapped %08lx",
+                     (unsigned long) table[mb[i]]);
+            return;
+        }
+    if (!(sram_code_backup = (uint8_t *) malloc(SRAM_CODE_END - SRAM_CODE_TABLES)))
+        return;
+    if (!(f = fopen(marker, "w")))
+    {
+        free(sram_code_backup);
+        sram_code_backup = NULL;
+        return;
+    }
+    fprintf(f, "PocketSNES runs code from the SRAM\n");
+    fclose(f);
+
+    uint32_t cpsr = interrupts_off();
+    memcpy(sram_code_backup, (const void *) SRAM_CODE_TABLES, SRAM_CODE_END - SRAM_CODE_TABLES);
+    volatile struct sram_code_record *r = RECORD;
+    r->magic = 0;
+    for (int n = 0; n < pages; n++)
+    {
+        memcpy((void *) sram_code_page(n), (const void *) (va + (uint32_t) n * 4096), 4096);
+        r->sram[n] = sram_code_page(n);
+    }
+    for (int i = 0; i < sections; i++)
+    {
+        uint32_t section = table[mb[i]];
+        uint32_t *pt = (uint32_t *) (SRAM_CODE_TABLES + (uint32_t) i * 0x400);
+        uint32_t base = section & 0xFFF00000;
+        for (int chunk = 0; chunk < 16; chunk++)
+        {
+            uint32_t chunk_va = (mb[i] << 20) + (uint32_t) chunk * 0x10000;
+            int small = chunk_va + 0x10000 > va && chunk_va < va + (uint32_t) pages * 4096;
+            for (int k = 0; k < 16; k++)
+            {
+                uint32_t page_va = chunk_va + (uint32_t) k * 4096;
+                uint32_t pa = small ? base + (page_va & 0xFF000) : base + (chunk_va & 0xF0000);
+                if (small && page_va >= va && page_va < va + (uint32_t) pages * 4096)
+                    pa = sram_code_page((int) ((page_va - va) / 4096));
+                pt[chunk * 16 + k] = page_entry(pa, section, small);
+            }
+        }
+        r->mb[i] = mb[i];
+        r->original[i] = section;
+    }
+    r->sections = (uint32_t) sections;
+    r->va = va;
+    r->pages = (uint32_t) pages;
+    r->magic = SRAM_CODE_MAGIC;
+    clean_flush_all_dcache();
+    /* Domain from the section (bits 8-5), bit 4 set as the ARM926 wants */
+    for (int i = 0; i < sections; i++)
+        table[mb[i]] = (SRAM_CODE_TABLES + (uint32_t) i * 0x400) | (r->original[i] & 0x1E0) | 0x10 | 1;
+    mmu_changed();
+    interrupts_restore(cpsr);
+
+    uint32_t first, second;
+    if (mmu_lookup(va, &first, &second) != sram_code_page(0) ||
+        memcmp((const void *) va, (const void *) sram_code_page(0), 4096))
+    {
+        sram_code_undo(0);
+        memcpy((void *) SRAM_CODE_TABLES, sram_code_backup, SRAM_CODE_END - SRAM_CODE_TABLES);
+        clean_dcache((const void *) SRAM_CODE_TABLES, SRAM_CODE_END - SRAM_CODE_TABLES);
+        free(sram_code_backup);
+        sram_code_backup = NULL;
+        remove(marker);
+        snprintf(sram_code_state, sizeof(sram_code_state), "code in normal memory: the mapping didn't take");
+        return;
+    }
+    sram_code_pages = pages;
+    snprintf(sram_code_state, sizeof(sram_code_state), "code in the SRAM: %d KB from %08lx (%lu KB marked)",
+             pages * 4, (unsigned long) va,
+             (unsigned long) (((uint32_t) (uintptr_t) sram_code_end - (uint32_t) (uintptr_t) sram_code_begin) / 1024));
+}
+
+static void sram_code_restore(void)
+{
+    if (!sram_code_pages)
+        return;
+    sram_code_undo(0);
+    memcpy((void *) SRAM_CODE_TABLES, sram_code_backup, SRAM_CODE_END - SRAM_CODE_TABLES);
+    clean_dcache((const void *) SRAM_CODE_TABLES, SRAM_CODE_END - SRAM_CODE_TABLES);
+    free(sram_code_backup);
+    sram_code_backup = NULL;
+    sram_code_pages = 0;
+    char marker[600];
+    paths_data_file(marker, sizeof(marker), SRAM_CODE_MARKER);
+    remove(marker);
+}
+
+void platform_code_report(char *text, size_t size)
+{
+    snprintf(text, size, "%s", sram_code_state);
 }
 
 static void write_mapping(FILE *f, const char *name, const void *start, uint32_t size)

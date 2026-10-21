@@ -579,6 +579,11 @@ int platform_cpu_multiplier(void)
     return cpu_multiplier ? cpu_multiplier : 33;
 }
 
+void platform_code_report(char *text, size_t size)
+{
+    snprintf(text, size, "code in normal memory (PC)");
+}
+
 void platform_clock_report(char *text, size_t size)
 {
     snprintf(text, size, "PC build, clock x%d asked for", platform_cpu_multiplier());
