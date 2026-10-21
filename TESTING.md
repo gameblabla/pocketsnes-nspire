@@ -205,6 +205,21 @@ for the four numbers (they're variables at the top of the script). The plugin's 
 the calculator as well (its memory timings can't make both the C and ARM
 cores come out right), so it's only used to count.
 
+**The cache model** (2026-10-20) does fit: `tools/calc_speed/calibrate.py
+tools/calc_speed/calc_cases.json 118,6,6,60` runs the speed tests in
+`calc_cases.json` (the builds and saves the calculator measured, rebuilt in
+their own trees) with the plugin's memory timings (cycles for a line fill,
+a write buffer entry, an extra word of a burst, a dirty line written back)
+and prints the model's milliseconds next to the calculator's: within 2–6%
+on Yoshi's Island. A case with `"cpu_ms": null` is only predicted, which is
+how a new build is estimated (`"harness"` picks another harness build,
+`"plugin_args"` adds plugin arguments). Each run also writes
+`model.out.misses`, the cache misses of every address:
+`tools/calc_speed/hot_sections.py build/calc-speed MISSES...` turns those
+into `frontend/hot_sections.ld` (the code that runs from the SRAM), and
+`tools/calc_speed/sram_imap.py` tries other layouts with the plugin's
+`fastlo`/`fasthi`/`fastfill` (fetches from the SRAM).
+
 The qemu with plugins (the Ubuntu one has none) is built from source, ARM
 user mode only, without root:
 

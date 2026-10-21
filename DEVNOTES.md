@@ -558,20 +558,23 @@ History
 | 2026-10-11 | 3eb26f2 | Saves in My Documents/`PocketSNES_saves`, so `_PocketSNES.tns` is first in its folder |
 | 2026-10-11 | | These notes |
 | 2026-10-11 | | Pushed to PR #10; release v4.0 updated in place with all of the above |
-| 2026-10-11 | 19a516b | Saves folder `zPocketSNES_saves`, below the game folders in My Documents (not pushed) |
-| 2026-10-11 | 7834655 | OS file list refreshed at exit; GBA zips refused (not pushed) |
-| 2026-10-13 | ee26428 | Yoshi's Island's top line steady: H-blank at dot 274, lines taken at dot 48 (not pushed) |
-| 2026-10-13 | 84f8ed7..05b6cf7 | Per-line fixed colour; Super FX interpreters in C and ARM assembler; `tests/calc_speed.sh` (not pushed) |
-| 2026-10-14 | | S-DD1 (Star Ocean, Street Fighter Alpha 2) and its test cartridge (not pushed) |
-| 2026-10-15 | 82d4db8 | Super FX assembler: R14 destination table, plot, merge, color (not pushed) |
-| 2026-10-15 | 71bef17..ee6d762 | Tile drawing and line fills in ARM assembler, VRAM DMA a word at a time, `calc_speed.sh` FUNCS/ANNOTATE (not pushed) |
-| 2026-10-15 | 042079c | Screen size: full screen, full with the edges cropped, sharp or smooth (not pushed) |
-| 2026-10-15 | 30c3a33, 8465004 | The Super FX translated into ARM code (not pushed) |
-| 2026-10-15 | 0e3c338 | Background tiles nothing on their lines can hide drawn without the depth test (not pushed) |
-| 2026-10-16 | b61b1c2, 3129554 | Background rows in two assembler passes; VRAM DMA a copy; brightness rebuilt when used (not pushed) |
-=======
-| 2026-10-19 | | Issue #11: no folder walk at start (ndless.cfg.tns edited directly), OS file list refreshed only after file changes |
-| 2026-10-19 | | Save state pictures, shown at Load state (not pushed) |
+| 2026-10-11 | 19a516b | Saves folder `zPocketSNES_saves`, below the game folders in My Documents |
+| 2026-10-11 | 7834655 | OS file list refreshed at exit; GBA zips refused |
+| 2026-10-13 | ee26428 | Yoshi's Island's top line steady: H-blank at dot 274, lines taken at dot 48 |
+| 2026-10-13 | 84f8ed7..05b6cf7 | Per-line fixed colour; Super FX interpreters in C and ARM assembler; `tests/calc_speed.sh` |
+| 2026-10-14 | | S-DD1 (Star Ocean, Street Fighter Alpha 2) and its test cartridge |
+| 2026-10-15 | 82d4db8 | Super FX assembler: R14 destination table, plot, merge, color |
+| 2026-10-15 | 71bef17..ee6d762 | Tile drawing and line fills in ARM assembler, VRAM DMA a word at a time, `calc_speed.sh` FUNCS/ANNOTATE |
+| 2026-10-15 | 042079c | Screen size: full screen, full with the edges cropped, sharp or smooth |
+| 2026-10-15 | 30c3a33, 8465004 | The Super FX translated into ARM code |
+| 2026-10-15 | 0e3c338 | Background tiles nothing on their lines can hide drawn without the depth test |
+| 2026-10-16 | b61b1c2, 3129554 | Background rows in two assembler passes; VRAM DMA a copy; brightness rebuilt when used |
+| 2026-10-19 | 394535e | Issue #11: no folder walk at start (ndless.cfg.tns edited directly), OS file list refreshed only after file changes |
+| 2026-10-19 | 28a086f | Save state pictures, shown at Load state |
+| 2026-10-20 | 208ed5e | `tools/deploy.sh`: tests, build, backup, settings kept, upload and check in one step |
+| 2026-10-20 | 1d9faa6 | Speed model with caches and memory, fitted to the calculator (`tools/calc_speed/calibrate.py`) |
+| 2026-10-20 | 4031b0b | The busiest code runs from the on-chip SRAM (CX II) |
+| 2026-10-20 | | Everything since PR #10 pushed (branch asm-cpu) as a new PR |
 
 `git log` has the details; every commit message says what changed and why.
 
@@ -581,19 +584,34 @@ Open items and ideas
 
 Waiting on the owner:
 
-* A speed test of Yoshi's Island on the calculator from the owner's save
-  (state 10, copied to `build/calc-saves/yi/`) with the 2026-10-16 build.
-  `tests/calc_speed.sh` estimates 92.1 fps with no speed limit and the DMA
-  output (`SHOW_MS=0.5`). The 2026-10-15 build (estimate 65.3) wasn't
-  measured; the one before measured 53.0 (estimate 53.3). The translated
-  Super FX code's cycles per instruction on the calculator are unknown (the
-  interpreter's were 3.2 against the script's 2.58).
+* A speed test of Yoshi's Island on the calculator with 4031b0b (uploaded
+  2026-10-20), from the owner's busiest save (state 14, in
+  `build/calc-saves/yi/`; the FPS counter showed 57-58 there with the
+  2026-10-16 build). The results file now says where the code ran ("code
+  in the SRAM: N KB" or why not). The model with caches
+  (`tools/calc_speed/calibrate.py`) estimates 62.6 fps with no speed limit
+  without the SRAM code and 70.2 with it; the fill time from the SRAM (30
+  cycles) is a guess from FINDINGS.md's measured 4x. If the calculator
+  froze, the next start keeps the code in normal memory
+  (`pocketsnes_sramcode_off.tns`).
 
 * Run v4.0's `_PocketSNES.tns` on the calculator (uploaded 2026-10-11):
   settings, keys and saves still there; `_PocketSNES` first in `snes`; how
   far the overclock test gets in SMW.
 
 Ideas, most promising first (see README → Future steps):
+
+* The Super FX translator's code buffer in the SRAM too: a quarter of
+  Yoshi's Island's instruction cache misses (93 KB of translated code runs
+  every frame). The model: 13.0 ms a frame in save 14 with 128 KB of the
+  buffer and the best 96 KB of code there, against 13.8 with code only.
+  The assembler 65c816 core (121 KB) has only 24 KB of hot code, spread
+  out: its hot handlers in one section would leave room.
+* Data cache misses (about 2.6 ms a frame in save 14: background drawing,
+  sprites): hot buffers in the SRAM.
+* Saving and loading states faster (the owner asked, 2026-10-20): not
+  looked into yet beyond reading `states.cpp` (compress2 at Z_BEST_SPEED,
+  a temporary file then rename).
 
 * Sprites: `DrawOBJS` calls `DrawTile16` for every 8 pixels of a sprite on
   a line, about 150 instructions each with the setup per sprite and line

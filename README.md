@@ -197,11 +197,12 @@ Speed and overclocking
 On a CX II at its normal 396 MHz, Super Mario World runs at a full 60 frames
 per second with every frame drawn. Games with extra chips (Super FX like
 Yoshi's Island and Star Fox, or SA-1) are heavier: Yoshi's Island measured
-53 fps in a busy spot of its first world (2026-10-14), and the changes since
-are estimated to bring that spot to about 92 with no speed limit and the DMA
-screen output, and lighter spots to 110–127 (see *How it got faster*; not
-yet measured on the calculator). The no-tearing output and full screen each
-cost about 1.5 ms a frame more, about 80 fps in that spot.
+53 fps in a busy spot of its first world (2026-10-14); with the changes up
+to 2026-10-16 the FPS counter showed 57–58 in its busiest spot, and running
+the busiest code from the CX II's on-chip SRAM is estimated to bring that
+spot to about 70 fps with no speed limit (not yet measured on the
+calculator). The no-tearing output and full screen each cost about 1.5 ms a
+frame more.
 
 To help a slow game:
 
