@@ -49,9 +49,6 @@ int  emu_menu_save_slot(void);
 int  emu_menu_save_target(void);
 void emu_step_menu_save_slot(int delta);
 int  emu_save_state(int slot);    /* 1 on success */
-/* The picture a save made now would keep (STATE_PICTURE_W x
- * STATE_PICTURE_H), or NULL when there isn't one of the game as it is. */
-const uint16_t *emu_save_picture(void);
 int  emu_load_state(int slot);    /* 1 ok, 0 empty slot, -1 unreadable */
 void emu_reset_game(void);
 /* Shows a short message over the game. */

@@ -417,8 +417,12 @@ check "$(pic has "$s.sv002.tns")$(pic has "$OUT/storedrt/zPocketSNES_saves/Monst
 # Save state shows its card in the same place as Load state's.
 setup picsave MonsterFarmJump.sfc config_version=3 show_fps=0 save_on_exit=0 load_on_start=0
 play picsave tests/scripts/state_picture_save.txt MonsterFarmJump.sfc
-check "$(pic card "$OUT/picsave/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns" "$OUT/picsave/shots/savecard.png" 194 79)" same \
-    "Save state shows the picture a new slot will keep, and the save keeps it"
+# cardbox SHOT: the card's area as a PNG next to it (SHOT.card.png)
+cardbox() { python3 -c "
+from PIL import Image
+Image.open('$1').crop((191, 76, 309, 180)).save('$1.card.png')"; echo "$1.card.png"; }
+check "$(pic card "$OUT/picsave/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns" "$OUT/picsave/shots/savecard.png" 194 79)" different \
+    "Save state on a new slot shows no picture (it's empty)"
 setup picover MonsterFarmJump.sfc config_version=3 show_fps=0 save_on_exit=0 load_on_start=0 auto_increment=0
 cp "$p" "$OUT/picover/zPocketSNES_saves/"
 play picover tests/scripts/state_picture_save.txt MonsterFarmJump.sfc
@@ -430,7 +434,8 @@ play_logged savepick tests/scripts/save_slot_pick.txt MonsterFarmJump.sfc
 s2=$OUT/savepick/zPocketSNES_saves/MonsterFarmJump.sfc
 check "$(exists "$s2.sv002.tns")$(exists "$s2.sv003.tns")$(grep -c '^message: Loaded slot 001' "$OUT/savepick/log.txt")" yesno1 \
     "Save state's left/right pick any slot (auto-increment on too) without moving Load state's slot"
-check "$(pic card "$s2.sv002.tns" "$OUT/savepick/shots/pick.png" 194 79)" same "... and its card shows the picture the save there keeps"
+check "$(pic card "$s2.sv002.tns" "$OUT/savepick/shots/pick.png" 194 79)$(same "$(cardbox "$OUT/savepick/shots/pick.png")" "$(cardbox "$OUT/picsave/shots/savecard.png")")" differentsame \
+    "... an empty slot it picks shows the same empty card as a new slot"
 
 echo "== S-DD1 (Star Ocean, Street Fighter Alpha 2)"
 # backdrop NAME: green, red or other, from the centre of shots/end.png

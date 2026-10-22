@@ -607,12 +607,12 @@ static void draw_controls_page(void);
 
 /* Save state pictures (Saving > State pictures): the selected slot's
  * picture on a card at the right, under the Load state row (at row_bottom),
- * over the values of the rows below it. At Save state, a slot without a
- * state shows 'now' instead, the picture the save would keep. */
+ * over the values of the rows below it. Save state shows the same card for
+ * the slot it would save to. */
 #define PICTURE_CARD_W (STATE_PICTURE_W + 6)
 #define PICTURE_CARD_H (STATE_PICTURE_H + 6)
 
-static void draw_state_picture(int slot, int row_bottom, const uint16_t *now)
+static void draw_state_picture(int slot, int row_bottom)
 {
     int x = 309 - PICTURE_CARD_W, y = row_bottom + 2;
     if (y + PICTURE_CARD_H > UI_HELP_Y - 2)
@@ -626,8 +626,6 @@ static void draw_state_picture(int slot, int row_bottom, const uint16_t *now)
     draw_round_frame(x, y, PICTURE_CARD_W, PICTURE_CARD_H, 4, COLOR_PANEL_EDGE);
     if (picture_found)
         draw_pixels(x + 3, y + 3, STATE_PICTURE_W, STATE_PICTURE_H, picture_pixels);
-    else if (now && !states_exists(slot))
-        draw_pixels(x + 3, y + 3, STATE_PICTURE_W, STATE_PICTURE_H, now);
     else
         draw_string_center(FONT_SMALL, states_exists(slot) ? "No picture" : "Empty slot", x + PICTURE_CARD_W / 2,
                            y + (PICTURE_CARD_H - TEXT_H) / 2, COLOR_TEXT_FAINT);
@@ -709,13 +707,12 @@ static void draw_menu(const struct Menu *menu, int selected, int *scroll)
         }
         ui_scrollbar(*scroll, view, height, UI_LIST_Y + top, view);
         if (in_game && current->type == OPTION_LOAD_SLOT && cfg.state_pictures)
-            draw_state_picture(emu_slot(), UI_LIST_Y + top + pos[selected] - *scroll + UI_ROW_H, NULL);
+            draw_state_picture(emu_slot(), UI_LIST_Y + top + pos[selected] - *scroll + UI_ROW_H);
         /* Save state: the same card in the same place (the Load state row
          * follows it), for the slot the save goes to. */
         if (in_game && current->type == OPTION_SAVE_SLOT && cfg.state_pictures && emu_menu_save_target() &&
             selected + 1 < menu->count && menu->options[selected + 1].type == OPTION_LOAD_SLOT)
-            draw_state_picture(emu_menu_save_target(), UI_LIST_Y + top + pos[selected + 1] - *scroll + UI_ROW_H,
-                               emu_save_picture());
+            draw_state_picture(emu_menu_save_target(), UI_LIST_Y + top + pos[selected + 1] - *scroll + UI_ROW_H);
     }
 
     /* The help panel, or what just happened. */

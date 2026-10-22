@@ -1094,11 +1094,6 @@ int emu_save_state(int slot)
     return saved;
 }
 
-const uint16_t *emu_save_picture(void)
-{
-    return picture_ready ? game_picture : NULL;
-}
-
 int emu_load_state(int slot)
 {
     int result = states_load(slot);

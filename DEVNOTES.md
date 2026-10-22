@@ -304,10 +304,9 @@ Files and launching:
   the key, the frame its picture shows (`roundtrip*.txt` wait 151). The
   menu draws the selected slot's picture on a card under *Load state*
   (`draw_state_picture`), over the values of the rows below. *Save state*
-  puts the same card in the same place for the slot the save goes to; a
-  slot without a state (a new one with auto-increment) shows
-  `emu_save_picture()`, the picture taken when the menu opened, which is
-  what the save will keep.
+  puts the same card in the same place for the slot the save goes to
+  ("Empty slot" for a new or empty one: the user didn't want the game's
+  current picture shown for a slot that has nothing in it).
 * **Save slot apart from Load slot:** the menu's *Save state* has its own
   slot (`menu_save_slot` in emu.cpp, 0 = "new slot"), set at game start
   (new slot with auto-increment, else the newest state) and stepped by
@@ -586,7 +585,8 @@ History
 | 2026-10-20 | 4031b0b | The busiest code runs from the on-chip SRAM (CX II) |
 | 2026-10-20 | | Everything since PR #10 pushed (branch asm-cpu) as a new PR |
 | 2026-10-21 | 6b3d39d | Save state shows a picture too (the state it replaces, or the game now) |
-| 2026-10-21 | | The menu's Save state picks its own slot (any slot, auto-increment on too) |
+| 2026-10-21 | 18c1bde | The menu's Save state picks its own slot (any slot, auto-increment on too) |
+| 2026-10-21 | | Save state's card says "Empty slot" for an empty or new slot |
 
 `git log` has the details; every commit message says what changed and why.
 

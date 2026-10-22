@@ -155,8 +155,7 @@ any slot (with auto-increment on, its first choice is a new slot) without
 moving *Load state*'s. Each state keeps a small picture of the moment it was
 saved, and *Load state* shows the picture of the slot you're on, so you can
 see which one you're loading. *Save state* shows one too: the state a save
-would replace, or for a new slot the game as it is now, the picture the save
-will keep (*Saving → State pictures*; states saved by
+would replace, or "Empty slot" for an empty or new slot (*Saving → State pictures*; states saved by
 older versions have none). Everything a game saves goes in the `zPocketSNES_saves`
 folder in My Documents (the z keeps it below your game folders; the game
 list doesn't show it).
