@@ -151,8 +151,11 @@ them much:
 
 You can pick a slot in the menu (*Save state* / *Load state*, left/right
 choose the slot). The two pick their slots separately: *Save state* can go to
-any slot (with auto-increment on, its first choice is a new slot) without
-moving *Load state*'s. Each state keeps a small picture of the moment it was
+any slot (with auto-increment on it starts on the next new slot, and
+left/right step from that number) without moving *Load state*'s. To start a
+game from any state, not just the newest: the game list's menu (menu key on
+the game) → *Play from a state*, left/right pick the slot (with its
+picture). Each state keeps a small picture of the moment it was
 saved, and *Load state* shows the picture of the slot you're on, so you can
 see which one you're loading. *Save state* shows one too: the state a save
 would replace, or "Empty slot" for an empty or new slot (*Saving → State pictures*; states saved by

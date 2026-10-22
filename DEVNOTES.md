@@ -310,7 +310,12 @@ Files and launching:
 * **Save slot apart from Load slot:** the menu's *Save state* has its own
   slot (`menu_save_slot` in emu.cpp, 0 = "new slot"), set at game start
   (new slot with auto-increment, else the newest state) and stepped by
-  `emu_step_menu_save_slot`; a menu save doesn't move *Load state*'s slot.
+  `emu_step_menu_save_slot`, which steps from the number shown ("new slot
+  005" -> 006, user's request); a menu save doesn't move *Load state*'s slot.
+* **Play from a state** (game list's menu on a game, `OPTION_START_SLOT`,
+  `list_slot`): `menu_run_list` opens the game's states and starts on the
+  newest; enter calls `emu_start_from_slot`, which the next `emu_run` loads
+  instead of the newest, whatever *Load newest on start* says.
   The hotkeys keep one shared slot (`current_slot`): a hotkey save moves it,
   so the load hotkey loads what was just saved.
 * **File associations:** PocketSNES registers sfc, smc, fig, swc and zip
@@ -586,7 +591,8 @@ History
 | 2026-10-20 | | Everything since PR #10 pushed (branch asm-cpu) as a new PR |
 | 2026-10-21 | 6b3d39d | Save state shows a picture too (the state it replaces, or the game now) |
 | 2026-10-21 | 18c1bde | The menu's Save state picks its own slot (any slot, auto-increment on too) |
-| 2026-10-21 | | Save state's card says "Empty slot" for an empty or new slot |
+| 2026-10-21 | 1996c06 | Save state's card says "Empty slot" for an empty or new slot |
+| 2026-10-21 | | Save state steps from the new slot's number; game list's Play from a state |
 
 `git log` has the details; every commit message says what changed and why.
 

@@ -432,10 +432,13 @@ setup savepick MonsterFarmJump.sfc config_version=3 show_fps=0 save_on_exit=0 lo
 cp "$p" "$OUT/savepick/zPocketSNES_saves/"
 play_logged savepick tests/scripts/save_slot_pick.txt MonsterFarmJump.sfc
 s2=$OUT/savepick/zPocketSNES_saves/MonsterFarmJump.sfc
-check "$(exists "$s2.sv002.tns")$(exists "$s2.sv003.tns")$(grep -c '^message: Loaded slot 001' "$OUT/savepick/log.txt")" yesno1 \
-    "Save state's left/right pick any slot (auto-increment on too) without moving Load state's slot"
-check "$(pic card "$s2.sv002.tns" "$OUT/savepick/shots/pick.png" 194 79)$(same "$(cardbox "$OUT/savepick/shots/pick.png")" "$(cardbox "$OUT/picsave/shots/savecard.png")")" differentsame \
+check "$(exists "$s2.sv002.tns")$(exists "$s2.sv003.tns")$(grep -c '^message: Loaded slot 001' "$OUT/savepick/log.txt")" noyes1 \
+    "Save state's right goes from new slot 002 to 003, the save goes there, and Load state's slot didn't move"
+check "$(pic card "$s2.sv003.tns" "$OUT/savepick/shots/pick.png" 194 79)$(same "$(cardbox "$OUT/savepick/shots/pick.png")" "$(cardbox "$OUT/picsave/shots/savecard.png")")" differentsame \
     "... an empty slot it picks shows the same empty card as a new slot"
+play_logged savepick tests/scripts/list_play_state.txt -
+check "$(grep -c '^message: Started from slot 001' "$OUT/savepick/log.txt")$(pic card "$s2.sv001.tns" "$OUT/savepick/shots/card.png" 194 64)" 1same \
+    "the game list's Play from a state starts the game from the slot picked (001, not the newest), with its picture"
 
 echo "== S-DD1 (Star Ocean, Street Fighter Alpha 2)"
 # backdrop NAME: green, red or other, from the centre of shots/end.png

@@ -93,6 +93,7 @@ static char rom_path[512];
 static char game_title[ROM_NAME_LEN + 1];
 static int current_slot = 1;
 static int menu_save_slot;   /* the menu's Save state slot, 0 for a new slot */
+static int start_slot;       /* emu_start_from_slot: the next start's state, 0 for none */
 
 static uint32 joypad;
 static int pending;
@@ -1050,17 +1051,11 @@ int emu_menu_save_target(void)
 
 void emu_step_menu_save_slot(int delta)
 {
-    /* With auto-increment on, "a new slot" comes before the others. */
-    if (!cfg.auto_increment)
-        menu_save_slot = emu_step_slot(emu_menu_save_target(), delta);
-    else
-    {
-        int with_auto = cfg.auto_slot || states_exists(AUTO_SLOT);
-        int count = 1 + with_auto + MAX_STATE_SLOTS;
-        int index = !menu_save_slot ? 0 : menu_save_slot == AUTO_SLOT ? 1 : menu_save_slot + with_auto;
-        index = ((index + delta) % count + count) % count;
-        menu_save_slot = index == 0 ? 0 : with_auto && index == 1 ? AUTO_SLOT : index - with_auto;
-    }
+    /* Steps from the slot shown, "new slot 005" included (right: 006). Back
+     * on the next new slot it is "new slot" again, which follows saves. */
+    int from = emu_menu_save_target();
+    int slot = emu_step_slot(from ? from : states_newest(), delta);
+    menu_save_slot = cfg.auto_increment && slot == states_next_new_slot() ? 0 : slot;
 }
 
 int emu_step_slot(int slot, int delta)
@@ -1624,6 +1619,11 @@ static void save_before_leaving(void)
                     slot ? "The calculator may be out of space." : "All 999 slots are used.");
 }
 
+void emu_start_from_slot(int slot)
+{
+    start_slot = slot;
+}
+
 enum EmuExit emu_run(int may_load_state)
 {
     fast_forward = false;
@@ -1633,7 +1633,16 @@ enum EmuExit emu_run(int may_load_state)
     perf_line[0] = 0;
     clear_screens_later();
 
-    if (may_load_state && cfg.load_on_start && states_newest())
+    if (start_slot)
+    {
+        int slot = start_slot;
+        start_slot = 0;
+        if (emu_load_state(slot) == 1)
+            show_slot_message("Started from %s", slot);
+        else
+            show_slot_message("Couldn't load %s", slot);
+    }
+    else if (may_load_state && cfg.load_on_start && states_newest())
     {
         int slot = states_newest();
         if (emu_load_state(slot) == 1)

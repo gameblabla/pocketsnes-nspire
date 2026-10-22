@@ -26,7 +26,8 @@ enum OptionType
     OPTION_NUMBER,     /* value is 0..max */
     OPTION_BINDING,    /* the two key slots of action 'action_id' */
     OPTION_LOAD_SLOT,  /* left/right pick the slot, select loads it */
-    OPTION_SAVE_SLOT   /* left/right pick the slot, select saves */
+    OPTION_SAVE_SLOT,  /* left/right pick the slot, select saves */
+    OPTION_START_SLOT  /* game list: left/right pick a state, select starts from it */
 };
 
 /* What an action asks the menu to do next. */
@@ -209,6 +210,20 @@ static enum Step exit_app(void) { return STEP_EXIT; }
 static enum Step back_to_list(void) { return STEP_BACK_TO_LIST; }
 static enum Step start_game(void) { return STEP_START; }
 static enum Step start_without_state(void) { return STEP_START_WITHOUT_STATE; }
+
+/* The game list's Play from a state: its slot, for the game list_rom. */
+static int list_slot = 1;
+
+static enum Step start_from_state(void)
+{
+    if (!states_exists(list_slot))
+    {
+        set_slot_status("%s is empty.", list_slot, true);
+        return STEP_STAY;
+    }
+    emu_start_from_slot(list_slot);
+    return STEP_START;
+}
 static enum Step move_in_list(void) { return STEP_MOVE; }
 static enum Step sort_list(void) { return STEP_SORT; }
 
@@ -442,7 +457,7 @@ static struct Option main_options[] =
 {
     ACTION("Resume game", "Close the menu and keep playing.", 0, return_to_game, ICON_PLAY),
     { OPTION_SAVE_SLOT, "Save state",
-      "Saves the game here. Left/right pick any slot; with auto-increment on, the first is a new slot.",
+      "Saves the game here. Left/right pick any slot; with auto-increment on it starts on a new slot.",
       1, NULL, NULL, 0, save_state, NULL, NULL, 0, ICON_SAVE },
     { OPTION_LOAD_SLOT, "Load state",
       "Loads the selected slot. Left/right pick the slot (hold them to go faster).",
@@ -463,17 +478,20 @@ static struct Option list_game_options[] =
 {
     ACTION("Play", "Starts the game, from its newest state if Load newest on start is on.",
            0, start_game, ICON_PLAY),
+    { OPTION_START_SLOT, "Play from a state",
+      "Starts the game from the selected state. Left/right pick the slot (hold them to go faster).",
+      1, NULL, NULL, 0, start_from_state, NULL, NULL, 0, ICON_LOAD },
     ACTION("Play without a state", "Starts from the game's own save only, e.g. when a state is broken.",
-           1, start_without_state, ICON_CART),
+           2, start_without_state, ICON_CART),
     ACTION("Move in the list", "Up/down move the game, enter puts it there (tab in the list does this too).",
-           2, move_in_list, ICON_MOVE),
+           3, move_in_list, ICON_MOVE),
     ACTION("Sort the list A to Z", "Puts the games in this folder back in alphabetical order.",
-           3, sort_list, ICON_SORT),
-    SETTINGS_SUBMENUS(5, &list_graphics_menu),
-    SCOPE_OPTIONS(9),
+           4, sort_list, ICON_SORT),
+    SETTINGS_SUBMENUS(6, &list_graphics_menu),
+    SCOPE_OPTIONS(10),
     ACTION("Save manager", "This game's saves and their sizes: compress, uncompress or delete them.",
-           11, open_save_manager, ICON_DISK),
-    ACTION("Back to the game list", "Close this menu.", 12, back_to_list, ICON_BACK),
+           12, open_save_manager, ICON_DISK),
+    ACTION("Back to the game list", "Close this menu.", 13, back_to_list, ICON_BACK),
 };
 
 /* ... and on a folder: the settings for all games. */
@@ -522,6 +540,12 @@ static void option_value(const struct Option *option, char *text, size_t size)
     case OPTION_NUMBER:
         snprintf(text, size, "%d", (int) *option->value);
         break;
+    case OPTION_START_SLOT:
+        if (list_slot == AUTO_SLOT)
+            snprintf(text, size, "auto slot  %s", states_exists(AUTO_SLOT) ? "saved" : "empty");
+        else
+            snprintf(text, size, "slot %03d  %s", list_slot, states_exists(list_slot) ? "saved" : "empty");
+        break;
     case OPTION_LOAD_SLOT:
         if (emu_slot() == AUTO_SLOT)
             snprintf(text, size, "auto slot  %s", states_exists(AUTO_SLOT) ? "saved" : "empty");
@@ -556,7 +580,8 @@ static int option_flags(const struct Option *option, int selected)
     if (option->type == OPTION_CHOICE && option->choices == off_on)
         flags |= ROW_TOGGLE;
     else if (option->type == OPTION_CHOICE || option->type == OPTION_NUMBER ||
-             option->type == OPTION_LOAD_SLOT || option->type == OPTION_SAVE_SLOT)
+             option->type == OPTION_LOAD_SLOT || option->type == OPTION_SAVE_SLOT ||
+             option->type == OPTION_START_SLOT)
         flags |= ROW_ARROWS;
     if (option->type == OPTION_SUBMENU && option->submenu)
         flags |= ROW_SUBMENU;
@@ -706,6 +731,8 @@ static void draw_menu(const struct Menu *menu, int selected, int *scroll)
                    option->label, value, option_flags(option, i == selected));
         }
         ui_scrollbar(*scroll, view, height, UI_LIST_Y + top, view);
+        if (!in_game && current->type == OPTION_START_SLOT && cfg.state_pictures)
+            draw_state_picture(list_slot, UI_LIST_Y + top + pos[selected] - *scroll + UI_ROW_H);
         if (in_game && current->type == OPTION_LOAD_SLOT && cfg.state_pictures)
             draw_state_picture(emu_slot(), UI_LIST_Y + top + pos[selected] - *scroll + UI_ROW_H);
         /* Save state: the same card in the same place (the Load state row
@@ -1005,11 +1032,17 @@ static void change_value(const struct Option *option, int delta)
     }
     else if (option->type == OPTION_BINDING)
         key_column = delta > 0 ? 1 : 0;
-    else if (option->type == OPTION_LOAD_SLOT || option->type == OPTION_SAVE_SLOT)
+    else if (option->type == OPTION_LOAD_SLOT || option->type == OPTION_SAVE_SLOT ||
+             option->type == OPTION_START_SLOT)
     {
         int step = gui_repeat_count() > 20 ? 10 : 1;
         if (option->type == OPTION_SAVE_SLOT)
             emu_step_menu_save_slot(delta * step);
+        else if (option->type == OPTION_START_SLOT)
+        {
+            list_slot = emu_step_slot(list_slot, delta * step);
+            return;
+        }
         else
             emu_set_slot(emu_step_slot(emu_slot(), delta * step));
     }
@@ -1117,6 +1150,12 @@ enum ListMenuResult menu_run_list(const char *rom_path)
 {
     in_game = 0;
     list_rom = rom_path;
+    picture_slot = -1;
+    if (rom_path)
+    {
+        states_open_game(rom_path);
+        list_slot = states_newest() ? states_newest() : 1;
+    }
     enum Step step = run(rom_path ? &list_game_menu : &list_menu);
     switch (step)
     {

@@ -1,11 +1,13 @@
 # Starts in the ROM folder (remembered from the run before), puts the cursor
 # on the game and starts it from the game list's menu (menu key) with
-# "Start without loading a state".
+# "Play without a state" (its third entry).
 wait 5
 press down
 wait 3
 press menu
 wait 5
+press down
+wait 3
 shot list_menu.png
 press down
 wait 3
