@@ -41,6 +41,13 @@ int  emu_save_target(void);
 /* The slot 'delta' steps from 'slot', round 001-999 and the auto slot
  * (before 001) when Saving > Auto save slot is on or it has a state. */
 int  emu_step_slot(int slot, int delta);
+/* The menu's Save state has its own slot, apart from Load state's (and the
+ * hotkeys'): 0 for "a new slot" (auto-increment on) or a slot 'delta' steps
+ * round. emu_menu_save_target is where a save there goes now (0: every slot
+ * is used). */
+int  emu_menu_save_slot(void);
+int  emu_menu_save_target(void);
+void emu_step_menu_save_slot(int delta);
 int  emu_save_state(int slot);    /* 1 on success */
 /* The picture a save made now would keep (STATE_PICTURE_W x
  * STATE_PICTURE_H), or NULL when there isn't one of the game as it is. */

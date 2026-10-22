@@ -92,6 +92,7 @@ static unsigned screens_to_clear = ~0u;   /* one bit per screen buffer */
 static char rom_path[512];
 static char game_title[ROM_NAME_LEN + 1];
 static int current_slot = 1;
+static int menu_save_slot;   /* the menu's Save state slot, 0 for a new slot */
 
 static uint32 joypad;
 static int pending;
@@ -998,6 +999,7 @@ int emu_load_game(const char *path)
         game_title[i] = 0;
 
     current_slot = states_newest() ? states_newest() : 1;
+    menu_save_slot = cfg.auto_increment ? 0 : current_slot;
     return 1;
 }
 
@@ -1034,6 +1036,33 @@ int emu_save_target(void)
     return cfg.auto_increment ? states_next_new_slot() : current_slot;
 }
 
+int emu_menu_save_slot(void)
+{
+    return menu_save_slot;
+}
+
+int emu_menu_save_target(void)
+{
+    if (menu_save_slot)
+        return menu_save_slot;
+    return cfg.auto_increment ? states_next_new_slot() : current_slot;
+}
+
+void emu_step_menu_save_slot(int delta)
+{
+    /* With auto-increment on, "a new slot" comes before the others. */
+    if (!cfg.auto_increment)
+        menu_save_slot = emu_step_slot(emu_menu_save_target(), delta);
+    else
+    {
+        int with_auto = cfg.auto_slot || states_exists(AUTO_SLOT);
+        int count = 1 + with_auto + MAX_STATE_SLOTS;
+        int index = !menu_save_slot ? 0 : menu_save_slot == AUTO_SLOT ? 1 : menu_save_slot + with_auto;
+        index = ((index + delta) % count + count) % count;
+        menu_save_slot = index == 0 ? 0 : with_auto && index == 1 ? AUTO_SLOT : index - with_auto;
+    }
+}
+
 int emu_step_slot(int slot, int delta)
 {
     /* Positions: the auto slot (when it's in use) at 0, then 1-999. */
@@ -1062,10 +1091,7 @@ int emu_save_state(int slot)
     states_set_picture(cfg.state_pictures && picture_ready ? game_picture : NULL);
     int saved = states_save(slot);
     states_set_picture(NULL);
-    if (!saved)
-        return 0;
-    current_slot = slot;
-    return 1;
+    return saved;
 }
 
 const uint16_t *emu_save_picture(void)
@@ -1567,7 +1593,10 @@ static void save_state_hotkey(void)
     if (!slot)
         emu_show_message("All 999 slots are used");
     else if (emu_save_state(slot))
+    {
+        current_slot = slot;
         show_slot_message("Saved %s", slot);
+    }
     else
         show_slot_message("Couldn't save %s", slot);
     game_speed();

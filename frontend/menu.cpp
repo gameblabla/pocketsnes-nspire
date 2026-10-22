@@ -123,7 +123,7 @@ static uint16_t picture_pixels[STATE_PICTURE_W * STATE_PICTURE_H];
 static enum Step save_state(void)
 {
     picture_slot = -1;   /* it may go over the slot whose picture is shown */
-    int slot = emu_save_target();
+    int slot = emu_menu_save_target();
     if (!slot)
         set_status("All 999 slots are used.");
     else if (emu_save_state(slot))
@@ -442,7 +442,7 @@ static struct Option main_options[] =
 {
     ACTION("Resume game", "Close the menu and keep playing.", 0, return_to_game, ICON_PLAY),
     { OPTION_SAVE_SLOT, "Save state",
-      "Saves the game right here. With auto-increment on, every save gets a new slot.",
+      "Saves the game here. Left/right pick any slot; with auto-increment on, the first is a new slot.",
       1, NULL, NULL, 0, save_state, NULL, NULL, 0, ICON_SAVE },
     { OPTION_LOAD_SLOT, "Load state",
       "Loads the selected slot. Left/right pick the slot (hold them to go faster).",
@@ -533,15 +533,18 @@ static void option_value(const struct Option *option, char *text, size_t size)
             snprintf(text, size, "%s", option->shown);
         break;
     case OPTION_SAVE_SLOT:
-        if (!cfg.auto_increment && emu_slot() == AUTO_SLOT)
-            snprintf(text, size, "auto slot  %s", states_exists(AUTO_SLOT) ? "saved" : "empty");
-        else if (!cfg.auto_increment)
-            snprintf(text, size, "slot %03d  %s", emu_slot(), states_exists(emu_slot()) ? "saved" : "empty");
-        else if (emu_save_target())
-            snprintf(text, size, "new slot %03d", emu_save_target());
-        else
+    {
+        int slot = emu_menu_save_target();
+        if (!slot)
             snprintf(text, size, "all slots used");
+        else if (!emu_menu_save_slot() && cfg.auto_increment)
+            snprintf(text, size, "new slot %03d", slot);
+        else if (slot == AUTO_SLOT)
+            snprintf(text, size, "auto slot  %s", states_exists(AUTO_SLOT) ? "saved" : "empty");
+        else
+            snprintf(text, size, "slot %03d  %s", slot, states_exists(slot) ? "saved" : "empty");
         break;
+    }
     default:
         break;
     }
@@ -553,7 +556,7 @@ static int option_flags(const struct Option *option, int selected)
     if (option->type == OPTION_CHOICE && option->choices == off_on)
         flags |= ROW_TOGGLE;
     else if (option->type == OPTION_CHOICE || option->type == OPTION_NUMBER ||
-             option->type == OPTION_LOAD_SLOT || (option->type == OPTION_SAVE_SLOT && !cfg.auto_increment))
+             option->type == OPTION_LOAD_SLOT || option->type == OPTION_SAVE_SLOT)
         flags |= ROW_ARROWS;
     if (option->type == OPTION_SUBMENU && option->submenu)
         flags |= ROW_SUBMENU;
@@ -709,9 +712,9 @@ static void draw_menu(const struct Menu *menu, int selected, int *scroll)
             draw_state_picture(emu_slot(), UI_LIST_Y + top + pos[selected] - *scroll + UI_ROW_H, NULL);
         /* Save state: the same card in the same place (the Load state row
          * follows it), for the slot the save goes to. */
-        if (in_game && current->type == OPTION_SAVE_SLOT && cfg.state_pictures && emu_save_target() &&
+        if (in_game && current->type == OPTION_SAVE_SLOT && cfg.state_pictures && emu_menu_save_target() &&
             selected + 1 < menu->count && menu->options[selected + 1].type == OPTION_LOAD_SLOT)
-            draw_state_picture(emu_save_target(), UI_LIST_Y + top + pos[selected + 1] - *scroll + UI_ROW_H,
+            draw_state_picture(emu_menu_save_target(), UI_LIST_Y + top + pos[selected + 1] - *scroll + UI_ROW_H,
                                emu_save_picture());
     }
 
@@ -1008,7 +1011,10 @@ static void change_value(const struct Option *option, int delta)
     else if (option->type == OPTION_LOAD_SLOT || option->type == OPTION_SAVE_SLOT)
     {
         int step = gui_repeat_count() > 20 ? 10 : 1;
-        emu_set_slot(emu_step_slot(emu_slot(), delta * step));
+        if (option->type == OPTION_SAVE_SLOT)
+            emu_step_menu_save_slot(delta * step);
+        else
+            emu_set_slot(emu_step_slot(emu_slot(), delta * step));
     }
 }
 

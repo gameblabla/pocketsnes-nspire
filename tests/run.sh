@@ -424,6 +424,13 @@ cp "$p" "$OUT/picover/zPocketSNES_saves/"
 play picover tests/scripts/state_picture_save.txt MonsterFarmJump.sfc
 check "$(pic card "$p" "$OUT/picover/shots/savecard.png" 194 79)" same \
     "with auto-increment off Save state shows the state it replaces"
+setup savepick MonsterFarmJump.sfc config_version=3 show_fps=0 save_on_exit=0 load_on_start=0
+cp "$p" "$OUT/savepick/zPocketSNES_saves/"
+play_logged savepick tests/scripts/save_slot_pick.txt MonsterFarmJump.sfc
+s2=$OUT/savepick/zPocketSNES_saves/MonsterFarmJump.sfc
+check "$(exists "$s2.sv002.tns")$(exists "$s2.sv003.tns")$(grep -c '^message: Loaded slot 001' "$OUT/savepick/log.txt")" yesno1 \
+    "Save state's left/right pick any slot (auto-increment on too) without moving Load state's slot"
+check "$(pic card "$s2.sv002.tns" "$OUT/savepick/shots/pick.png" 194 79)" same "... and its card shows the picture the save there keeps"
 
 echo "== S-DD1 (Star Ocean, Street Fighter Alpha 2)"
 # backdrop NAME: green, red or other, from the centre of shots/end.png

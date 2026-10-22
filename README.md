@@ -150,7 +150,9 @@ them much:
   never overwritten. A state takes about 35–60 KB compressed.
 
 You can pick a slot in the menu (*Save state* / *Load state*, left/right
-choose the slot). Each state keeps a small picture of the moment it was
+choose the slot). The two pick their slots separately: *Save state* can go to
+any slot (with auto-increment on, its first choice is a new slot) without
+moving *Load state*'s. Each state keeps a small picture of the moment it was
 saved, and *Load state* shows the picture of the slot you're on, so you can
 see which one you're loading. *Save state* shows one too: the state a save
 would replace, or for a new slot the game as it is now, the picture the save
