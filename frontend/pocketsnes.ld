@@ -1,0 +1,47 @@
+/* Ndless's ldscript (ndless-sdk/system/ldscript) with the code that misses
+ * the instruction cache most in one stretch at the start (hot_sections.ld,
+ * made by tools/calc_speed/hot_sections.py), which the program runs from the
+ * on-chip SRAM (platform_nspire.cpp, "Code in the SRAM"). Used through
+ * tools/ndless-ld/ld.gold. */
+ENTRY(_start)
+
+SECTIONS {
+	.text 0x0 : {
+		_start = .;
+		*(.text)
+		INCLUDE frontend/hot_sections.ld
+		KEEP(*(.text.crtn))
+		KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*)))
+		KEEP(*(.init_array))
+		KEEP(*(.fini_array))
+		KEEP(*(SORT_BY_INIT_PRIORITY(REVERSE(.fini_array.*))))
+		*(.text.*)
+	}
+
+	.got : {
+		*(.got.plt*)
+		*(.got)
+		LONG(0xFFFFFFFF)
+	}
+	
+	.data : {
+		*(.rodata*)
+		*(.data*)
+                KEEP(*(.genzehn))
+	}
+
+	.ARM.extab   : { KEEP(*(.ARM.extab* .gnu.linkonce.armextab.*)) }
+	PROVIDE_HIDDEN (__exidx_start = .);
+	.ARM.exidx   : { KEEP(*(.ARM.exidx* .gnu.linkonce.armexidx.*)) }
+	PROVIDE_HIDDEN (__exidx_end = .);
+	
+	.eh_frame : {
+		KEEP(*(.eh_frame))
+	}
+	
+	.bss : {
+		PROVIDE(__bss_start = .);
+		*(.bss*)
+		PROVIDE(_end = .);
+	}
+}

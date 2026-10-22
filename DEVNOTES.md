@@ -1,6 +1,5 @@
 PocketSNES for the TI-Nspire: developer notes
-============================================
-
+=====================================
 The working notes for this port: where everything is, how to build, test
 and put a build on the calculator, the decisions made along the way and
 why, what has and hasn't been seen working on real hardware, and what's
@@ -85,8 +84,8 @@ README.md → Building has the full list.
 
 ### Test (before every calculator build)
 
-    tests/run.sh          # 83 checks: scripted runs of the PC build, screenshots in tests/out/
-    make unit-tests       # 75 checks: tile drawing, frame turning, settings, program-file settings
+    tests/run.sh          # 103 checks: scripted runs of the PC build, screenshots in tests/out/
+    make unit-tests       # 102 checks: tile drawing, frame turning, settings, program-file settings, ndless.cfg.tns, file list
     tests/asm/run.sh      # ARM core vs C core under qemu-arm: every opcode, 12 games x 3600 frames, replays
     tests/render_compare.sh   # pixel compare against ./pocketsnes-host-ref (old renderer)
 
@@ -96,6 +95,13 @@ by hand. An untested calculator build that misbehaves costs a lot more
 than the tests do.
 
 ### Put a build on the calculator
+
+`tools/deploy.sh` does all of the below in one step and prints a few
+lines: PC tests (`--no-test` skips them), the build (named after the
+commit), a backup of the calculator's copy in `tests/calc/versions/`, its
+settings area carried over, the upload and an md5 read-back.
+`tools/deploy.sh --check` only reads the copy back again. Details go to
+`build/deploy.log`.
 
 `~/nspire/build/tools/nspire-link` talks to the calculator over USB
 (libnspire, no root needed):
@@ -212,6 +218,17 @@ Screen and speed:
   don't overclock: the right speed differs per calculator.
 * **SRAM rendering is off** (`SRAM_RENDERING 0`): both tries froze the
   calculator. The MMU page table at 0xA4004000 is the likely reason.
+* **Full screen is a setting, the original size the default** (*Screen
+  size*, 2026-10-15). Stretching 4 pixels to 5 and 224 lines to 240 can't
+  keep every pixel the same size, so *smooth stretching* (on by default)
+  makes the doubled column and line averages of their neighbours instead
+  of copies. Output line y shows source line (2y+1)·lines/480, which
+  spreads the repeated lines evenly. *Full, crop edges* drops 8 lines at
+  the top and bottom first (Yoshi's Island blanks 16 of its own). The
+  stretch and the turn for the portrait LCD are one pass into the
+  portrait buffer, so a stretched frame is always shown that way; the DMA
+  output, which copies a landscape frame, only applies at the original
+  size.
 
 Keys and settings:
 
@@ -263,18 +280,177 @@ Files and launching:
   old saves in `/gba`, all gone. `platform_shutdown` calls Ndless's
   `refresh_osscr()` last (gpSP too, in `nspire_restore`). Its syscalls are
   in Ndless's table for OS 6.4.0.74; whether it redraws the list there is
-  waiting on the first quit with 7834655.
+  waiting on the first quit with 7834655. The OS reads every file again for
+  it, which is slow on a calculator with many files (issue #11: slow to
+  close), so it only runs when PocketSNES added, removed or renamed a file:
+  `paths_file_list_start` notes the names in the saves folder at start,
+  `paths_file_list_changed` compares at exit (a file written over doesn't
+  count), and moves of older files call `paths_file_list_touched`.
 * **GBA zips:** PocketSNES owns `.zip`, so a GBA zip opened from My
   Documents starts PocketSNES. Other consoles' ROMs inside a zip never
   count as the ROM; a GBA one says "It's a GBA game: start it in gpSP."
   (Before 7834655 the .gba ran as a SNES game and saved junk states.)
+* **Save state pictures** (*Saving → State pictures*, on by default; asked
+  for 2026-10-19, "like RetroArch or TI-Boy CE"). A state file can carry a
+  112x98 RGB565 picture after the snapshot (header flag `STATE_PICTURE`,
+  then `struct PictureHeader` "PSPC" and the pixels, zlib unless Compress
+  saves is off); older versions read only the header and snapshot, so they
+  still load these states (checked with the pre-picture PC build). The
+  save manager carries the picture along. The picture is the SNES picture's
+  middle 224 lines shrunk to 7/16 with a box filter (`take_picture`), taken
+  in `S9xDeinitUpdate` before the FPS counter and messages are drawn over
+  it: a save, the menu or quitting has one more frame drawn first (forced
+  even with frameskip), so a hotkey save now happens on the frame after
+  the key, the frame its picture shows (`roundtrip*.txt` wait 151). The
+  menu draws the selected slot's picture on a card under *Load state*
+  (`draw_state_picture`), over the values of the rows below. *Save state*
+  puts the same card in the same place for the slot the save goes to
+  ("Empty slot" for a new or empty one: the user didn't want the game's
+  current picture shown for a slot that has nothing in it).
+* **Save slot apart from Load slot:** the menu's *Save state* has its own
+  slot (`menu_save_slot` in emu.cpp, 0 = "new slot"), set at game start
+  (new slot with auto-increment, else the newest state) and stepped by
+  `emu_step_menu_save_slot`, which steps from the number shown ("new slot
+  005" -> 006, user's request); a menu save doesn't move *Load state*'s slot.
+* **Play from a state** (game list's menu on a game, `OPTION_START_SLOT`,
+  `list_slot`): `menu_run_list` opens the game's states and starts on the
+  newest; enter calls `emu_start_from_slot`, which the next `emu_run` loads
+  instead of the newest, whatever *Load newest on start* says.
+  The hotkeys keep one shared slot (`current_slot`): a hotkey save moves it,
+  so the load hotkey loads what was just saved.
 * **File associations:** PocketSNES registers sfc, smc, fig, swc and zip
   with Ndless, and points existing PocketSNES associations at its current
-  name, so opening a ROM in My Documents starts that game.
+  name, so opening a ROM in My Documents starts that game. It edits
+  `My Documents/ndless/ndless.cfg.tns` itself (`romtypes.cpp`), reading it
+  once and writing only when a line changes. Ndless's
+  `cfg_register_fileext` finds the file with `locate()`, which walks every
+  folder of My Documents (stat on each file, A to Z by strcmp, so
+  capitalised folders before `ndless`) on every call; five calls at every
+  start froze a calculator with many files for most of a minute (issue
+  #11, CX II CAS-T). Opening a ROM from the OS list still makes Ndless
+  walk the files to find the program (`ploaderhook.c`, every associated
+  program has that).
 * **Zipped ROMs:** rename `Game.zip` to `Game.zip.tns`. A zip that replaces
   the unzipped ROM takes over its saves.
 * **Number keys 1-9, 0 start the first ten games** in the game list; tab
   (or *Move in the list*) reorders; the order is kept per folder.
+
+Emulation core:
+
+* **H-blank starts at dot 274 and each line is taken at dot 48**, as in
+  Snes9x 1.52 and later (Snes9x 1.43 had H-blank, its HDMA and the $4212
+  flag at dot 256, and took a line's settings at its first cycle). This
+  fixed Yoshi's Island's top line (2026-10-13). Its IRQs at lines 6 and 8
+  wait for the next H-blank on $4212 and then switch HDMA on and the
+  screen to full brightness. Their first poll lands close to dot 256, so
+  with the old timing the IRQ's few cycles of jitter decided whether they
+  caught this line's H-blank or the next. The brightness write also
+  slipped to dot 7-10 of line 9 when the line's HDMA ran first, which the
+  console still shows on line 9 (pixels start at dot 22). In 400 frames
+  the first picture line was lit in 124 and dark in 276; the sky's colour
+  bands also jumped a line in about 4% of frames (HDMA switched on a line
+  late). Both changes are needed (each alone still flickers). A register
+  write before dot 48 now changes the line it's in: the end of H-blank
+  queues the line (`S9xQueueRenderLine`), and it's taken at the first PPU
+  register write or VRAM/CG-RAM flush from dot 48 on, or at the next
+  H-blank before HDMA. Against the old build, every test game and demo is
+  pixel-identical except Yoshi's Island, the Rings demo (the first line,
+  where the demo writes the second half of a scroll value at dot 8; the
+  old build drew that line with a half-written value) and Chrono Trigger
+  (one line of one loading frame that is blanked at dot 34, now blank).
+* **Each line keeps its own fixed colour** ($2132), taken with the line in
+  `RenderLine` (`LineFixedColour`), and the backdrop passes in `DrawLines`
+  use it. A $2132 write then only makes the lines above it be drawn first
+  when a layer has colour maths ($2131 & $1f) or pseudo hi-res ($2133 bit 3,
+  which now also redraws when it changes) is on, because the tile drawers
+  use one fixed colour for everything they draw. Yoshi's Island writes $2132
+  on nearly every line through HDMA (the sky) with colour maths on the
+  backdrop only, and was drawn in about 210 one-line pieces a frame; the
+  pixels are the same as before for every test game.
+* **S-DD1 is on** (`SDD1_DECOMP` in `pocketsnes/linux/port.h`; the port had
+  it commented out and `sdd1.cpp`/`sdd1emu.cpp` in `unused/`). $4804-$4807
+  map a megabyte of ROM into banks c0-ff (`S9xSetSDD1MemoryMap`), a DMA with
+  a fixed source address while $4801 is set gets `SDD1_decompress`'s output
+  instead of the ROM, and loading a state now puts the banks back
+  (`S9xSDD1PostLoadState`, which Snes9x 1.43 and snes9x2005 have but never
+  call). `sdd1emu.cpp` gives the same bytes as bsnes's decompressor for
+  3000 random streams (checked once, in a scratch harness, not kept: bsnes
+  is GPL) and as `tests/make_sdd1_rom.py`'s own decompressor.
+* **Two Super FX interpreters.** `fx_run` in C keeps the status register,
+  the source and destination register numbers, the pipe byte and the bank
+  pointers in locals and jumps from one instruction's code to the next
+  through a table of labels (GCC's computed goto). `fx_run_arm`
+  (`pocketsnes/arm/fx_run_arm.s`) keeps them, and R15, in ARM registers. Both
+  run the rare instructions through `fx_apfOpcodeTable` (the original C
+  functions) with the state written back first. The assembler one also
+  sends any instruction that would read or write R15 by register number
+  there, and while the source or the destination is R15 it uses a
+  "careful" table that sends everything there. While the destination is
+  R14 it uses a third table of the handlers' `_d14` versions, which reload
+  the ROM buffer after writing R14 (the handlers are macros assembled
+  twice). So its own code never needs those checks. It runs with *CPU core:
+  ARM* (the C one with *C*, as a fallback). `tests/fx_test.cpp` checks both
+  against the original loop, byte for byte.
+* **Fast paths go with *CPU core: ARM*, the C code with *C*.** The tile
+  drawers' inner loop and the line fills in ARM assembler
+  (`pocketsnes/arm/gfx_arm.s`, `ARM_ASM_GFX`) and the word-at-a-time VRAM
+  DMA loop (`dma.cpp`) check `Settings.AsmCPU`, like the Super FX
+  interpreter. That leaves *C* as a fallback with the original code, and
+  lets `tests/asm/run.sh` compare every frame of the test games with and
+  without them (the C setting's run is the reference).
+* **The Super FX translator** (`fxjit.cpp`, 2026-10-15) replaced the
+  assembler interpreter for *CPU core: ARM*; *C* runs the C interpreter,
+  and the translator falls back to it (`fx_step`) an instruction at a time.
+  The assembler interpreter is no longer called by the emulator
+  (`fx_run_arm_interpreter` is left in; `tests/fx_test.cpp` still checks
+  it). Blocks are keyed
+  by bank, address and prefix state, so the prefixes cost nothing when a
+  block runs; R15 is a constant in each instruction; a flag is stored only
+  if something can read it before it's set again (a block's end reads
+  them all). Exits are patched into direct branches once their target is
+  translated; computed jumps look the target up in the block table from
+  the translated code. What it doesn't do goes to `fx_step` (code in the
+  GSU's RAM, ljmp, a delay slot holding a jump, the C functions with R15 as
+  destination, the first instruction of a run whose pipe isn't the byte
+  before R15), and an address that failed is remembered. On the
+  calculator the new code is written back from the data cache and the
+  instruction cache invalidated (`FX_JIT_CACHE_OPS`); under qemu the buffer
+  is made executable with `mprotect` (`FX_JIT_MPROTECT`).
+* **Depth ceilings** (`LineMaxDepth`, gfx.cpp, 2026-10-15): for each line
+  of the main and sub screen, a depth at least as high as anything drawn
+  on it so far (the clears set 0 and 1). `DrawOBJS` and `DrawBackground`
+  raise it as they draw (by what each row really drew; mosaic, offset-per-
+  tile and mode 7 raise it by their highest depth), and a background tile
+  above every ceiling on its lines is drawn with the untested drawers
+  (`DrawTileLines16_u*`, no depth compare: the result is the same). Off
+  for interlace and double-height pixels.
+* **Background rows in two passes** (`ListBGTiles16` and
+  `DrawBGCommands16` in `gfx_arm.s`, `DrawBGTiles16` in tile.cpp,
+  2026-10-16): the first lists a row's unclipped tiles with everything in
+  registers (tables by the map entry's bits for depth, flips and palette;
+  blank tiles dropped; 16x16 quarters; tile numbers wrapping past the last
+  tile), the second draws the list. One pass in assembler ran out of
+  registers and reloaded the row's values for every tile; in C, GCC
+  spilled them. A row where a 16x16 quarter's sum may carry into the
+  palette bits (DrawBackground adds the quarter to the whole map entry) is
+  listed by the C lister instead, which adds as DrawBackground does.
+* **The tile drawers' assembler** (`DrawTileLines16_*`, 8 versions: flips,
+  clipped or not) gets each pixel's palette index already doubled with one
+  `ands` (mask 0x1fe, shifted), which also says whether it's 0; the depth
+  compare and the three loads/stores after it are conditional, and the next
+  pixel's depth is loaded between the colour's load and its store, so no
+  load result is waited for (byte and halfword loads come 2 cycles late on
+  the ARM926). `DrawTile16`'s C part (the tile cache lookup and palette)
+  calls it through a table indexed by the flip bits; it reads Z1, Z2 and
+  PPL from GFX itself (offsets checked with `static_assert` in tile.cpp).
+* **A new brightness rebuilds the colours only when they're drawn with**
+  (*CPU core: ARM*, 2026-10-16): `S9xUpdateScreen` does it, and not at all
+  if the brightness is back to what they were built with; CGRAM writes in
+  between use the old brightness and are rebuilt with the rest. Yoshi's
+  Island turns it down and up in every V-blank.
+* **VRAM DMA with source and address both moving on by one is a
+  `memcpy`** (*CPU core: ARM*), with the tile caches marked a block at a
+  time; anything that would wrap goes through the word loop.
 
 
 Gotchas
@@ -396,8 +572,27 @@ History
 | 2026-10-11 | 3eb26f2 | Saves in My Documents/`PocketSNES_saves`, so `_PocketSNES.tns` is first in its folder |
 | 2026-10-11 | | These notes |
 | 2026-10-11 | | Pushed to PR #10; release v4.0 updated in place with all of the above |
-| 2026-10-11 | 19a516b | Saves folder `zPocketSNES_saves`, below the game folders in My Documents (not pushed) |
-| 2026-10-11 | 7834655 | OS file list refreshed at exit; GBA zips refused (not pushed) |
+| 2026-10-11 | 19a516b | Saves folder `zPocketSNES_saves`, below the game folders in My Documents |
+| 2026-10-11 | 7834655 | OS file list refreshed at exit; GBA zips refused |
+| 2026-10-13 | ee26428 | Yoshi's Island's top line steady: H-blank at dot 274, lines taken at dot 48 |
+| 2026-10-13 | 84f8ed7..05b6cf7 | Per-line fixed colour; Super FX interpreters in C and ARM assembler; `tests/calc_speed.sh` |
+| 2026-10-14 | | S-DD1 (Star Ocean, Street Fighter Alpha 2) and its test cartridge |
+| 2026-10-15 | 82d4db8 | Super FX assembler: R14 destination table, plot, merge, color |
+| 2026-10-15 | 71bef17..ee6d762 | Tile drawing and line fills in ARM assembler, VRAM DMA a word at a time, `calc_speed.sh` FUNCS/ANNOTATE |
+| 2026-10-15 | 042079c | Screen size: full screen, full with the edges cropped, sharp or smooth |
+| 2026-10-15 | 30c3a33, 8465004 | The Super FX translated into ARM code |
+| 2026-10-15 | 0e3c338 | Background tiles nothing on their lines can hide drawn without the depth test |
+| 2026-10-16 | b61b1c2, 3129554 | Background rows in two assembler passes; VRAM DMA a copy; brightness rebuilt when used |
+| 2026-10-19 | 394535e | Issue #11: no folder walk at start (ndless.cfg.tns edited directly), OS file list refreshed only after file changes |
+| 2026-10-19 | 28a086f | Save state pictures, shown at Load state |
+| 2026-10-20 | 208ed5e | `tools/deploy.sh`: tests, build, backup, settings kept, upload and check in one step |
+| 2026-10-20 | 1d9faa6 | Speed model with caches and memory, fitted to the calculator (`tools/calc_speed/calibrate.py`) |
+| 2026-10-20 | 4031b0b | The busiest code runs from the on-chip SRAM (CX II) |
+| 2026-10-20 | | Everything since PR #10 pushed (branch asm-cpu) as a new PR |
+| 2026-10-21 | 6b3d39d | Save state shows a picture too (the state it replaces, or the game now) |
+| 2026-10-21 | 18c1bde | The menu's Save state picks its own slot (any slot, auto-increment on too) |
+| 2026-10-21 | 1996c06 | Save state's card says "Empty slot" for an empty or new slot |
+| 2026-10-21 | | Save state steps from the new slot's number; game list's Play from a state |
 
 `git log` has the details; every commit message says what changed and why.
 
@@ -407,20 +602,60 @@ Open items and ideas
 
 Waiting on the owner:
 
+* A speed test of Yoshi's Island on the calculator with 4031b0b (uploaded
+  2026-10-20), from the owner's busiest save (state 14, in
+  `build/calc-saves/yi/`; the FPS counter showed 57-58 there with the
+  2026-10-16 build). The results file now says where the code ran ("code
+  in the SRAM: N KB" or why not). The model with caches
+  (`tools/calc_speed/calibrate.py`) estimates 62.6 fps with no speed limit
+  without the SRAM code and 70.2 with it; the fill time from the SRAM (30
+  cycles) is a guess from FINDINGS.md's measured 4x. If the calculator
+  froze, the next start keeps the code in normal memory
+  (`pocketsnes_sramcode_off.tns`).
+
 * Run v4.0's `_PocketSNES.tns` on the calculator (uploaded 2026-10-11):
   settings, keys and saves still there; `_PocketSNES` first in `snes`; how
   far the overclock test gets in SMW.
 
 Ideas, most promising first (see README → Future steps):
 
-* Tile drawing in ARM assembly (snes9x2002's `tile16` renderer). Drawing is
-  still the biggest part of a frame.
-* A lighter HBlank sync for the ARM core (`doHBlank` save/load of registers
-  is about 8% of an ARM frame), and calling `S9xGetPPU`/`S9xGetCPU`
-  directly for I/O.
+* The Super FX translator's code buffer in the SRAM too: a quarter of
+  Yoshi's Island's instruction cache misses (93 KB of translated code runs
+  every frame). The model: 13.0 ms a frame in save 14 with 128 KB of the
+  buffer and the best 96 KB of code there, against 13.8 with code only.
+  The assembler 65c816 core (121 KB) has only 24 KB of hot code, spread
+  out: its hot handlers in one section would leave room.
+* Data cache misses (about 2.6 ms a frame in save 14: background drawing,
+  sprites): hot buffers in the SRAM.
+* Saving and loading states faster (the owner asked, 2026-10-20): not
+  looked into yet beyond reading `states.cpp` (compress2 at Z_BEST_SPEED,
+  a temporary file then rename).
+
+* Sprites: `DrawOBJS` calls `DrawTile16` for every 8 pixels of a sprite on
+  a line, about 150 instructions each with the setup per sprite and line
+  (Yoshi's Island sv010: 465 calls, about 100K instructions a frame). A loop
+  over a sprite's tiles in assembler.
+* Opaque lines: 89% of the untested background lines Yoshi's Island draws
+  have no pixel 0 (FINDINGS.md). A per-tile flag from `ConvertTile` could
+  pick drawers without the per-pixel test that store the depths 2 or 4 at
+  a time (the row's alignment decides).
+* The Super FX translator: GSU registers kept in ARM registers across
+  blocks, flags dropped across jumps (its code is 260K instructions a frame
+  in sv010).
+* Idle frames: Yoshi's Island waits for the next frame in a two-instruction
+  loop that the core's idle loop detection skips, but every H-blank event
+  wakes it and it runs twice before skipping again (`WaitCounter`), plus
+  the events themselves: about 50K instructions a frame between
+  `doHBlank`, `S9xDoHBlankProcessing_SFX` and the loop.
+* H-DMA: Yoshi's Island writes the fixed colour on every line through
+  `S9xSetPPU` (about 30K instructions a frame with the H-DMA loop).
+* A lighter HBlank sync for the ARM core (`doHBlank` save/load of
+  registers), and calling `S9xGetPPU`/`S9xGetCPU` directly for I/O.
 * Profile-guided optimisation.
 * SRAM rendering again, leaving the first 32 KB alone.
-* S-DD1 and SPC7110 chips; Yoshi's Island's top-row glitch (Super FX code).
+* The SPC7110 chip.
+* Star Ocean and Street Fighter Alpha 2 themselves (only the S-DD1 test
+  cartridge has run).
 
 
 Researched, not built

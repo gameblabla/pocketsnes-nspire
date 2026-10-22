@@ -26,7 +26,8 @@ enum OptionType
     OPTION_NUMBER,     /* value is 0..max */
     OPTION_BINDING,    /* the two key slots of action 'action_id' */
     OPTION_LOAD_SLOT,  /* left/right pick the slot, select loads it */
-    OPTION_SAVE_SLOT   /* left/right pick the slot, select saves */
+    OPTION_SAVE_SLOT,  /* left/right pick the slot, select saves */
+    OPTION_START_SLOT  /* game list: left/right pick a state, select starts from it */
 };
 
 /* What an action asks the menu to do next. */
@@ -115,9 +116,15 @@ static enum Step load_state(void)
     return STEP_STAY;
 }
 
+/* The picture of the state shown at Load state (draw_state_picture). */
+static int picture_slot = -1;   /* the slot in picture_pixels, -1 for none read */
+static int picture_found;
+static uint16_t picture_pixels[STATE_PICTURE_W * STATE_PICTURE_H];
+
 static enum Step save_state(void)
 {
-    int slot = emu_save_target();
+    picture_slot = -1;   /* it may go over the slot whose picture is shown */
+    int slot = emu_menu_save_target();
     if (!slot)
         set_status("All 999 slots are used.");
     else if (emu_save_state(slot))
@@ -168,6 +175,7 @@ static enum Step open_save_manager(void)
         states_open_game(rom);
     game_name(rom, title, sizeof(title));
     save_manager_run(title);
+    picture_slot = -1;   /* the shown state may be gone */
     return STEP_STAY;
 }
 
@@ -202,6 +210,20 @@ static enum Step exit_app(void) { return STEP_EXIT; }
 static enum Step back_to_list(void) { return STEP_BACK_TO_LIST; }
 static enum Step start_game(void) { return STEP_START; }
 static enum Step start_without_state(void) { return STEP_START_WITHOUT_STATE; }
+
+/* The game list's Play from a state: its slot, for the game list_rom. */
+static int list_slot = 1;
+
+static enum Step start_from_state(void)
+{
+    if (!states_exists(list_slot))
+    {
+        set_slot_status("%s is empty.", list_slot, true);
+        return STEP_STAY;
+    }
+    emu_start_from_slot(list_slot);
+    return STEP_START;
+}
 static enum Step move_in_list(void) { return STEP_MOVE; }
 static enum Step sort_list(void) { return STEP_SORT; }
 
@@ -225,6 +247,8 @@ static const char *const fps_modes[] = { "off", "on", "detailed" };
 static const char *const sram_write_modes[] = { "on exit", "automatic" };
 static const char *const scopes[] = { "all games", "this game" };
 static const char *const screen_outputs[] = { "no tearing", "DMA" };
+static const char *const screen_sizes[] = { "original", "full screen", "full, crop edges" };
+static_assert(sizeof(screen_sizes) / sizeof(screen_sizes[0]) == NUM_SCREEN_SIZES, "a name for each screen size");
 /* "normal" shows the calculator's own clock (288 MHz while USB is plugged
  * in), "highest tested" the overclock test's result. */
 static char normal_cpu_speed[24] = "normal";
@@ -284,36 +308,42 @@ static void update_speed_names(void)
     CHOICE("FPS counter", \
            "Frames drawn per second: 60/60 is full speed. Detailed adds timings (also logged).", \
            2, &cfg.show_fps, fps_modes, 2, ICON_NONE), \
+    CHOICE("Screen size", \
+           "Full screen stretches the picture like a TV did. Crop edges also cuts the 8 lines TVs hid.", \
+           3, &cfg.screen_size, screen_sizes, NUM_SCREEN_SIZES - 1, ICON_NONE), \
+    CHOICE("Smooth stretching", \
+           "On: full screen blends the pixels it doubles, so all look the same size. Off: sharp.", \
+           4, &cfg.smooth, off_on, 1, ICON_NONE), \
     CHOICE("Screen output", \
-           "No tearing (best): every frame shows whole. DMA: slightly faster, but it can tear.", \
-           3, &cfg.screen_dma, screen_outputs, 1, ICON_NONE), \
+           "No tearing (best): every frame shows whole. DMA: a little faster, can tear (original size).", \
+           5, &cfg.screen_dma, screen_outputs, 1, ICON_NONE), \
     CHOICE("Brightness", \
            "The screen while PocketSNES runs (CX II); yours comes back after. Keys: + and -.", \
-           4, &cfg.brightness, brightness_levels, BRIGHTNESS_LEVELS, ICON_NONE), \
+           6, &cfg.brightness, brightness_levels, BRIGHTNESS_LEVELS, ICON_NONE), \
     CHOICE("CPU speed", \
            "Overclocks the CX II in games. Highest tested is what the overclock test passed.", \
-           5, &cfg.cpu_speed, cpu_speeds, NUM_CPU_SPEEDS - 1, ICON_NONE), \
+           7, &cfg.cpu_speed, cpu_speeds, NUM_CPU_SPEEDS - 1, ICON_NONE), \
     { OPTION_ACTION, "Overclock test", \
       "Plays the open game at 408-504 MHz until it goes wrong: about 3 minutes.", \
-      6, NULL, NULL, 0, run_overclock_test, NULL, NULL, 0, ICON_SPEED, tested_result }, \
+      8, NULL, NULL, 0, run_overclock_test, NULL, NULL, 0, ICON_SPEED, tested_result }, \
     CHOICE("CPU core", \
            "ARM: the SNES CPU in ARM assembler (faster). C: the old core, if a game acts up.", \
-           7, &cfg.cpu_core, cpu_cores, NUM_CPU_CORES - 1, ICON_NONE)
+           9, &cfg.cpu_core, cpu_cores, NUM_CPU_CORES - 1, ICON_NONE)
 
 static struct Option graphics_options[] =
 {
     GRAPHICS_OPTIONS,
     ACTION("Run speed test",
            "Plays from here for about 40 seconds in six ways, both CPU cores, and shows the frame rates.",
-           8, run_speed_test, ICON_STAR),
-    BACK_OPTION(9),
+           10, run_speed_test, ICON_STAR),
+    BACK_OPTION(11),
 };
 
 /* The same from the game list, which has no game running to test. */
 static struct Option list_graphics_options[] =
 {
     GRAPHICS_OPTIONS,
-    BACK_OPTION(7),
+    BACK_OPTION(10),
 };
 
 static struct Option savestate_options[] =
@@ -339,9 +369,12 @@ static struct Option savestate_options[] =
     CHOICE("Compress saves",
            "On: new states and in-game saves take less space. Off: in-game saves copy straight to a PC.",
            6, &cfg.compress_saves, off_on, 1, ICON_NONE),
+    CHOICE("State pictures",
+           "On: each new state keeps a small picture of the game, shown at Save state and Load state.",
+           7, &cfg.state_pictures, off_on, 1, ICON_NONE),
     ACTION("Save manager", "This game's saves and their sizes: compress, uncompress or delete them.",
-           7, open_save_manager, ICON_DISK),
-    BACK_OPTION(9),
+           8, open_save_manager, ICON_DISK),
+    BACK_OPTION(10),
 };
 
 #define BINDING_HELP "Left/right: key 1 or 2. Enter: set it (hold one key, press another: a combo). Del: clear."
@@ -411,7 +444,7 @@ MENU(about_menu, about_options, "Controls & about");
       line + 1, &own_keys, scopes, 1, NULL, NULL, own_keys_changed, 0, ICON_KEY }
 
 #define SETTINGS_SUBMENUS(line, graphics) \
-    SUBMENU("Graphics & speed", "Frameskip, the FPS counter, screen output, brightness, CPU speed and core.", \
+    SUBMENU("Graphics & speed", "Frameskip, FPS counter, screen size and output, brightness, CPU speed, core.", \
             line, graphics, ICON_SPEED), \
     SUBMENU("Saving", "Auto-increment, saving when you leave (and where), loading on start, in-game saves.", \
             line + 1, &savestate_menu, ICON_DISK), \
@@ -424,7 +457,7 @@ static struct Option main_options[] =
 {
     ACTION("Resume game", "Close the menu and keep playing.", 0, return_to_game, ICON_PLAY),
     { OPTION_SAVE_SLOT, "Save state",
-      "Saves the game right here. With auto-increment on, every save gets a new slot.",
+      "Saves the game here. Left/right pick any slot; with auto-increment on it starts on a new slot.",
       1, NULL, NULL, 0, save_state, NULL, NULL, 0, ICON_SAVE },
     { OPTION_LOAD_SLOT, "Load state",
       "Loads the selected slot. Left/right pick the slot (hold them to go faster).",
@@ -445,17 +478,20 @@ static struct Option list_game_options[] =
 {
     ACTION("Play", "Starts the game, from its newest state if Load newest on start is on.",
            0, start_game, ICON_PLAY),
+    { OPTION_START_SLOT, "Play from a state",
+      "Starts the game from the selected state. Left/right pick the slot (hold them to go faster).",
+      1, NULL, NULL, 0, start_from_state, NULL, NULL, 0, ICON_LOAD },
     ACTION("Play without a state", "Starts from the game's own save only, e.g. when a state is broken.",
-           1, start_without_state, ICON_CART),
+           2, start_without_state, ICON_CART),
     ACTION("Move in the list", "Up/down move the game, enter puts it there (tab in the list does this too).",
-           2, move_in_list, ICON_MOVE),
+           3, move_in_list, ICON_MOVE),
     ACTION("Sort the list A to Z", "Puts the games in this folder back in alphabetical order.",
-           3, sort_list, ICON_SORT),
-    SETTINGS_SUBMENUS(5, &list_graphics_menu),
-    SCOPE_OPTIONS(9),
+           4, sort_list, ICON_SORT),
+    SETTINGS_SUBMENUS(6, &list_graphics_menu),
+    SCOPE_OPTIONS(10),
     ACTION("Save manager", "This game's saves and their sizes: compress, uncompress or delete them.",
-           11, open_save_manager, ICON_DISK),
-    ACTION("Back to the game list", "Close this menu.", 12, back_to_list, ICON_BACK),
+           12, open_save_manager, ICON_DISK),
+    ACTION("Back to the game list", "Close this menu.", 13, back_to_list, ICON_BACK),
 };
 
 /* ... and on a folder: the settings for all games. */
@@ -504,6 +540,12 @@ static void option_value(const struct Option *option, char *text, size_t size)
     case OPTION_NUMBER:
         snprintf(text, size, "%d", (int) *option->value);
         break;
+    case OPTION_START_SLOT:
+        if (list_slot == AUTO_SLOT)
+            snprintf(text, size, "auto slot  %s", states_exists(AUTO_SLOT) ? "saved" : "empty");
+        else
+            snprintf(text, size, "slot %03d  %s", list_slot, states_exists(list_slot) ? "saved" : "empty");
+        break;
     case OPTION_LOAD_SLOT:
         if (emu_slot() == AUTO_SLOT)
             snprintf(text, size, "auto slot  %s", states_exists(AUTO_SLOT) ? "saved" : "empty");
@@ -515,15 +557,18 @@ static void option_value(const struct Option *option, char *text, size_t size)
             snprintf(text, size, "%s", option->shown);
         break;
     case OPTION_SAVE_SLOT:
-        if (!cfg.auto_increment && emu_slot() == AUTO_SLOT)
-            snprintf(text, size, "auto slot");
-        else if (!cfg.auto_increment)
-            snprintf(text, size, "slot %03d", emu_slot());
-        else if (emu_save_target())
-            snprintf(text, size, "new slot %03d", emu_save_target());
-        else
+    {
+        int slot = emu_menu_save_target();
+        if (!slot)
             snprintf(text, size, "all slots used");
+        else if (!emu_menu_save_slot() && cfg.auto_increment)
+            snprintf(text, size, "new slot %03d", slot);
+        else if (slot == AUTO_SLOT)
+            snprintf(text, size, "auto slot  %s", states_exists(AUTO_SLOT) ? "saved" : "empty");
+        else
+            snprintf(text, size, "slot %03d  %s", slot, states_exists(slot) ? "saved" : "empty");
         break;
+    }
     default:
         break;
     }
@@ -535,7 +580,8 @@ static int option_flags(const struct Option *option, int selected)
     if (option->type == OPTION_CHOICE && option->choices == off_on)
         flags |= ROW_TOGGLE;
     else if (option->type == OPTION_CHOICE || option->type == OPTION_NUMBER ||
-             option->type == OPTION_LOAD_SLOT || (option->type == OPTION_SAVE_SLOT && !cfg.auto_increment))
+             option->type == OPTION_LOAD_SLOT || option->type == OPTION_SAVE_SLOT ||
+             option->type == OPTION_START_SLOT)
         flags |= ROW_ARROWS;
     if (option->type == OPTION_SUBMENU && option->submenu)
         flags |= ROW_SUBMENU;
@@ -583,6 +629,32 @@ static int layout(const struct Menu *menu, int *pos)
 }
 
 static void draw_controls_page(void);
+
+/* Save state pictures (Saving > State pictures): the selected slot's
+ * picture on a card at the right, under the Load state row (at row_bottom),
+ * over the values of the rows below it. Save state shows the same card for
+ * the slot it would save to. */
+#define PICTURE_CARD_W (STATE_PICTURE_W + 6)
+#define PICTURE_CARD_H (STATE_PICTURE_H + 6)
+
+static void draw_state_picture(int slot, int row_bottom)
+{
+    int x = 309 - PICTURE_CARD_W, y = row_bottom + 2;
+    if (y + PICTURE_CARD_H > UI_HELP_Y - 2)
+        return;
+    if (slot != picture_slot)
+    {
+        picture_found = states_read_picture(slot, picture_pixels);
+        picture_slot = slot;
+    }
+    draw_round_rect(x, y, PICTURE_CARD_W, PICTURE_CARD_H, 4, COLOR_PANEL);
+    draw_round_frame(x, y, PICTURE_CARD_W, PICTURE_CARD_H, 4, COLOR_PANEL_EDGE);
+    if (picture_found)
+        draw_pixels(x + 3, y + 3, STATE_PICTURE_W, STATE_PICTURE_H, picture_pixels);
+    else
+        draw_string_center(FONT_SMALL, states_exists(slot) ? "No picture" : "Empty slot", x + PICTURE_CARD_W / 2,
+                           y + (PICTURE_CARD_H - TEXT_H) / 2, COLOR_TEXT_FAINT);
+}
 
 static void draw_menu(const struct Menu *menu, int selected, int *scroll)
 {
@@ -659,6 +731,15 @@ static void draw_menu(const struct Menu *menu, int selected, int *scroll)
                    option->label, value, option_flags(option, i == selected));
         }
         ui_scrollbar(*scroll, view, height, UI_LIST_Y + top, view);
+        if (!in_game && current->type == OPTION_START_SLOT && cfg.state_pictures)
+            draw_state_picture(list_slot, UI_LIST_Y + top + pos[selected] - *scroll + UI_ROW_H);
+        if (in_game && current->type == OPTION_LOAD_SLOT && cfg.state_pictures)
+            draw_state_picture(emu_slot(), UI_LIST_Y + top + pos[selected] - *scroll + UI_ROW_H);
+        /* Save state: the same card in the same place (the Load state row
+         * follows it), for the slot the save goes to. */
+        if (in_game && current->type == OPTION_SAVE_SLOT && cfg.state_pictures && emu_menu_save_target() &&
+            selected + 1 < menu->count && menu->options[selected + 1].type == OPTION_LOAD_SLOT)
+            draw_state_picture(emu_menu_save_target(), UI_LIST_Y + top + pos[selected + 1] - *scroll + UI_ROW_H);
     }
 
     /* The help panel, or what just happened. */
@@ -951,10 +1032,19 @@ static void change_value(const struct Option *option, int delta)
     }
     else if (option->type == OPTION_BINDING)
         key_column = delta > 0 ? 1 : 0;
-    else if (option->type == OPTION_LOAD_SLOT || option->type == OPTION_SAVE_SLOT)
+    else if (option->type == OPTION_LOAD_SLOT || option->type == OPTION_SAVE_SLOT ||
+             option->type == OPTION_START_SLOT)
     {
         int step = gui_repeat_count() > 20 ? 10 : 1;
-        emu_set_slot(emu_step_slot(emu_slot(), delta * step));
+        if (option->type == OPTION_SAVE_SLOT)
+            emu_step_menu_save_slot(delta * step);
+        else if (option->type == OPTION_START_SLOT)
+        {
+            list_slot = emu_step_slot(list_slot, delta * step);
+            return;
+        }
+        else
+            emu_set_slot(emu_step_slot(emu_slot(), delta * step));
     }
 }
 
@@ -1051,6 +1141,7 @@ enum MenuResult menu_run(void)
 {
     in_game = 1;
     list_rom = NULL;
+    picture_slot = -1;
     enum Step step = run(&main_menu);
     return step == STEP_NEW_GAME ? MENU_LOAD_NEW_GAME : step == STEP_EXIT ? MENU_EXIT : MENU_RESUME;
 }
@@ -1059,6 +1150,12 @@ enum ListMenuResult menu_run_list(const char *rom_path)
 {
     in_game = 0;
     list_rom = rom_path;
+    picture_slot = -1;
+    if (rom_path)
+    {
+        states_open_game(rom_path);
+        list_slot = states_newest() ? states_newest() : 1;
+    }
     enum Step step = run(rom_path ? &list_game_menu : &list_menu);
     switch (step)
     {

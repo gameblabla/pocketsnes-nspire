@@ -1,4 +1,5 @@
 #include <dirent.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,11 +73,13 @@ static int file_exists(const char *path)
     return stat(path, &st) == 0;
 }
 
+static int file_list_touched;
+
 /* Moves from to to unless to is there already. */
 static void move_file(const char *from, const char *to)
 {
-    if (!file_exists(to))
-        rename(from, to);
+    if (!file_exists(to) && rename(from, to) == 0)
+        file_list_touched = 1;
 }
 
 /* PocketSNES's own files, which older versions kept next to the program. */
@@ -129,7 +132,8 @@ static void move_folder(const char *old_dir, const char *dir)
         move_file(from, to);
     }
     free(names);
-    rmdir(old_dir);   /* only goes if everything moved */
+    if (rmdir(old_dir) == 0)   /* only goes if everything moved */
+        file_list_touched = 1;
 }
 
 void paths_move_old_files(const char *dir, int with_program_files)
@@ -165,4 +169,45 @@ int paths_is_pocketsnes_name(const char *name)
 {
     return strcasecmp(name, SAVE_FOLDER) == 0 || strncasecmp(name, "pocketsnes", 10) == 0 ||
            strncasecmp(name, "_pocketsnes", 11) == 0;
+}
+
+/* The names in the saves folder, in any order, as one number; 0 if the
+ * folder isn't there. */
+static uint32_t save_folder_names(void)
+{
+    char path[600];
+    paths_save_file(path, sizeof(path), "");
+    DIR *dir = opendir(path);
+    if (!dir)
+        return 0;
+    uint32_t sum = 0, count = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL)
+    {
+        uint32_t hash = 2166136261u;   /* FNV-1a */
+        for (const unsigned char *c = (const unsigned char *) entry->d_name; *c; c++)
+            hash = (hash ^ *c) * 16777619u;
+        sum += hash;
+        count++;
+    }
+    closedir(dir);
+    return (sum * 31 + count) | 1;
+}
+
+static uint32_t start_names;
+
+void paths_file_list_start(void)
+{
+    start_names = save_folder_names();
+    file_list_touched = 0;
+}
+
+void paths_file_list_touched(void)
+{
+    file_list_touched = 1;
+}
+
+int paths_file_list_changed(void)
+{
+    return file_list_touched || save_folder_names() != start_names;
 }

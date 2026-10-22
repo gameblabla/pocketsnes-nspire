@@ -295,6 +295,8 @@ Ideas not tried yet
   all.
 * Seen (user): Yoshi's Island (Super FX) glitches in the top rows of the
   picture, in the old build too, so it comes from the emulator core.
+  Fixed 2026-10-13 (core timing, not Super FX): see DEVNOTES.md, "Emulation
+  core".
 
 * Done 2026-10-05: only the 256x224 picture is turned; 8-word DMA bursts;
   DrawTile16 in faster C (ARM assembly could still go further).
@@ -412,3 +414,71 @@ Where things stand (2026-10-05)
   over the message's own length and drop anything read past it. Writes add
   the empty packet after a message that fills whole USB packets. Checked
   with files of 478 to 40,000 bytes both ways.
+
+Yoshi's Island (2026-10-14)
+---------------------------
+
+* The owner's speed test of Yoshi's Island (build eebf818, 396 MHz, DMA
+  output, their save in the first world, every frame drawn): 53.0 fps;
+  a frame took 10.3 ms running the game (cpu), 7.9 ms drawing (gfx) and
+  0.5 ms getting it on screen (out). `tests/calc_speed.sh` with the same
+  save said 53.3 fps, but 9.2 ms drawing and 9.0 ms for the rest.
+* So per ARM instruction this game's drawing is cheaper than Super Mario
+  World's (about 2.3 cycles instead of the fitted 2.64) and its Super FX
+  interpreter dearer (about 3.2 cycles instead of 2.58; probably the
+  indirect jump per GSU instruction, and plotting all over the GSU's 128 KB
+  of RAM). Fitted with the CPU core and PPU parts at 2.58, as for SMW.
+* The busiest code then, in ARM instructions a frame: the tile drawers
+  963K, the Super FX 791K (632K after 82d4db8), the PPU, DMA and timing
+  283K (VRAM DMA through the register functions 118K of it), the 65c816
+  core 203K, `DrawBackground` 134K, the per-line buffer clears 149K.
+* Yoshi's Island blanks its own top 8 and bottom 8 lines during play (the
+  screen is off until its line-8 IRQ and again from line 216), so it shows
+  208 lines of its 224; centred on the 240-line screen, that's 16 black
+  rows above and below instead of SMW's 8. A real SNES does the same; a
+  TV's overscan hides it.
+
+Yoshi's Island, estimated (2026-10-16)
+---------------------------------------
+
+From `tests/calc_speed.sh` with the owner's saves (`build/calc-saves/yi/`),
+the DMA output (`SHOW_MS=0.5`), 300 frames each, no keys after the start,
+build 3129554. Not measured on the calculator yet.
+
+| Save | Spot | ARM instructions a frame | Estimated fps (no speed limit) | 95% of frames at least |
+|---|---|---:|---:|---:|
+| sv010 | the busy spot measured on 2026-10-14 | 1,474,286 | 92.1 | 89.9 |
+| sv005 | | 1,474,574 | 91.7 | 89.1 |
+| sv007, sv008, sv009 | | 1,448,000–1,449,000 | 93.5–93.6 | 91.3–91.7 |
+| sv006 | | 1,131,998 | 116.3 | 112.5 |
+| sv001 | | 1,194,835 | 111.0 | 108.1 |
+| sv011 | bubbles; one frame of 4.8 million | 1,020,103 | 127.2 | 81.2 |
+
+* sv010's frame by part: drawing 806K instructions (5.37 ms), the Super FX
+  277K (1.80 ms), the 65c816 core 203K (1.32 ms), PPU, DMA and timing 179K
+  (1.17 ms). The busiest functions: the background rows' drawing pass 449K,
+  the translated Super FX code 259K, the rows' listing pass 62K,
+  `DrawOBJS` 52K, `S9xDoHDMA` 43K, `DrawBackground` 42K,
+  `S9xDoHBlankProcessing_SFX` 40K, `S9xSetPPU` 37K, the ARM core's
+  `mainLoop` 35K and `doHBlank` 34K, the clipped tile drawer 32K, the line
+  fills 26K.
+* What it draws (sv010, counted in the background rows over 300 frames):
+  84 rows a frame, 1271 tiles drawn without the depth test and 93 with it;
+  of the lines drawn without it, 89% have no transparent pixel, 2% are
+  empty and 9% partly transparent. The rows start at an even pixel 37% of
+  the time, a multiple of 4 20% (the depths' alignment for wider stores).
+* Sprites (sv010): 244 sprite lines a frame, 465 calls of `DrawTile16` for
+  8 pixels each; with `DrawOBJS`'s setup (121 instructions per sprite and
+  line, 35 per 8 pixels) and the line drawer, about 100K instructions a
+  frame for some 3700 pixels.
+* The 65c816 waits for the next frame from line 31 to 216 in a loop at
+  00:80f1 (`lda` of a RAM flag, `bmi` back). The idle loop detection skips
+  to the next event, but each of the two events a line (H-blank start and
+  the line's end) adds one to `WaitCounter`, so the loop runs twice before
+  skipping again: 746 times in the frame traced (frame 10 from sv010).
+* Yoshi's Island's per-frame DMA: 544 bytes to OAM, 512 to CGRAM and
+  3584 to VRAM (the Super FX's picture). H-DMA: two channels on every line,
+  one of them the fixed colour (the sky's bands); 630 writes of $2132 a
+  frame.
+* It turns the brightness down and back up in V-blank every frame; each
+  change recomputed the 256 colours (about 5K instructions).

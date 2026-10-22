@@ -1,0 +1,15 @@
+# Save state pictures: S saves on the frame after the key (shot saved.png),
+# then the menu's Load state (its third entry) shows that slot's picture.
+wait 60
+press S
+wait 1
+shot saved.png
+wait 30
+press esc
+wait 5
+press down
+wait 3
+press down
+wait 3
+shot card.png
+quit

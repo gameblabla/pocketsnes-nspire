@@ -12,7 +12,10 @@ CC  = arm-none-eabi-gcc
 BUILD = build/asm-test
 
 ARCH    = -marm -mcpu=arm926ej-s
-DEFINES = -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -DARM_ASM_CPU
+DEFINES = -DRC_OPTIMIZED -D__LINUX__ -DFOREVER_16_BIT -DNO_ASM -DARM_ASM_CPU -DARM_ASM_FX -DARM_ASM_GFX
+# The Super FX translator's code buffer made executable for qemu-arm
+# (fxjit.cpp; on the calculator memory is)
+DEFINES += -DFX_JIT_MPROTECT
 # zlib.h from the Ndless SDK (the core's port.h includes it)
 ZLIB    = $(HOME)/nspire/build/Ndless/ndless-sdk/thirdparty/zlib
 INCLUDE = -Ipocketsnes -Ipocketsnes/include -Ipocketsnes/linux -Ipocketsnes/snes9x -isystem $(ZLIB)
@@ -25,9 +28,10 @@ CORE_SRC = $(wildcard pocketsnes/snes9x/*.cpp)
 CORE_OBJ = $(patsubst %.cpp,$(BUILD)/%.o,$(CORE_SRC))
 ASM_DEPS = $(wildcard pocketsnes/arm/*.s)
 COMMON   = $(BUILD)/tests/asm/stubs.o $(BUILD)/tests/asm/newlib_shim.o $(BUILD)/arm/global.o \
-           $(BUILD)/frontend/romzip.o
+           $(BUILD)/frontend/romzip.o $(BUILD)/arm/fx_run_arm.o $(BUILD)/arm/gfx_arm.o
 
-all: $(BUILD)/opcode_test $(BUILD)/game_test $(BUILD)/game_trace
+all: $(BUILD)/opcode_test $(BUILD)/game_test $(BUILD)/game_trace $(BUILD)/fx_test $(BUILD)/tile_test \
+     $(BUILD)/scale_test
 
 $(BUILD)/pocketsnes/%.o: pocketsnes/%.cpp
 	@mkdir -p $(dir $@)
@@ -51,6 +55,34 @@ $(BUILD)/tests/asm/%.o: tests/asm/%.c
 $(BUILD)/arm/global.o: pocketsnes/arm/os9x_65c816_global.s $(ASM_DEPS)
 	@mkdir -p $(dir $@)
 	$(CC) $(ARCH) -Ipocketsnes/arm -c $< -o $@
+
+# The Super FX interpreter; the _counted one stops after a given number of
+# instructions, for fx_test.
+$(BUILD)/arm/fx_run_arm.o: pocketsnes/arm/fx_run_arm.s
+	@mkdir -p $(dir $@)
+	$(CC) $(ARCH) -c $< -o $@
+
+# The drawing's busiest loops (tile drawers, line fills)
+$(BUILD)/arm/gfx_arm.o: pocketsnes/arm/gfx_arm.s
+	@mkdir -p $(dir $@)
+	$(CC) $(ARCH) -c $< -o $@
+
+$(BUILD)/arm/fx_run_arm_counted.o: pocketsnes/arm/fx_run_arm.s
+	@mkdir -p $(dir $@)
+	$(CC) $(ARCH) -Wa,--defsym,FX_COUNTED=1 -c $< -o $@
+
+# fx_test (tests/fx_test.cpp): fxinst.cpp also built with the original loop
+$(BUILD)/fxtest/%.o: pocketsnes/snes9x/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CORE_FLAGS) -DFX_REFERENCE_RUN -MMD -c $< -o $@
+
+$(BUILD)/tests/fx_test.o: tests/fx_test.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(TEST_FLAGS) -MMD -c $< -o $@
+
+$(BUILD)/fx_test: $(BUILD)/tests/fx_test.o $(BUILD)/fxtest/fxinst.o $(BUILD)/fxtest/fxemu.o $(BUILD)/fxtest/fxjit.o \
+		  $(BUILD)/arm/fx_run_arm.o $(BUILD)/arm/fx_run_arm_counted.o $(BUILD)/tests/asm/newlib_shim.o
+	$(CXX) $(LDFLAGS) $^ $(LIBS) -o $@
 
 $(BUILD)/arm/cpu.o: pocketsnes/arm/os9x_65c816_cpu.s $(ASM_DEPS)
 	@mkdir -p $(dir $@)
@@ -80,6 +112,30 @@ $(BUILD)/opcode_test: $(BUILD)/tests/asm/opcode_test.o $(BUILD)/arm/cpu_step.o $
 $(BUILD)/game_test: $(BUILD)/tests/asm/game_test.o $(BUILD)/arm/cpu.o $(COMMON) $(BUILD)/libcore.a
 	$(CXX) $(LDFLAGS) $^ $(LIBS) -o $@
 
+# The tile drawers (C and ARM assembler) against Snes9x 1.43's
+$(BUILD)/tile_test: $(BUILD)/tests/asm/tile_test.o $(BUILD)/arm/cpu.o $(COMMON) $(BUILD)/libcore.a
+	$(CXX) $(LDFLAGS) $^ $(LIBS) -o $@
+
+# The full screen picture (frontend/scale.cpp with its ARM assembler loops,
+# frontend/scale_arm.S) against its definition
+FRONTEND_TEST_FLAGS = $(ARCH) -O3 -fno-strict-aliasing -DSCALE_ARM -Ifrontend -Wall
+
+$(BUILD)/scaletest/%.o: frontend/%.cpp frontend/scale.h frontend/rotate.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(FRONTEND_TEST_FLAGS) -c $< -o $@
+
+$(BUILD)/scaletest/scale_arm.o: frontend/scale_arm.S
+	@mkdir -p $(dir $@)
+	$(CC) $(ARCH) -c $< -o $@
+
+$(BUILD)/scaletest/scale_test.o: tests/asm/scale_test.cpp frontend/scale.h frontend/rotate.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(FRONTEND_TEST_FLAGS) -c $< -o $@
+
+$(BUILD)/scale_test: $(BUILD)/scaletest/scale_test.o $(BUILD)/scaletest/scale.o $(BUILD)/scaletest/rotate.o \
+		     $(BUILD)/scaletest/scale_arm.o $(BUILD)/tests/asm/newlib_shim.o
+	$(CXX) $(LDFLAGS) $^ -o $@
+
 # game_test that prints every opcode of chosen frames, on either core
 $(BUILD)/game_trace: $(BUILD)/tests/asm/game_trace.o $(BUILD)/arm/cpu_trace.o $(COMMON) $(BUILD)/libcore.a
 	$(CXX) $(LDFLAGS) $^ $(LIBS) -o $@
@@ -90,4 +146,4 @@ clean:
 .PHONY: all clean
 
 -include $(CORE_OBJ:.o=.d) $(BUILD)/tests/asm/opcode_test.d $(BUILD)/tests/asm/game_test.d \
-	 $(BUILD)/tests/asm/game_trace.d
+	 $(BUILD)/tests/asm/game_trace.d $(BUILD)/tests/asm/tile_test.d

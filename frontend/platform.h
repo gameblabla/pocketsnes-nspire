@@ -133,6 +133,14 @@ int  platform_frame_begin(void);
 void platform_frame_copy(int x, int y, int w, int h);
 void platform_frame_present(void);
 
+/* The picture stretched to the whole screen (Screen size, scale.h): puts
+ * the SCALE_SRC_W-pixel-wide picture at src (src_pitch pixels a line,
+ * 'lines' lines) into the frame being shown, stretched to 320x240 over all
+ * of it; overlays copied with platform_frame_copy afterwards go on top.
+ * Where frames aren't turned (platform_frame_begin), the stretched picture
+ * goes into platform_screen() instead and is shown from there. */
+void platform_frame_copy_scaled(const uint16_t *src, int src_pitch, int lines, int smooth);
+
 /* Lines of spare memory after the 240 lines of platform_screen(). */
 int platform_screen_spare_lines(void);
 
@@ -176,6 +184,9 @@ int platform_cpu_multiplier(void);
 /* A line about the clock register and the last change, for the speed test
  * results. */
 void platform_clock_report(char *text, size_t size);
+/* Where the busiest code runs from (the CX II's on-chip SRAM or normal
+ * memory, and why), for the speed test results. */
+void platform_code_report(char *text, size_t size);
 /* For the PC tests: 1 when the PC build is acting like a calculator that
  * runs games wrongly at the clock set now (--glitch-above). Always 0 on the
  * calculator. */

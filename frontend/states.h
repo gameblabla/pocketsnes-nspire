@@ -5,6 +5,7 @@
 #define STATES_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #define MAX_STATE_SLOTS 999
 /* The slot apart from 1-999 that saving when leaving can use (Saving > Auto
@@ -55,6 +56,17 @@ int states_next_new_slot(void);
  * the file can't be read or isn't a PocketSNES state. */
 int states_save(int slot);
 int states_load(int slot);
+
+/* Save state pictures (Saving > State pictures): a state can keep a small
+ * picture of the game (RGB565, the SNES picture shrunk to 7/16), shown when
+ * picking a slot to load. states_save adds the one given here (NULL: none). */
+#define STATE_PICTURE_W 112
+#define STATE_PICTURE_H 98
+void states_set_picture(const uint16_t *pixels);
+/* A slot's picture into pixels (STATE_PICTURE_W x STATE_PICTURE_H). Returns 0
+ * for an empty slot or a state without one (saved before pictures or with
+ * them off). */
+int states_read_picture(int slot, uint16_t *pixels);
 
 /* "slot 012", or "the auto slot". */
 const char *states_slot_name(int slot, char *text, size_t size);

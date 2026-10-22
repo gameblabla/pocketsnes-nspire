@@ -4,7 +4,8 @@
 @ Assembled with --defsym ASM_SINGLE_STEP=1 (the opcode tests), the entry
 @ point is asmStepOpcode instead: one opcode, then back.
 
-	.text
+	@ its own section, so the build can put it with the busiest code (frontend/hot_sections.txt)
+	.section .text.os9x_cpu,"ax",%progbits
 	.align 4
 	.include	"os9x_65c816_common.s"
 	.include	"os9x_65c816_opcodes.s"

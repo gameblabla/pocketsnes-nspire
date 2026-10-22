@@ -18,8 +18,11 @@
 #include "brightness.h"
 #include "config.h"
 #include "selfstore.h"
+#include "paths.h"
+#include "romtypes.h"
 #include "platform.h"
 #include "rotate.h"
+#include "scale.h"
 
 static int failures, checks;
 
@@ -110,62 +113,8 @@ void DrawTile16 (uint32 Tile, uint32 Offset, uint32 StartLine, uint32 LineCount)
 void DrawClippedTile16 (uint32 Tile, uint32 Offset, uint32 StartPixel, uint32 Width,
                         uint32 StartLine, uint32 LineCount);
 
-/* The original drawers (Snes9x 1.43's tile.cpp, WRITE_4PIXELS16 with the
- * RENDER_TILE and RENDER_CLIPPED_TILE macros of tile.h). */
-static uint8 ConvertTile (uint8 *, uint32)
-{
-    return TRUE;   /* never called: the test's tiles are all cached */
-}
-
-static inline void REF_WRITE_4PIXELS16 (uint32 Offset, uint8 *Pixels, uint16 *ScreenColors)
-{
-    uint8  Pixel;
-    uint16 *Screen = (uint16 *) GFX.S + (int32) Offset;
-    uint8  *Depth = GFX.DB + (int32) Offset;
-
-    for (uint8 N = 0; N < 4; N++)
-    {
-        if (GFX.Z1 > Depth [N] && (Pixel = Pixels[N]))
-        {
-            Screen [N] = ScreenColors [Pixel];
-            Depth [N] = GFX.Z2;
-        }
-    }
-}
-
-static inline void REF_WRITE_4PIXELS16_FLIPPED (uint32 Offset, uint8 *Pixels, uint16 *ScreenColors)
-{
-    uint8  Pixel;
-    uint16 *Screen = (uint16 *) GFX.S + (int32) Offset;
-    uint8  *Depth = GFX.DB + (int32) Offset;
-
-    for (uint8 N = 0; N < 4; N++)
-    {
-        if (GFX.Z1 > Depth [N] && (Pixel = Pixels[3 - N]))
-        {
-            Screen [N] = ScreenColors [Pixel];
-            Depth [N] = GFX.Z2;
-        }
-    }
-}
-
-static void RefDrawTile16 (uint32 Tile, uint32 Offset, uint32 StartLine, uint32 LineCount)
-{
-    TILE_PREAMBLE
-    register uint8 *bp;
-
-    RENDER_TILE(REF_WRITE_4PIXELS16, REF_WRITE_4PIXELS16_FLIPPED, 4)
-}
-
-static void RefDrawClippedTile16 (uint32 Tile, uint32 Offset, uint32 StartPixel, uint32 Width,
-                                  uint32 StartLine, uint32 LineCount)
-{
-    TILE_PREAMBLE
-    register uint8 *bp;
-
-    TILE_CLIP_PREAMBLE
-    RENDER_CLIPPED_TILE(REF_WRITE_4PIXELS16, REF_WRITE_4PIXELS16_FLIPPED, 4)
-}
+/* The original drawers */
+#include "tile_ref.h"
 
 #define TEST_PITCH 320
 #define TEST_LINES 40
@@ -314,6 +263,69 @@ static void test_rotation(void)
     CHECK(memcmp(fast, slow, sizeof(fast_words)) == 0, "rotate_block of the whole frame differs");
 }
 
+/* ---- The picture stretched to the whole screen (scale.h) ---- */
+
+static void test_scaling(void)
+{
+    /* A picture of random pixels in a frame of 320-pixel lines, at the
+     * place the game draws it, with lines of other pixels around it. */
+    static uint16_t picture[320 * 260] __attribute__ ((aligned (8)));
+    static uint16_t expected[320 * 240], landscape[320 * 240];
+    static uint32_t portrait_words[240 * 320 / 2];
+    uint16_t *portrait = (uint16_t *) portrait_words;
+    uint16_t *turned = (uint16_t *) slow_words;
+
+    for (int i = 0; i < 320 * 260; i++)
+        picture[i] = (uint16_t) rnd(0x10000);
+    const uint16_t *src = picture + 10 * 320 + 32;
+
+    int mismatches[2][2] = { { 0, 0 }, { 0, 0 } };
+    for (int lines = SCALE_MIN_LINES; lines <= 240; lines++)
+        for (int smooth = 0; smooth < 2; smooth++)
+        {
+            scale_reference(src, 320, lines, smooth, expected, 320);
+            rotate_frame_reference(expected, turned, ROTATE_FLIP_COLUMNS);
+            memset(portrait_words, 0x55, sizeof(portrait_words));
+            scale_turn(src, 320, lines, smooth, portrait);
+            mismatches[0][smooth] += memcmp(portrait, turned, sizeof(portrait_words)) != 0;
+            memset(landscape, 0x55, sizeof(landscape));
+            scale_frame(src, 320, lines, smooth, landscape, 320);
+            mismatches[1][smooth] += memcmp(landscape, expected, sizeof(landscape)) != 0;
+        }
+    for (int smooth = 0; smooth < 2; smooth++)
+    {
+        CHECK(mismatches[0][smooth] == 0, "scale_turn (smooth %d) differs at %d of 121 heights", smooth,
+              mismatches[0][smooth]);
+        CHECK(mismatches[1][smooth] == 0, "scale_frame (smooth %d) differs at %d of 121 heights", smooth,
+              mismatches[1][smooth]);
+    }
+
+    /* The definition itself, on a picture whose pixels say where they are:
+     * 224 lines, sharp: across, columns 0 1 2 2 3 4 5 6 6 7 ...; down,
+     * line 7 shown twice (output lines 7 and 8), then every 14 lines. */
+    for (int y = 0; y < 224; y++)
+        for (int x = 0; x < 256; x++)
+            picture[y * 320 + x] = (uint16_t) (y << 8 | x);
+    scale_reference(picture, 320, 224, 0, expected, 320);
+    static const int columns[10] = { 0, 1, 2, 2, 3, 4, 5, 6, 6, 7 };
+    int across = 1;
+    for (int X = 0; X < 10; X++)
+        across &= expected[X] == columns[X];
+    CHECK(across && expected[319] == 255, "sharp: the third of every 4 columns shown twice");
+    CHECK(expected[7 * 320] >> 8 == 7 && expected[8 * 320] >> 8 == 7 && expected[9 * 320] >> 8 == 8 &&
+          expected[22 * 320] >> 8 == 21 && expected[23 * 320] >> 8 == 21 && expected[239 * 320] >> 8 == 223,
+          "sharp: lines 7, 21, ... shown twice, the last line last");
+    /* Smooth: the repeated column and line are averages (here of
+     * neighbouring values, so the average rounds down). */
+    scale_reference(picture, 320, 224, 1, expected, 320);
+    uint16_t c = (uint16_t) 2, d = (uint16_t) 3;
+    uint16_t avg = (uint16_t) ((c & d) + (((c ^ d) & 0xF7DE) >> 1));
+    CHECK(expected[3] == avg && expected[2] == 2 && expected[4] == 3, "smooth: column 3 averages columns 2 and 3");
+    uint16_t l7 = (uint16_t) (7 << 8), l8 = (uint16_t) (8 << 8);
+    CHECK(expected[8 * 320] == (uint16_t) ((l7 & l8) + (((l7 ^ l8) & 0xF7DE) >> 1)) && expected[7 * 320] == l7,
+          "smooth: output line 8 averages lines 7 and 8");
+}
+
 /* ---- Settings files ---- */
 
 static void write_file(const char *path, const char *text)
@@ -362,11 +374,14 @@ static void test_config(void)
     CHECK(cfg.auto_increment == 1 && cfg.save_on_exit == 1 && cfg.load_on_start == 1,
           "defaults: auto-increment, save when leaving and load on start are on");
     CHECK(cfg.cpu_speed == CPU_SPEED_NORMAL && cfg.screen_dma == 0, "defaults: normal CPU speed, no DMA");
+    CHECK(cfg.screen_size == SCREEN_SIZE_ORIGINAL && cfg.smooth == 1,
+          "defaults: the original screen size, smooth stretching on");
     CHECK(cfg.keys[ACTION_A][0].key == KEY_SHIFT && !cfg.keys[ACTION_A][0].with && !cfg.keys[ACTION_A][1].key,
           "defaults: A is shift, with no second key");
     CHECK(cfg.keys[ACTION_LOAD_NEWEST][0].key == KEY_N && cfg.keys[ACTION_SHOW_FPS][0].key == 0,
           "defaults: Load newest on N, the FPS counter hotkey has no key");
     CHECK(cfg.frameskip_type == FRAMESKIP_OFF && cfg.show_fps == 1, "defaults: frameskip off, FPS counter on");
+    CHECK(cfg.state_pictures == 1, "defaults: save state pictures on");
     CHECK(cfg.auto_slot == 0 && cfg.quit_new_save == 1 && cfg.brightness == 0,
           "defaults: no auto slot, a new save on quit, the calculator's own brightness");
     CHECK(cfg.keys[ACTION_BRIGHTER][0].key == KEY_PLUS && cfg.keys[ACTION_DIMMER][0].key == KEY_MINUS,
@@ -429,9 +444,16 @@ static void test_config(void)
     CHECK(cfg.keys[ACTION_START][0].key == KEY_MINUS && cfg.keys[ACTION_SELECT][0].key == KEY_PLUS &&
           !cfg.keys[ACTION_BRIGHTER][0].key && !cfg.keys[ACTION_DIMMER][0].key,
           "... both, when the file uses + and -");
-    write_file(global_path, "config_version=3\nbrightness=99\nauto_slot=5\n");
+    write_file(global_path, "config_version=3\nscreen_size=2\nsmooth=0\n");
     config_load();
-    CHECK(cfg.brightness == BRIGHTNESS_LEVELS && cfg.auto_slot == 1, "out of range values are clamped");
+    CHECK(cfg.screen_size == SCREEN_SIZE_FULL_CROP && cfg.smooth == 0, "the screen size and smoothing read as written");
+    config_save();
+    CHECK(file_has_line(global_path, "screen_size=2") && file_has_line(global_path, "smooth=0"),
+          "... and written back");
+    write_file(global_path, "config_version=3\nbrightness=99\nauto_slot=5\nscreen_size=7\n");
+    config_load();
+    CHECK(cfg.brightness == BRIGHTNESS_LEVELS && cfg.auto_slot == 1 && cfg.screen_size == NUM_SCREEN_SIZES - 1,
+          "out of range values are clamped");
     write_file(global_path, "config_version=2\nauto_increment=0\nsave_on_exit=0\nload_on_start=1\n"
                             "cpu_speed=3\nscreen_dma=1\nkey_a=6\nkey_a_2=121+20\nkey_save_state_2=121+23\n"
                             "key_b=999\nkey_x=113\nkey_y=121+121\nkey_next_slot=0\nkey_next_slot_2=20\n");
@@ -559,6 +581,100 @@ static void test_selfstore(void)
     program_file[0] = 0;
 }
 
+/* ---- ROM file associations in ndless.cfg.tns (romtypes.h) ---- */
+
+static char *read_whole(const char *path, size_t *len)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    static char buffer[4096];
+    *len = fread(buffer, 1, sizeof(buffer) - 1, f);
+    buffer[*len] = 0;
+    fclose(f);
+    return buffer;
+}
+
+/* romtypes_update on a C string; "" for no change. */
+static const char *updated(const char *text, const char *program)
+{
+    static char result[2048];
+    size_t len = 0;
+    char *out = romtypes_update(text, text ? strlen(text) : 0, program, &len);
+    if (!out)
+        return "";
+    snprintf(result, sizeof(result), "%.*s", (int) len, out);
+    free(out);
+    return result;
+}
+
+#define ALL_TYPES(name) "ext.sfc=" name "\next.smc=" name "\next.fig=" name "\next.swc=" name "\next.zip=" name "\n"
+
+static void test_romtypes(void)
+{
+    CHECK(strcmp(updated(NULL, "_PocketSNES"), ALL_TYPES("_PocketSNES")) == 0,
+          "no ndless.cfg.tns: a line for each ROM type");
+    CHECK(strcmp(updated("ext.nes=nespire\next.gba=gpsp_launcher", "_PocketSNES"),
+                 "ext.nes=nespire\next.gba=gpsp_launcher\n" ALL_TYPES("_PocketSNES")) == 0,
+          "other programs' lines stay, ours go after them (on a new line)");
+    CHECK(strcmp(updated("ext.nes=nespire\n" ALL_TYPES("_PocketSNES"), "_PocketSNES"), "") == 0,
+          "already there: nothing to write");
+    CHECK(strcmp(updated(" ext.sfc = pocketsnes  # old\r\next.smc=snes9x\r\n#ext.fig=_PocketSNES\r\n"
+                         "ext.swc=_pocketsnes_old\next.zip=_PocketSNES\n", "_PocketSNES"),
+                 " ext.sfc = _PocketSNES  # old\r\next.smc=snes9x\r\n#ext.fig=_PocketSNES\r\n"
+                 "ext.swc=_PocketSNES\next.zip=_PocketSNES\next.fig=_PocketSNES\n") == 0,
+          "older PocketSNES names renamed in place, another program's type kept, a commented line not counted");
+    CHECK(strcmp(updated("ext.sfcx=pocketsnes\next.sfc=\n", "_PocketSNES"),
+                 "ext.sfcx=pocketsnes\next.sfc=\next.smc=_PocketSNES\next.fig=_PocketSNES\n"
+                 "ext.swc=_PocketSNES\next.zip=_PocketSNES\n") == 0,
+          "only exact keys count; an empty value keeps its type, as Ndless sees it");
+
+    char ndless_dir[600], cfg_path[700];
+    size_t len;
+    snprintf(ndless_dir, sizeof(ndless_dir), "%s/ndless", documents_dir);
+    snprintf(cfg_path, sizeof(cfg_path), "%s/ndless.cfg.tns", ndless_dir);
+    CHECK(romtypes_register(cfg_path, "_PocketSNES") == 0, "no ndless folder: nothing written");
+    mkdir(ndless_dir, 0755);
+    FILE *f = fopen(cfg_path, "wb");
+    fputs("ext.nes=nespire\n", f);
+    fclose(f);
+    CHECK(romtypes_register(cfg_path, "_PocketSNES") == 1, "missing types: the file is written");
+    const char *text = read_whole(cfg_path, &len);
+    CHECK(text && strcmp(text, "ext.nes=nespire\n" ALL_TYPES("_PocketSNES")) == 0, "... with the lines added");
+    CHECK(romtypes_register(cfg_path, "_PocketSNES") == 0, "the next start doesn't write it again");
+}
+
+/* ---- Whether the OS's file list needs reading again (paths.h) ---- */
+
+static void test_file_list(void)
+{
+    char state[800], other[800];
+    paths_save_dir_make();
+    paths_save_file(state, sizeof(state), "Game.sfc.sv001.tns");
+    paths_save_file(other, sizeof(other), "Game.sfc.sv002.tns");
+    FILE *f = fopen(state, "wb");
+    fputs("1", f);
+    fclose(f);
+
+    paths_file_list_start();
+    CHECK(!paths_file_list_changed(), "nothing changed: no refresh");
+    f = fopen(state, "wb");
+    fputs("22", f);
+    fclose(f);
+    CHECK(!paths_file_list_changed(), "a state written over (same name): no refresh");
+    f = fopen(other, "wb");
+    fclose(f);
+    CHECK(paths_file_list_changed(), "a new state: refresh");
+    remove(other);
+    CHECK(!paths_file_list_changed(), "... gone again: the same names as at start");
+    rename(state, other);
+    CHECK(paths_file_list_changed(), "a state renamed: refresh");
+    rename(other, state);
+    paths_file_list_touched();
+    CHECK(paths_file_list_changed(), "a name changed outside the saves folder: refresh");
+    remove(state);
+}
+
 static void test_reset_all(void)
 {
     config_load();
@@ -669,10 +785,13 @@ int main(void)
 
     test_tile_drawing();
     test_rotation();
+    test_scaling();
     test_config();
     test_brightness();
     test_selfstore();
     test_reset_all();
+    test_romtypes();
+    test_file_list();
     test_bindings();
 
     char command[700];

@@ -88,8 +88,12 @@
 *******************************************************************************/
 #define FX_DO_ROMBUFFER
 
+#ifdef ARM_ASM_FX
+#include "snes9x.h"	/* Settings.AsmCPU */
+#endif
 #include "fxemu.h"
 #include "fxinst.h"
+#include <stddef.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -444,6 +448,9 @@ static void fx_plot_4bit()
     if(c & 0x08) a[0x11] |= v;
     else a[0x11] &= ~v;
 }
+
+/* (the translator, fxjit.cpp, does this one itself when it's the mode's) */
+void (*fx_plot_4bit_function) () = fx_plot_4bit;
 
 /* 4c(ALT1) - rpix - read color of the pixel with R1,R2 as x,y */
 static void fx_rpix_4bit()
@@ -1592,9 +1599,714 @@ static void fx_sm_r13() { FX_SM(13); }
 static void fx_sm_r14() { FX_SM(14); }
 static void fx_sm_r15() { FX_SM(15); }
 
+/*** The ARM assembler interpreter (pocketsnes/arm/fx_run_arm.s) ***/
+
+#ifdef ARM_ASM_FX
+/* The offsets fx_run_arm.s uses (its .equ list) */
+#define FX_CHECK_OFFSET(field, offset) \
+    static_assert (offsetof (struct FxRegs_s, field) == (offset), \
+		   "FxRegs_s." #field " moved: update pocketsnes/arm/fx_run_arm.s")
+FX_CHECK_OFFSET (avReg, 0);
+FX_CHECK_OFFSET (vColorReg, 64);
+FX_CHECK_OFFSET (vPlotOptionReg, 68);
+FX_CHECK_OFFSET (vStatusReg, 72);
+FX_CHECK_OFFSET (vLastRamAdr, 96);
+FX_CHECK_OFFSET (pvDreg, 100);
+FX_CHECK_OFFSET (pvSreg, 104);
+FX_CHECK_OFFSET (vRomBuffer, 108);
+FX_CHECK_OFFSET (vPipe, 109);
+FX_CHECK_OFFSET (vSign, 116);
+FX_CHECK_OFFSET (vZero, 120);
+FX_CHECK_OFFSET (vCarry, 124);
+FX_CHECK_OFFSET (vOverflow, 128);
+FX_CHECK_OFFSET (pvRegisters, 140);
+FX_CHECK_OFFSET (apvScreen, 172);
+FX_CHECK_OFFSET (x, 300);
+FX_CHECK_OFFSET (vScreenHeight, 428);
+FX_CHECK_OFFSET (pvRamBank, 444);
+FX_CHECK_OFFSET (pvRomBank, 448);
+FX_CHECK_OFFSET (pvPrgBank, 452);
+
+extern "C"
+{
+    void fx_run_arm (void);
+    extern uint32 fx_arm_handlers [];
+    extern uint32 fx_arm_tables [3072];
+}
+#endif
+
+/* fx_run_arm.s's handlers, in the order of its fx_arm_handlers list */
+enum FxArmHandler
+{
+    H_SLOW, H_STOP, H_NOP, H_LSR, H_ROL, H_BRA, H_BGE, H_BLT, H_BNE, H_BEQ, H_BPL, H_BMI,
+    H_BCC, H_BCS, H_BVC, H_BVS, H_TO, H_WITH, H_STW, H_STB, H_LOOP,
+    H_ALT1, H_ALT2, H_ALT3, H_LDW, H_LDB, H_SWAP, H_NOT,
+    H_ADD, H_ADC, H_ADD_I, H_ADC_I, H_SUB, H_SBC, H_SUB_I, H_CMP,
+    H_AND, H_BIC, H_AND_I, H_BIC_I, H_OR, H_XOR, H_OR_I, H_XOR_I,
+    H_MULT, H_UMULT, H_MULT_I, H_UMULT_I, H_LINK, H_SEX, H_ASR, H_ROR, H_JMP, H_LOB, H_HIB,
+    H_IBT, H_IBT_R14, H_IBT_R15, H_LMS, H_LMS_R14, H_SMS,
+    H_FROM, H_INC, H_INC_R14, H_DEC, H_DEC_R14,
+    H_GETB, H_IWT, H_IWT_R14, H_IWT_R15, H_LM, H_LM_R14, H_SM,
+    H_PLOT4, H_MERGE, H_COLOR, H_TO_R14, H_WITH_R14,
+    H_COUNT	/* (then the same list again, the R14 table's versions) */
+};
+
+/* Fills an interpreter's three tables (1024 handler addresses each, ALT mode
+ * << 8 | opcode): the fast one; the careful one, for a source or
+ * destination of R15, which runs everything but stop through
+ * fx_apfOpcodeTable; and the R14 one, for a destination of R14, with the
+ * handlers' versions that reload the ROM buffer (handlers [H_COUNT + h]).
+ * Instructions that would read or write R15 by register number run through
+ * the C table (H_SLOW) from every table, as do rpix, cache, cmode, sbk, div2,
+ * ljmp, fmult, lmult, getc, ramb, romb, getbh, getbl, getbs, and plot unless
+ * fx_arm_plot_entries says otherwise. */
+extern "C" void fx_arm_setup_tables (uint32 *tables, const uint32 *handlers)
+{
+    static const struct { uint8 first, last, alts, handler; } map[] =
+    {
+	/* alts: bit n = ALT mode n */
+	{ 0x00, 0x00, 15, H_STOP }, { 0x01, 0x01, 15, H_NOP }, { 0x03, 0x03, 15, H_LSR },
+	{ 0x04, 0x04, 15, H_ROL }, { 0x05, 0x05, 15, H_BRA }, { 0x06, 0x06, 15, H_BGE },
+	{ 0x07, 0x07, 15, H_BLT }, { 0x08, 0x08, 15, H_BNE }, { 0x09, 0x09, 15, H_BEQ },
+	{ 0x0a, 0x0a, 15, H_BPL }, { 0x0b, 0x0b, 15, H_BMI }, { 0x0c, 0x0c, 15, H_BCC },
+	{ 0x0d, 0x0d, 15, H_BCS }, { 0x0e, 0x0e, 15, H_BVC }, { 0x0f, 0x0f, 15, H_BVS },
+	{ 0x10, 0x1d, 15, H_TO }, { 0x20, 0x2d, 15, H_WITH },
+	{ 0x30, 0x3b, 5, H_STW }, { 0x30, 0x3b, 10, H_STB },
+	{ 0x3c, 0x3c, 15, H_LOOP }, { 0x3d, 0x3d, 15, H_ALT1 }, { 0x3e, 0x3e, 15, H_ALT2 },
+	{ 0x3f, 0x3f, 15, H_ALT3 },
+	{ 0x40, 0x4b, 5, H_LDW }, { 0x40, 0x4b, 10, H_LDB },
+	{ 0x4d, 0x4d, 15, H_SWAP }, { 0x4f, 0x4f, 15, H_NOT },
+	{ 0x50, 0x5e, 1, H_ADD }, { 0x50, 0x5e, 2, H_ADC }, { 0x50, 0x5f, 4, H_ADD_I },
+	{ 0x50, 0x5f, 8, H_ADC_I },
+	{ 0x60, 0x6e, 1, H_SUB }, { 0x60, 0x6e, 2, H_SBC }, { 0x60, 0x6f, 4, H_SUB_I },
+	{ 0x60, 0x6e, 8, H_CMP },
+	{ 0x71, 0x7e, 1, H_AND }, { 0x71, 0x7e, 2, H_BIC }, { 0x71, 0x7f, 4, H_AND_I },
+	{ 0x71, 0x7f, 8, H_BIC_I },
+	{ 0x80, 0x8e, 1, H_MULT }, { 0x80, 0x8e, 2, H_UMULT }, { 0x80, 0x8f, 4, H_MULT_I },
+	{ 0x80, 0x8f, 8, H_UMULT_I },
+	{ 0x91, 0x94, 15, H_LINK }, { 0x95, 0x95, 15, H_SEX }, { 0x96, 0x96, 5, H_ASR },
+	{ 0x97, 0x97, 15, H_ROR }, { 0x98, 0x9d, 5, H_JMP }, { 0x9e, 0x9e, 15, H_LOB },
+	{ 0xa0, 0xad, 1, H_IBT }, { 0xae, 0xae, 1, H_IBT_R14 }, { 0xaf, 0xaf, 1, H_IBT_R15 },
+	{ 0xa0, 0xad, 10, H_LMS }, { 0xae, 0xae, 10, H_LMS_R14 }, { 0xa0, 0xae, 4, H_SMS },
+	{ 0xb0, 0xbe, 15, H_FROM }, { 0xc0, 0xc0, 15, H_HIB },
+	{ 0xc1, 0xce, 1, H_OR }, { 0xc1, 0xce, 2, H_XOR }, { 0xc1, 0xcf, 4, H_OR_I },
+	{ 0xc1, 0xcf, 8, H_XOR_I },
+	{ 0xd0, 0xdd, 15, H_INC }, { 0xde, 0xde, 15, H_INC_R14 },
+	{ 0xe0, 0xed, 15, H_DEC }, { 0xee, 0xee, 15, H_DEC_R14 }, { 0xef, 0xef, 1, H_GETB },
+	{ 0xf0, 0xfd, 1, H_IWT }, { 0xfe, 0xfe, 1, H_IWT_R14 }, { 0xff, 0xff, 1, H_IWT_R15 },
+	{ 0xf0, 0xfd, 10, H_LM }, { 0xfe, 0xfe, 10, H_LM_R14 }, { 0xf0, 0xfe, 4, H_SM },
+	{ 0x70, 0x70, 15, H_MERGE }, { 0x4e, 0x4e, 5, H_COLOR },
+	{ 0x1e, 0x1e, 15, H_TO_R14 }, { 0x2e, 0x2e, 15, H_WITH_R14 },
+    };
+    uint8 handler [1024];
+    memset (handler, H_SLOW, sizeof handler);
+    for (unsigned m = 0; m < sizeof map / sizeof map [0]; m++)
+	for (int alt = 0; alt < 4; alt++)
+	    if (map [m].alts & (1 << alt))
+		for (int o = map [m].first; o <= map [m].last; o++)
+		    handler [(alt << 8) | o] = map [m].handler;
+    uint32 *fast = tables, *careful = tables + 1024, *r14 = tables + 2048;
+    for (int i = 0; i < 1024; i++)
+    {
+	fast [i] = handlers [handler [i]];
+	careful [i] = handlers [(i & 0xff) == 0 ? H_STOP : H_SLOW];
+	r14 [i] = handlers [H_COUNT + handler [i]];
+    }
+}
+
+/* plot (4c, ALT0 and ALT2) in assembler for the 4-bit colour modes, which
+ * fx_readRegisterSpace has set fx_apfOpcodeTable to before each run. */
+extern "C" void fx_arm_plot_entries (uint32 *tables, const uint32 *handlers)
+{
+    int h = fx_apfOpcodeTable [0x04c] == &fx_plot_4bit ? H_PLOT4 : H_SLOW;
+    tables [0x04c] = tables [0x24c] = handlers [h];
+    tables [2048 + 0x04c] = tables [2048 + 0x24c] = handlers [H_COUNT + h];
+}
+
 /*** GSU executions functions ***/
 
+/* The interpreter. The GSU's state lives in the GSU struct, but what every
+ * instruction touches is kept in local variables while it runs: the status
+ * register (for the ALT1, ALT2 and B prefix bits), the source and destination
+ * register pointers, the pipe byte and the program and RAM bank pointers. The
+ * common instructions are done right here, for any register (op & 15), each
+ * ending with a jump straight to the next one's code; the rare ones (plot,
+ * rpix, cmode, cache, ljmp, getc, romb, ramb, merge and a few more) call their
+ * function from fx_apfOpcodeTable, with the locals written back first and
+ * read again after. Every instruction does exactly what its function does:
+ * tests/fx_test.cpp runs random instructions and programs through this and
+ * through fx_run_reference (the original loop, a call through the table for
+ * every instruction) and compares the whole GSU state and RAM. In Yoshi's
+ * Island this takes ?? ARM instructions per GSU instruction, against 38.8. */
+
+#define FXR_CLRFLAGS { sfr &= ~(FLG_ALT1|FLG_ALT2|FLG_B); sidx = didx = 0; }
+#define FXR_FETCHPIPE { pipe = prg[USEX16(R15)]; }
+#define FXR_TESTR14 { if (didx == 14) READR14; }
+#define FXR_RAM(adr) ram[USEX16(adr)]
+#define FXR_SAVE { GSU.vStatusReg = sfr; GSU.pvSreg = &r[sidx]; GSU.pvDreg = &r[didx]; GSU.vPipe = pipe; }
+#define FXR_LOAD { sfr = GSU.vStatusReg; sidx = GSU.pvSreg - r; didx = GSU.pvDreg - r; pipe = GSU.vPipe; \
+		   prg = GSU.pvPrgBank; ram = GSU.pvRamBank; }
+/* Ends an instruction: fetch the next one and jump to its code */
+#define FXR_NEXT { if (--vCounter == 0) goto out; op = pipe; FXR_FETCHPIPE; \
+		   goto *table[(sfr & 0x300) | op]; }
+#define FXR_BRA(cond) { uint8 v = pipe; R15++; FXR_FETCHPIPE; if(cond) R15 += SEX8(v); else R15++; } FXR_NEXT
+
+/* The interpreter. A run starts by reading the ROM buffer (READR14); a step
+ * that goes on with a run doesn't (fx_step), as the ROM buffer keeps what it
+ * read when R14 was last written, even after a romb. */
+static void fx_run_c(uint32 nInstructions, bool start);
+
 void fx_run(uint32 nInstructions)
+{
+#ifdef ARM_ASM_FX
+    /* Until the GSU stops (FxEmulate's usual ~0), with the ARM CPU core set:
+     * translated into ARM code (fxjit.cpp), or with FX_INTERPRET run by the
+     * assembler interpreter (for speed comparisons) */
+    if (nInstructions == ~0u && Settings.AsmCPU)
+    {
+#ifdef FX_INTERPRET
+	fx_run_arm_interpreter ();
+#else
+	fx_jit_run ();
+#endif
+	return;
+    }
+#endif
+    fx_run_c (nInstructions, true);
+}
+
+void fx_step(uint32 nInstructions)
+{
+    fx_run_c (nInstructions, false);
+}
+
+#ifdef ARM_ASM_FX
+/* The assembler interpreter (fx_run_arm.s), until the GSU stops. */
+void fx_run_arm_interpreter(void)
+{
+    if (!fx_arm_tables [0])
+	fx_arm_setup_tables (fx_arm_tables, fx_arm_handlers);
+    fx_arm_plot_entries (fx_arm_tables, fx_arm_handlers);
+    fx_run_arm ();
+}
+#endif
+
+static void fx_run_c(uint32 nInstructions, bool start)
+{
+    static void *table[1024];
+    uint32 *const r = GSU.avReg;
+    uint32 sfr = GSU.vStatusReg;
+    uint32 sidx = GSU.pvSreg - r, didx = GSU.pvDreg - r;	/* source and destination register */
+    uint8 *prg = GSU.pvPrgBank, *ram = GSU.pvRamBank;
+    uint32 pipe = GSU.vPipe;
+    uint32 vCounter = nInstructions;
+    uint32 op;
+
+    if (!table[0])
+    {
+	/* Which code runs each opcode in each ALT mode (ALT mode << 8 | opcode) */
+	static const struct { uint16 first, last; uint8 alts; int8 code; } map[] =
+	{
+	    /* alts: bit n = ALT mode n (0x0f = all four) */
+	    { 0x00, 0x00, 0x0f,  1 }, { 0x01, 0x01, 0x0f,  2 }, { 0x03, 0x03, 0x0f,  3 }, { 0x04, 0x04, 0x0f,  4 },
+	    { 0x05, 0x05, 0x0f,  5 }, { 0x06, 0x06, 0x0f,  6 }, { 0x07, 0x07, 0x0f,  7 }, { 0x08, 0x08, 0x0f,  8 },
+	    { 0x09, 0x09, 0x0f,  9 }, { 0x0a, 0x0a, 0x0f, 10 }, { 0x0b, 0x0b, 0x0f, 11 }, { 0x0c, 0x0c, 0x0f, 12 },
+	    { 0x0d, 0x0d, 0x0f, 13 }, { 0x0e, 0x0e, 0x0f, 14 }, { 0x0f, 0x0f, 0x0f, 15 }, { 0x10, 0x1f, 0x0f, 16 },
+	    { 0x20, 0x2f, 0x0f, 17 }, { 0x30, 0x3b, 0x05, 18 }, { 0x30, 0x3b, 0x0a, 19 }, { 0x3c, 0x3c, 0x0f, 20 },
+	    { 0x3d, 0x3d, 0x0f, 21 }, { 0x3e, 0x3e, 0x0f, 22 }, { 0x3f, 0x3f, 0x0f, 23 }, { 0x40, 0x4b, 0x05, 24 },
+	    { 0x40, 0x4b, 0x0a, 25 }, { 0x50, 0x5f, 0x01, 26 }, { 0x50, 0x5f, 0x02, 27 }, { 0x50, 0x5f, 0x04, 28 },
+	    { 0x50, 0x5f, 0x08, 29 }, { 0x60, 0x6f, 0x01, 30 }, { 0x60, 0x6f, 0x02, 31 }, { 0x60, 0x6f, 0x04, 32 },
+	    { 0x60, 0x6f, 0x08, 33 }, { 0x71, 0x7f, 0x01, 34 }, { 0x71, 0x7f, 0x02, 35 }, { 0x71, 0x7f, 0x04, 36 },
+	    { 0x71, 0x7f, 0x08, 37 }, { 0x80, 0x8f, 0x01, 38 }, { 0x80, 0x8f, 0x02, 39 }, { 0x80, 0x8f, 0x04, 40 },
+	    { 0x80, 0x8f, 0x08, 41 }, { 0x91, 0x94, 0x0f, 42 }, { 0x98, 0x9d, 0x05, 43 }, { 0xa0, 0xaf, 0x01, 44 },
+	    { 0xa0, 0xaf, 0x0a, 45 }, { 0xa0, 0xaf, 0x04, 46 }, { 0xb0, 0xbf, 0x0f, 47 }, { 0xc1, 0xcf, 0x01, 48 },
+	    { 0xc1, 0xcf, 0x02, 49 }, { 0xc1, 0xcf, 0x04, 50 }, { 0xc1, 0xcf, 0x08, 51 }, { 0xd0, 0xde, 0x0f, 52 },
+	    { 0xe0, 0xee, 0x0f, 53 }, { 0xef, 0xef, 0x01, 54 }, { 0xf0, 0xff, 0x01, 55 }, { 0xf0, 0xff, 0x0a, 56 },
+	    { 0xf0, 0xff, 0x04, 57 },
+	};
+	void *const code[] =
+	{
+	    &&slow, &&stop, &&nop, &&lsr, &&rol, &&bra, &&bge, &&blt, &&bne, &&beq, &&bpl, &&bmi, &&bcc, &&bcs,
+	    &&bvc, &&bvs, &&to, &&with, &&stw, &&stb, &&loop, &&alt1, &&alt2, &&alt3, &&ldw, &&ldb, &&add,
+	    &&adc, &&add_i, &&adc_i, &&sub, &&sbc, &&sub_i, &&cmp, &&and_r, &&bic, &&and_i, &&bic_i, &&mult,
+	    &&umult, &&mult_i, &&umult_i, &&link, &&jmp, &&ibt, &&lms, &&sms, &&from, &&or_r, &&xor_r, &&or_i,
+	    &&xor_i, &&inc, &&dec, &&getb, &&iwt, &&lm, &&sm,
+	};
+	for (int i = 1; i < 1024; i++)
+	    table[i] = &&slow;
+	for (unsigned m = 0; m < sizeof map / sizeof map[0]; m++)
+	    for (int alt = 0; alt < 4; alt++)
+		if (map[m].alts & (1 << alt))
+		    for (int o = map[m].first; o <= map[m].last; o++)
+			table[(alt << 8) | o] = code[map[m].code];
+	table[0] = &&stop;	/* (set last: it marks the table as ready) */
+    }
+
+    if (start)
+	READR14;
+    /* Only stop clears G, and stop ends the run. */
+    if (!(sfr & FLG_G) || vCounter == 0)
+	return;
+    /* Execute the instruction in the pipe, and fetch the next byte into it */
+    op = pipe;
+    FXR_FETCHPIPE;
+    goto *table[(sfr & 0x300) | op];
+
+  stop:
+    sfr &= ~FLG_G;
+    if(!(GSU.pvRegisters[GSU_CFGR] & 0x80))
+	sfr |= FLG_IRQ;
+    GSU.vPlotOptionReg = 0;
+    pipe = 1;
+    FXR_CLRFLAGS;
+    R15++;
+    goto out;
+  nop:
+    FXR_CLRFLAGS; R15++;
+    FXR_NEXT
+  lsr:
+    {
+	uint32 v;
+	GSU.vCarry = r[sidx] & 1;
+	v = USEX16(r[sidx]) >> 1;
+	R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  rol:
+    {
+	uint32 v = USEX16((r[sidx] << 1) + GSU.vCarry);
+	GSU.vCarry = (r[sidx] >> 15) & 1;
+	R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  bra:
+    {
+	uint8 v = pipe; R15++; FXR_FETCHPIPE; R15 += SEX8(v);
+    }
+    FXR_NEXT
+    /* The branches, as fx_apfOpcodeTable has them (06 is fx_bge, 07 fx_blt) */
+  bge: FXR_BRA( (TEST_S!=0) == (TEST_OV!=0) )
+  blt: FXR_BRA( (TEST_S!=0) != (TEST_OV!=0) )
+  bne: FXR_BRA( !TEST_Z )
+  beq: FXR_BRA( TEST_Z )
+  bpl: FXR_BRA( !TEST_S )
+  bmi: FXR_BRA( TEST_S )
+  bcc: FXR_BRA( !TEST_CY )
+  bcs: FXR_BRA( TEST_CY )
+  bvc: FXR_BRA( !TEST_OV )
+  bvs: FXR_BRA( TEST_OV )
+  to:	/* to rn; move rn (B) */
+    {
+	uint32 n = op & 15;
+	if (sfr & FLG_B)
+	{
+	    r[n] = r[sidx];
+	    FXR_CLRFLAGS;
+	    if (n == 14) READR14;
+	    if (n != 15) R15++;
+	}
+	else
+	{
+	    didx = n;
+	    R15++;
+	}
+    }
+    FXR_NEXT
+  with:	/* with rn */
+    sfr |= FLG_B;
+    sidx = didx = op & 15;
+    R15++;
+    FXR_NEXT
+  stw:	/* stw (rn) */
+    {
+	uint32 a = r[op & 15];
+	GSU.vLastRamAdr = a;
+	FXR_RAM(a) = (uint8)r[sidx];
+	FXR_RAM(a^1) = (uint8)(r[sidx]>>8);
+	FXR_CLRFLAGS; R15++;
+    }
+    FXR_NEXT
+  stb:	/* stb (rn) */
+    {
+	uint32 a = r[op & 15];
+	GSU.vLastRamAdr = a;
+	FXR_RAM(a) = (uint8)r[sidx];
+	FXR_CLRFLAGS; R15++;
+    }
+    FXR_NEXT
+  loop:
+    GSU.vSign = GSU.vZero = --R12;
+    if( (uint16) R12 != 0 )
+	R15 = R13;
+    else
+	R15++;
+    FXR_CLRFLAGS;
+    FXR_NEXT
+  alt1:
+    sfr |= FLG_ALT1; sfr &= ~FLG_B; R15++;
+    FXR_NEXT
+  alt2:
+    sfr |= FLG_ALT2; sfr &= ~FLG_B; R15++;
+    FXR_NEXT
+  alt3:
+    sfr |= FLG_ALT1 | FLG_ALT2; sfr &= ~FLG_B; R15++;
+    FXR_NEXT
+  ldw:	/* ldw (rn) */
+    {
+	uint32 a = r[op & 15], v;
+	GSU.vLastRamAdr = a;
+	v = (uint32)FXR_RAM(a);
+	v |= ((uint32)FXR_RAM(a^1))<<8;
+	R15++; r[didx] = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  ldb:	/* ldb (rn) */
+    {
+	uint32 a = r[op & 15], v;
+	GSU.vLastRamAdr = a;
+	v = (uint32)FXR_RAM(a);
+	R15++; r[didx] = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  add:	/* add rn */
+    {
+	uint32 n = op & 15;
+	int32 s = SUSEX16(r[sidx]) + SUSEX16(r[n]);
+	GSU.vCarry = s >= 0x10000;
+	GSU.vOverflow = ~(r[sidx] ^ r[n]) & (r[n] ^ s) & 0x8000;
+	GSU.vSign = s;
+	GSU.vZero = s;
+	R15++; r[didx] = s;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  adc:	/* adc rn */
+    {
+	uint32 n = op & 15;
+	int32 s = SUSEX16(r[sidx]) + SUSEX16(r[n]) + SEX16(GSU.vCarry);
+	GSU.vCarry = s >= 0x10000;
+	GSU.vOverflow = ~(r[sidx] ^ r[n]) & (r[n] ^ s) & 0x8000;
+	GSU.vSign = s;
+	GSU.vZero = s;
+	R15++; r[didx] = s;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  add_i:	/* add #n */
+    {
+	int32 imm = op & 15;
+	int32 s = SUSEX16(r[sidx]) + imm;
+	GSU.vCarry = s >= 0x10000;
+	GSU.vOverflow = ~(r[sidx] ^ imm) & (imm ^ s) & 0x8000;
+	GSU.vSign = s;
+	GSU.vZero = s;
+	R15++; r[didx] = s;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  adc_i:	/* adc #n */
+    {
+	int32 imm = op & 15;
+	int32 s = SUSEX16(r[sidx]) + imm + SUSEX16(GSU.vCarry);
+	GSU.vCarry = s >= 0x10000;
+	GSU.vOverflow = ~(r[sidx] ^ imm) & (imm ^ s) & 0x8000;
+	GSU.vSign = s;
+	GSU.vZero = s;
+	R15++; r[didx] = s;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  sub:	/* sub rn */
+    {
+	uint32 n = op & 15;
+	int32 s = SUSEX16(r[sidx]) - SUSEX16(r[n]);
+	GSU.vCarry = s >= 0;
+	GSU.vOverflow = (r[sidx] ^ r[n]) & (r[sidx] ^ s) & 0x8000;
+	GSU.vSign = s;
+	GSU.vZero = s;
+	R15++; r[didx] = s;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  sbc:	/* sbc rn */
+    {
+	uint32 n = op & 15;
+	int32 s = SUSEX16(r[sidx]) - SUSEX16(r[n]) - (SUSEX16(GSU.vCarry^1));
+	GSU.vCarry = s >= 0;
+	GSU.vOverflow = (r[sidx] ^ r[n]) & (r[sidx] ^ s) & 0x8000;
+	GSU.vSign = s;
+	GSU.vZero = s;
+	R15++; r[didx] = s;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  sub_i:	/* sub #n */
+    {
+	int32 imm = op & 15;
+	int32 s = SUSEX16(r[sidx]) - imm;
+	GSU.vCarry = s >= 0;
+	GSU.vOverflow = (r[sidx] ^ imm) & (r[sidx] ^ s) & 0x8000;
+	GSU.vSign = s;
+	GSU.vZero = s;
+	R15++; r[didx] = s;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  cmp:	/* cmp rn */
+    {
+	uint32 n = op & 15;
+	int32 s = SUSEX16(r[sidx]) - SUSEX16(r[n]);
+	GSU.vCarry = s >= 0;
+	GSU.vOverflow = (r[sidx] ^ r[n]) & (r[sidx] ^ s) & 0x8000;
+	GSU.vSign = s;
+	GSU.vZero = s;
+	R15++;
+	FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  and_r:	/* and rn */
+    {
+	uint32 v = r[sidx] & r[op & 15];
+	R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  bic:	/* bic rn */
+    {
+	uint32 v = r[sidx] & ~r[op & 15];
+	R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  and_i:	/* and #n */
+    {
+	int32 imm = op & 15;
+	uint32 v = r[sidx] & imm;
+	R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  bic_i:	/* bic #n */
+    {
+	int32 imm = op & 15;
+	uint32 v = r[sidx] & ~imm;
+	R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  mult:	/* mult rn */
+    {
+	uint32 v = (uint32)(SEX8(r[sidx]) * SEX8(r[op & 15]));
+	R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  umult:	/* umult rn */
+    {
+	uint32 v = USEX8(r[sidx]) * USEX8(r[op & 15]);
+	R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  mult_i:	/* mult #n */
+    {
+	int32 imm = op & 15;
+	uint32 v = (uint32) (SEX8(r[sidx]) * ((int32)imm));
+	R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  umult_i:	/* umult #n */
+    {
+	int32 imm = op & 15;
+	uint32 v = USEX8(r[sidx]) * ((uint32)imm);
+	R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  link:	/* link #n */
+    R11 = R15 + (op & 15); FXR_CLRFLAGS; R15++;
+    FXR_NEXT
+  jmp:	/* jmp rn */
+    R15 = r[op & 15];
+    FXR_CLRFLAGS;
+    FXR_NEXT
+  ibt:	/* ibt rn,#pp */
+    {
+	uint32 n = op & 15;
+	uint8 v = pipe; R15++;
+	FXR_FETCHPIPE; R15++;
+	r[n] = SEX8(v);
+	FXR_CLRFLAGS;
+	if (n == 14) READR14;
+    }
+    FXR_NEXT
+  lms:	/* lms rn,(yy) */
+    {
+	uint32 n = op & 15;
+	GSU.vLastRamAdr = ((uint32)pipe) << 1;
+	R15++; FXR_FETCHPIPE; R15++;
+	r[n] = (uint32)FXR_RAM(GSU.vLastRamAdr);
+	r[n] |= ((uint32)FXR_RAM(GSU.vLastRamAdr+1))<<8;
+	FXR_CLRFLAGS;
+	if (n == 14) READR14;
+    }
+    FXR_NEXT
+  sms:	/* sms (yy),rn */
+    {
+	uint32 v = r[op & 15];
+	GSU.vLastRamAdr = ((uint32)pipe) << 1;
+	R15++; FXR_FETCHPIPE;
+	FXR_RAM(GSU.vLastRamAdr) = (uint8)v;
+	FXR_RAM(GSU.vLastRamAdr+1) = (uint8)(v>>8);
+	FXR_CLRFLAGS; R15++;
+    }
+    FXR_NEXT
+  from:	/* from rn; moves rn (B) */
+    {
+	uint32 n = op & 15;
+	if (sfr & FLG_B)
+	{
+	    uint32 v = r[n]; R15++; r[didx] = v;
+	    GSU.vOverflow = (v&0x80) << 16; GSU.vSign = v; GSU.vZero = v;
+	    FXR_TESTR14; FXR_CLRFLAGS;
+	}
+	else
+	{
+	    sidx = n;
+	    R15++;
+	}
+    }
+    FXR_NEXT
+  or_r:	/* or rn */
+    {
+	uint32 v = r[sidx] | r[op & 15]; R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  xor_r:	/* xor rn */
+    {
+	uint32 v = r[sidx] ^ r[op & 15]; R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  or_i:	/* or #n */
+    {
+	int32 imm = op & 15;
+	uint32 v = r[sidx] | imm; R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  xor_i:	/* xor #n */
+    {
+	int32 imm = op & 15;
+	uint32 v = r[sidx] ^ imm; R15++; r[didx] = v;
+	GSU.vSign = v;
+	GSU.vZero = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  inc:	/* inc rn */
+    {
+	uint32 n = op & 15;
+	r[n] += 1;
+	GSU.vSign = r[n];
+	GSU.vZero = r[n];
+	FXR_CLRFLAGS; R15++;
+	if (n == 14) READR14;
+    }
+    FXR_NEXT
+  dec:	/* dec rn */
+    {
+	uint32 n = op & 15;
+	r[n] -= 1;
+	GSU.vSign = r[n];
+	GSU.vZero = r[n];
+	FXR_CLRFLAGS; R15++;
+	if (n == 14) READR14;
+    }
+    FXR_NEXT
+  getb:	/* getb */
+    {
+	uint32 v = (uint32)GSU.vRomBuffer;
+	R15++; r[didx] = v;
+	FXR_TESTR14; FXR_CLRFLAGS;
+    }
+    FXR_NEXT
+  iwt:	/* iwt rn,#xx */
+    {
+	uint32 n = op & 15;
+	uint32 v = pipe; R15++; FXR_FETCHPIPE; R15++;
+	v |= USEX8(pipe) << 8; FXR_FETCHPIPE; R15++;
+	r[n] = v;
+	FXR_CLRFLAGS;
+	if (n == 14) READR14;
+    }
+    FXR_NEXT
+  lm:	/* lm rn,(xx) */
+    {
+	uint32 n = op & 15;
+	GSU.vLastRamAdr = pipe; R15++; FXR_FETCHPIPE; R15++;
+	GSU.vLastRamAdr |= USEX8(pipe) << 8; FXR_FETCHPIPE; R15++;
+	r[n] = FXR_RAM(GSU.vLastRamAdr);
+	r[n] |= USEX8(FXR_RAM(GSU.vLastRamAdr^1)) << 8;
+	FXR_CLRFLAGS;
+	if (n == 14) READR14;
+    }
+    FXR_NEXT
+  sm:	/* sm (xx),rn */
+    {
+	uint32 v = r[op & 15];
+	GSU.vLastRamAdr = pipe; R15++; FXR_FETCHPIPE; R15++;
+	GSU.vLastRamAdr |= USEX8(pipe) << 8; FXR_FETCHPIPE;
+	FXR_RAM(GSU.vLastRamAdr) = (uint8)v;
+	FXR_RAM(GSU.vLastRamAdr^1) = (uint8)(v>>8);
+	FXR_CLRFLAGS; R15++;
+    }
+    FXR_NEXT
+  slow:	/* the rest: through the table */
+    FXR_SAVE;
+    (*fx_apfOpcodeTable[(sfr & 0x300) | op])();
+    FXR_LOAD;
+    FXR_NEXT
+
+  out:
+    FXR_SAVE;
+}
+
+#ifdef FX_REFERENCE_RUN
+/* The original loop, for tests/fx_test.cpp */
+void fx_run_reference(uint32 nInstructions)
 {
     uint32 vCounter = nInstructions;
     READR14;
@@ -1607,12 +2319,8 @@ void fx_run(uint32 nInstructions)
 	if (vOpcode == 0 /* fx_stop opcode, all alternatives */)
 		return;
     }
- /*
-#ifndef FX_ADDRESS_CHECK
-    GSU.vPipeAdr = USEX16(R15-1) | (USEX8(GSU.vPrgBankReg)<<16);
-#endif
-*/
 }
+#endif
 
 /*** Special table for the different plot configurations ***/
 

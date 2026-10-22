@@ -31,6 +31,8 @@ for path in PPU/Mode7/RotZoom/RotZoom.sfc PPU/Mode7/Perspective/Perspective.sfc 
         { echo "couldn't download $name"; exit 1; }
 done
 [ -f "$ROMS/SramWrite.sfc" ] || python3 tests/make_sram_rom.py "$ROMS/SramWrite.sfc"
+[ -f "$ROMS/SDD1Test.sfc" ] && [ "$ROMS/SDD1Test.sfc" -nt tests/make_sdd1_rom.py ] ||
+    python3 tests/make_sdd1_rom.py "$ROMS/SDD1Test.sfc"
 
 # setup NAME ROM [config lines...]: a fake calculator folder layout in $OUT/NAME,
 # with a settings file (just "config_version=2" if no lines are given), so
@@ -192,6 +194,26 @@ play quitold tests/scripts/save3_quit.txt MonsterFarmJump.sfc
 s=$OUT/quitold/zPocketSNES_saves/MonsterFarmJump.sfc
 check "$(exists "$s.sv001.tns")$(exists "$s.sv002.tns")$(grep -c '^quit_new_save=0$' "$OUT/quitold/zPocketSNES_saves/pocketsnes.cfg.tns")" \
     yesno1 "an older settings file with auto-increment off gets New save on quit off"
+
+echo "== Leaving: the OS's file list"
+# On the calculator the OS reads all its files again at exit (slow with many
+# files), only when PocketSNES added, removed or renamed one; the PC build
+# logs "file list refreshed" there.
+refreshed() { cat "$1" 2>/dev/null | grep -c '^file list refreshed$'; }
+setup listnone MonsterFarmJump.sfc
+play_logged listnone tests/scripts/wait_quit.txt -
+check "$(refreshed "$OUT/listnone/log.txt")" 0 "opening the game list and leaving: no new files, no refresh"
+setup liststate MonsterFarmJump.sfc config_version=3 auto_increment=0 save_on_exit=1 quit_new_save=0 load_on_start=0
+play_logged liststate tests/scripts/wait_quit.txt MonsterFarmJump.sfc
+s=$OUT/liststate/zPocketSNES_saves/MonsterFarmJump.sfc
+check "$(exists "$s.sv001.tns")$(refreshed "$OUT/liststate/log.txt")" yes1 "a game saved a new state when it closed: refresh"
+rm "$OUT/liststate/log.txt"
+play_logged liststate tests/scripts/wait_quit.txt MonsterFarmJump.sfc
+check "$(exists "$s.sv002.tns")$(refreshed "$OUT/liststate/log.txt")" no0 "... saved over it the next time: no refresh"
+setup listold MonsterFarmJump.sfc
+mv "$OUT/listold/zPocketSNES_saves/pocketsnes.cfg.tns" "$OUT/listold/ndless/"
+play_logged listold tests/scripts/wait_quit.txt -
+check "$(refreshed "$OUT/listold/log.txt")" 1 "an older version's file moved into the saves folder: refresh"
 
 echo "== Brightness"
 # The pretend calculator's own backlight is 112 (level 6); levels 7, 8, 3
@@ -355,7 +377,8 @@ echo "== Save manager"
 setup manager MonsterFarmJump.sfc config_version=3
 play manager tests/scripts/save3_quit.txt MonsterFarmJump.sfc
 s=$OUT/manager/zPocketSNES_saves/MonsterFarmJump.sfc
-flags() { xxd -s 24 -l 1 -p "$1" 2>/dev/null; }
+# A state's "stored" flag (not compressed) as 00 or 01.
+flags() { local v; v=$(xxd -s 24 -l 1 -p "$1" 2>/dev/null) && printf '%02x' $((0x$v & 1)); }
 check "$(flags "$s.sv001.tns")$(flags "$s.sv004.tns")" 0000 "new states are compressed by default"
 size_before=$(stat -c %s "$s.sv002.tns")
 echo "rom_dir=$(realpath "$OUT")/manager/roms" >> "$OUT/manager/zPocketSNES_saves/pocketsnes.cfg.tns"
@@ -370,13 +393,77 @@ d=$OUT/storedrt/shots
 check "$(same "$d/A.png" "$d/B.png")$(flags "$OUT/storedrt/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns")" same01 \
     "with Compress saves off a state is stored as it is, and loads back exactly"
 
+echo "== Save state pictures"
+# tests/state_picture.py reads a state's picture; the card's pixels start at
+# 194, 79 (menu.cpp draw_state_picture under the Load state row).
+pic() { python3 tests/state_picture.py "$@"; }
+setup pic MonsterFarmJump.sfc config_version=3 show_fps=0 save_on_exit=0 load_on_start=0
+play pic tests/scripts/state_picture.txt MonsterFarmJump.sfc
+p=$OUT/pic/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns
+check "$(pic has "$p")$(pic frame "$p" "$OUT/pic/shots/saved.png")" yessame \
+    "a state keeps a picture of the frame it was saved at, shrunk to 112x98"
+check "$(pic card "$p" "$OUT/pic/shots/card.png" 194 79)" same "... and Load state in the menu shows it for that slot"
+setup picfps MonsterFarmJump.sfc config_version=3 show_fps=1 save_on_exit=0 load_on_start=0
+play picfps tests/scripts/state_picture.txt MonsterFarmJump.sfc
+pic png "$p" "$OUT/pic/picture.png"
+pic png "$OUT/picfps/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns" "$OUT/picfps/picture.png"
+check "$(same "$OUT/pic/picture.png" "$OUT/picfps/picture.png")" same \
+    "with the FPS counter on the picture is the same: what's drawn over the game isn't in it"
+setup picoff MonsterFarmJump.sfc config_version=3 state_pictures=0 save_on_exit=0 load_on_start=0
+play picoff tests/scripts/state_picture.txt MonsterFarmJump.sfc
+check "$(pic has "$OUT/picoff/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns")" no "with State pictures off a state has none"
+check "$(pic has "$s.sv002.tns")$(pic has "$OUT/storedrt/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns")" yesyes \
+    "the save manager kept the pictures when it uncompressed the states; Compress saves off stores one too"
+# Save state shows its card in the same place as Load state's.
+setup picsave MonsterFarmJump.sfc config_version=3 show_fps=0 save_on_exit=0 load_on_start=0
+play picsave tests/scripts/state_picture_save.txt MonsterFarmJump.sfc
+# cardbox SHOT: the card's area as a PNG next to it (SHOT.card.png)
+cardbox() { python3 -c "
+from PIL import Image
+Image.open('$1').crop((191, 76, 309, 180)).save('$1.card.png')"; echo "$1.card.png"; }
+check "$(pic card "$OUT/picsave/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns" "$OUT/picsave/shots/savecard.png" 194 79)" different \
+    "Save state on a new slot shows no picture (it's empty)"
+setup picover MonsterFarmJump.sfc config_version=3 show_fps=0 save_on_exit=0 load_on_start=0 auto_increment=0
+cp "$p" "$OUT/picover/zPocketSNES_saves/"
+play picover tests/scripts/state_picture_save.txt MonsterFarmJump.sfc
+check "$(pic card "$p" "$OUT/picover/shots/savecard.png" 194 79)" same \
+    "with auto-increment off Save state shows the state it replaces"
+setup savepick MonsterFarmJump.sfc config_version=3 show_fps=0 save_on_exit=0 load_on_start=0
+cp "$p" "$OUT/savepick/zPocketSNES_saves/"
+play_logged savepick tests/scripts/save_slot_pick.txt MonsterFarmJump.sfc
+s2=$OUT/savepick/zPocketSNES_saves/MonsterFarmJump.sfc
+check "$(exists "$s2.sv002.tns")$(exists "$s2.sv003.tns")$(grep -c '^message: Loaded slot 001' "$OUT/savepick/log.txt")" noyes1 \
+    "Save state's right goes from new slot 002 to 003, the save goes there, and Load state's slot didn't move"
+check "$(pic card "$s2.sv003.tns" "$OUT/savepick/shots/pick.png" 194 79)$(same "$(cardbox "$OUT/savepick/shots/pick.png")" "$(cardbox "$OUT/picsave/shots/savecard.png")")" differentsame \
+    "... an empty slot it picks shows the same empty card as a new slot"
+play_logged savepick tests/scripts/list_play_state.txt -
+check "$(grep -c '^message: Started from slot 001' "$OUT/savepick/log.txt")$(pic card "$s2.sv001.tns" "$OUT/savepick/shots/card.png" 194 64)" 1same \
+    "the game list's Play from a state starts the game from the slot picked (001, not the newest), with its picture"
+
+echo "== S-DD1 (Star Ocean, Street Fighter Alpha 2)"
+# backdrop NAME: green, red or other, from the centre of shots/end.png
+backdrop() {
+    python3 -c "
+from PIL import Image
+p = Image.open('$OUT/$1/shots/end.png').convert('RGB').getpixel((160, 120))
+print('green' if p[1] > 200 and p[0] < 50 else 'red' if p[0] > 200 and p[1] < 50 else 'other')" 2>/dev/null || echo none
+}
+setup sdd1 SDD1Test.sfc config_version=3 show_fps=0 save_on_exit=1 load_on_start=0
+play sdd1 tests/scripts/wait_shot_quit.txt SDD1Test.sfc
+check "$(backdrop sdd1)" green "the S-DD1 test cartridge passes (bank registers, 8 decompressing DMAs, \$4801 cleared)"
+mv "$OUT/sdd1/shots/end.png" "$OUT/sdd1/shots/first.png"
+sed -i 's/^load_on_start=0$/load_on_start=1/' "$OUT/sdd1/zPocketSNES_saves/pocketsnes.cfg.tns"
+play sdd1 tests/scripts/wait_shot_quit.txt SDD1Test.sfc
+check "$(backdrop sdd1)" green "loading its state on a fresh start puts the S-DD1 banks back"
+
 echo "== Menu"
 setup menu MonsterFarmJump.sfc config_version=2
 play menu tests/scripts/menu_options.txt MonsterFarmJump.sfc
 cfg=$OUT/menu/zPocketSNES_saves/pocketsnes.cfg.tns
 check "$(grep -c -e '^auto_increment=0$' -e '^save_on_exit=0$' -e '^load_on_start=0$' -e '^show_fps=2$' "$cfg")" 4 \
     "menu turned off auto-increment, saving when leaving and loading on start, and the FPS counter to detailed"
-check "$(grep -c -e '^screen_dma=1$' -e '^cpu_speed=4$' "$cfg")" 2 "menu set the screen output to DMA and the CPU speed to 432 MHz"
+check "$(grep -c -e '^screen_size=1$' -e '^screen_dma=1$' -e '^cpu_speed=4$' "$cfg")" 3 \
+    "menu set the screen size to full screen, the screen output to DMA and the CPU speed to 432 MHz"
 check "$(grep -c -e '^key_a=6$' -e '^key_a_2=121+20$' -e '^key_save_state_2=121+23$' "$cfg")" 3 \
     "menu set A to Z and shift+3, and shift+S as a second key for Save state"
 play menu tests/scripts/menu_game_settings.txt MonsterFarmJump.sfc
@@ -384,6 +471,34 @@ game_cfg=$OUT/menu/zPocketSNES_saves/MonsterFarmJump.sfc.cfg.tns
 check "$(grep -c -e '^own_settings=1$' -e '^auto_increment=1$' "$game_cfg" 2>/dev/null)" 2 \
     "settings for this game only: auto-increment went back on for the game"
 check "$(grep -c '^auto_increment=0$' "$cfg")" 1 "... and stayed off for all games"
+
+echo "== Full screen (Screen size)"
+# The same frame of a demo at the original size and stretched (sharp, smooth,
+# cropped), turned like on the CX II and shown whole (--landscape, as on
+# other calculators); tests/scale_check.py works out each stretched pixel
+# from the original screenshot.
+script=$(realpath tests/scripts/wait_shot_quit.txt)
+for lcd in turned landscape; do
+    opt=; [ $lcd = landscape ] && opt=--landscape
+    for size in 0 1 2; do
+        for smooth in 0 1; do
+            [ $size = 0 ] && [ $smooth = 1 ] && continue
+            name=full_${lcd}_${size}_${smooth}
+            setup $name RotZoom.sfc config_version=3 show_fps=0 screen_size=$size smooth=$smooth
+            (cd "$OUT/$name" && "$HOST" --script "$script" --shots shots \
+                --exe-dir ndless $opt roms/RotZoom.sfc.tns >/dev/null 2>&1)
+        done
+    done
+    o=$OUT/full_${lcd}_0_0/shots/end.png
+    for size in 1 2; do
+        for smooth in 0 1; do
+            check "$(python3 tests/scale_check.py "$o" "$OUT/full_${lcd}_${size}_${smooth}/shots/end.png" \
+                $((size - 1)) $smooth)" same "full screen, $lcd LCD, crop $((size - 1)), smooth $smooth: each pixel as defined"
+        done
+    done
+done
+check "$(same "$OUT/full_turned_1_1/shots/end.png" "$OUT/full_landscape_1_1/shots/end.png")" same \
+    "full screen looks the same turned and shown whole"
 
 echo "== Files that aren't ROMs"
 # The core crashes on files under 32 KB; documents and programs are .tns

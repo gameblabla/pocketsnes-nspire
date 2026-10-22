@@ -1,11 +1,13 @@
 # The game list: down to the game (".." is first), its menu, Save manager
-# (its eleventh entry). A marks all, U uncompresses them (which clears the
+# (its twelfth entry). A marks all, U uncompresses them (which clears the
 # marks), del deletes the selected one (slot 001) and enter answers yes.
 wait 5
 press down
 wait 3
 press menu
 wait 5
+press down
+wait 3
 press down
 wait 3
 press down

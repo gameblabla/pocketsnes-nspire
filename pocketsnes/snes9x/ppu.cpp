@@ -201,8 +201,21 @@ void S9xUpdateHTimer ()
 	}
 }
 
+#ifdef ARM_ASM_CPU
+/* With the ARM CPU core setting, the colours are rebuilt for a new
+ * brightness only when they're next drawn with (S9xUpdateScreen), and not
+ * at all if it's back to theirs by then: games change it and back in
+ * V-blank, Yoshi's Island twice a frame. Until then IPPU.XB and the
+ * colours stay as they were; CGRAM writes go on with the old brightness
+ * and are rebuilt with the rest. */
+bool8 S9xBrightnessPending = FALSE;
+#endif
+
 void S9xFixColourBrightness ()
 {
+#ifdef ARM_ASM_CPU
+    S9xBrightnessPending = FALSE;
+#endif
     IPPU.XB = mul_brightness [PPU.Brightness];
 #ifndef FOREVER_16_BIT
     if (Settings.SixteenBit)
@@ -227,6 +240,8 @@ void S9xFixColourBrightness ()
 /******************************************************************************/
 void S9xSetPPU (uint8 Byte, uint16 Address)
 {
+	if (S9xQueuedRenderLine >= 0 && CPU.Cycles >= S9xRenderLinePos)
+		S9xFlushQueuedRenderLine ();
 //    fprintf(stderr, "%03d: %02x to %04x\n", CPU.V_Counter, Byte, Address);
 	if (Address <= 0x2183)
 	{
@@ -242,6 +257,11 @@ void S9xSetPPU (uint8 Byte, uint16 Address)
 					IPPU.ColorsChanged = TRUE;
 					IPPU.DirectColourMapsNeedRebuild = TRUE;
 					PPU.Brightness = Byte & 0xF;
+#ifdef ARM_ASM_CPU
+					if (Settings.AsmCPU)
+						S9xBrightnessPending = TRUE;
+					else
+#endif
 					S9xFixColourBrightness ();
 					if (PPU.Brightness > IPPU.MaxBrightness)
 						IPPU.MaxBrightness = PPU.Brightness;
@@ -795,7 +815,13 @@ void S9xSetPPU (uint8 Byte, uint16 Address)
 		  case 0x2132:
 			if (Byte != Memory.FillRAM [0x2132])
 			{
-				FLUSH_REDRAW ();
+				// Each line takes its fixed colour (RenderLine), and the
+				// backdrop passes use that. The tile drawers use one fixed
+				// colour for all the lines they draw, so the lines above
+				// must be drawn first when any layer has colour maths
+				// ($2131) or pseudo hi-res ($2133 bit 3) turns it on for all.
+				if ((Memory.FillRAM [0x2131] & 0x1f) || (Memory.FillRAM [0x2133] & 0x08))
+					FLUSH_REDRAW ();
 				// Colour data for fixed colour addition/subtraction
 				if (Byte & 0x80)
 					PPU.FixedColourBlue = Byte & 0x1f;
@@ -837,7 +863,8 @@ void S9xSetPPU (uint8 Byte, uint16 Address)
 #endif
 				//if((Byte & 1)&&(PPU.BGMode==5||PPU.BGMode==6))
 				//IPPU.Interlace=1;
-				if((Memory.FillRAM [0x2133] ^ Byte)&3)
+				// (Bit 3, pseudo hi-res, decides whether $2132 writes redraw)
+				if((Memory.FillRAM [0x2133] ^ Byte)&0x0b)
 				{
 					FLUSH_REDRAW ();
 					if((Memory.FillRAM [0x2133] ^ Byte)&2)
@@ -1951,6 +1978,17 @@ void S9xSetCPU (uint8 byte, uint16 Address)
 #endif
 			break;
 
+		  case 0x4804:
+		  case 0x4805:
+		  case 0x4806:
+		  case 0x4807:
+			// S-DD1: which megabyte of the ROM banks c0-cf, d0-df, e0-ef
+			// and f0-ff show ($4800 and $4801, the DMA channels that
+			// decompress, only need keeping in FillRAM, below)
+			if (Settings.SDD1)
+				S9xSetSDD1MemoryMap (Address - 0x4804, byte & 7);
+			break;
+
 		  default:
 #ifdef DEBUGGER
 			missing.unknowncpu_write = Address;
@@ -2439,6 +2477,7 @@ static void CommonPPUReset ()
 		IPPU.ScreenColors [c] = c;
 	S9xFixColourBrightness ();
 	IPPU.PreviousLine = IPPU.CurrentLine = 0;
+	S9xQueuedRenderLine = -1;
 
 	if (Settings.ControllerOption == 0)
 		IPPU.Controller = SNES_MAX_CONTROLLER_OPTIONS - 1;
@@ -3050,6 +3089,9 @@ uint8 REGISTER_4212()
 
 void FLUSH_REDRAW ()
 {
+    // (DMA to VRAM and CG-RAM comes here without S9xSetPPU.)
+    if (S9xQueuedRenderLine >= 0 && CPU.Cycles >= S9xRenderLinePos)
+	S9xFlushQueuedRenderLine ();
     if (IPPU.PreviousLine != IPPU.CurrentLine)
     S9xUpdateScreen ();
 }

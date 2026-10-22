@@ -41,9 +41,9 @@ CORE_FLAGS     = $(OPT) $(DEFINES) $(INCLUDE) -w
 FRONTEND_FLAGS = $(OPT) $(DEFINES) $(FRONTEND_INCLUDE) $(SDL_FLAGS) -Wall -Wextra -Wno-unused-parameter
 
 CORE_SRC     = $(wildcard pocketsnes/snes9x/*.cpp)
-FRONTEND_SRC = frontend/savemanager.cpp frontend/romzip.cpp frontend/paths.cpp frontend/selfstore.cpp frontend/brightness.cpp frontend/keys.cpp frontend/draw.cpp frontend/ui.cpp frontend/config.cpp frontend/states.cpp \
+FRONTEND_SRC = frontend/savemanager.cpp frontend/romzip.cpp frontend/romtypes.cpp frontend/paths.cpp frontend/selfstore.cpp frontend/brightness.cpp frontend/keys.cpp frontend/draw.cpp frontend/ui.cpp frontend/config.cpp frontend/states.cpp \
                frontend/gui.cpp frontend/browser.cpp frontend/menu.cpp frontend/overclock.cpp frontend/emu.cpp \
-               frontend/main.cpp frontend/rotate.cpp frontend/platform_host.cpp
+               frontend/main.cpp frontend/rotate.cpp frontend/scale.cpp frontend/platform_host.cpp
 
 CORE_OBJ     = $(patsubst %.cpp,$(BUILD)/%.o,$(CORE_SRC))
 FRONTEND_OBJ = $(patsubst %.cpp,$(BUILD)/%.o,$(FRONTEND_SRC))
@@ -65,7 +65,8 @@ $(TARGET): $(CORE_OBJ) $(FRONTEND_OBJ)
 # tests use is linked, plus the frontend files they test.
 UNIT_TESTS = tests/unit_tests
 UNIT_OBJ   = $(BUILD)/tests/unit_tests.o $(BUILD)/frontend/config.o $(BUILD)/frontend/keys.o \
-             $(BUILD)/frontend/rotate.o $(BUILD)/frontend/brightness.o $(BUILD)/frontend/paths.o $(BUILD)/frontend/selfstore.o $(BUILD)/frontend/romzip.o
+             $(BUILD)/frontend/rotate.o $(BUILD)/frontend/scale.o $(BUILD)/frontend/brightness.o $(BUILD)/frontend/paths.o $(BUILD)/frontend/selfstore.o $(BUILD)/frontend/romzip.o \
+             $(BUILD)/frontend/romtypes.o
 
 $(BUILD)/libcore.a: $(CORE_OBJ)
 	rm -f $@
@@ -81,9 +82,24 @@ $(UNIT_TESTS): $(UNIT_OBJ) $(BUILD)/libcore.a
 unit-tests: $(UNIT_TESTS)
 	./$(UNIT_TESTS)
 
+# Super FX interpreter test (tests/fx_test.cpp): fx_run against the original
+# loop, fx_run_reference, which this build of fxinst.cpp also has.
+FX_TEST = tests/fx_test
+FX_TEST_OBJ = $(BUILD)/tests/fx_test.o $(BUILD)/fxtest/fxinst.o $(BUILD)/fxtest/fxemu.o
+
+$(BUILD)/fxtest/%.o: pocketsnes/snes9x/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CORE_FLAGS) -DFX_REFERENCE_RUN -MMD -c $< -o $@
+
+$(FX_TEST): $(FX_TEST_OBJ)
+	$(CXX) $^ -o $@
+
+fx-test: $(FX_TEST)
+	./$(FX_TEST)
+
 clean:
-	rm -rf $(BUILD) $(TARGET) $(UNIT_TESTS)
+	rm -rf $(BUILD) $(TARGET) $(UNIT_TESTS) $(FX_TEST)
 
-.PHONY: all clean unit-tests
+.PHONY: all clean unit-tests fx-test
 
--include $(CORE_OBJ:.o=.d) $(FRONTEND_OBJ:.o=.d) $(BUILD)/tests/unit_tests.d
+-include $(CORE_OBJ:.o=.d) $(FRONTEND_OBJ:.o=.d) $(BUILD)/tests/unit_tests.d $(FX_TEST_OBJ:.o=.d)

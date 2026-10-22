@@ -435,6 +435,17 @@ struct FxRegs_s
 #define CLSR USEX8(GSU.pvRegisters[GSU_CLSR])
 
 extern void fx_run(uint32 nInstructions);
+/* The C interpreter going on with a run: n instructions, or until the GSU
+ * stops, without reading the ROM buffer again first. */
+extern void fx_step(uint32 nInstructions);
+#ifdef ARM_ASM_FX
+/* The GSU translated into ARM code (fxjit.cpp): runs until it stops. */
+extern void fx_jit_run(void);
+/* Forgets every translation (a new ROM, or the tests' new code). */
+extern void fx_jit_flush(void);
+/* The ARM assembler interpreter, until the GSU stops. */
+extern void fx_run_arm_interpreter(void);
+#endif
 
 extern void (*fx_apfOpcodeTable[])();
 extern void (*fx_apfPlotTable[])();

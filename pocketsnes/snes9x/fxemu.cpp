@@ -480,6 +480,10 @@ static void fx_writeRegisterSpace()
 /* Reset the FxChip */
 void FxReset(struct FxInit_s *psFxInfo)
 {
+#ifdef ARM_ASM_FX
+    /* A new game: its code isn't what was translated */
+    fx_jit_flush();
+#endif
     int i;
     
     /* Clear all internal variables */

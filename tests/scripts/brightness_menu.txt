@@ -1,4 +1,4 @@
-# In-game menu, Graphics & speed (entry 3), Brightness (its fifth line):
+# In-game menu, Graphics & speed (entry 3), Brightness (its seventh line):
 # three steps right (calculator's, 1, 2, 3), back to the game, then quit.
 wait 30
 press esc
@@ -11,6 +11,10 @@ press down
 wait 3
 press enter
 wait 5
+press down
+wait 3
+press down
+wait 3
 press down
 wait 3
 press down

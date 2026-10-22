@@ -22,6 +22,7 @@
 #include "paths.h"
 #include "romzip.h"
 #include "platform.h"
+#include "scale.h"
 #include "states.h"
 #include "ui.h"
 
@@ -39,6 +40,11 @@
  * SNES picture, and now and then a pixel before it. That much border around
  * the picture is wiped after every frame. */
 #define SPILL 8
+
+/* Screen size "full, crop edges": the lines left out at the top and at the
+ * bottom of the picture, about what a TV's edge hid (Yoshi's Island blanks
+ * them itself). */
+#define CROP_LINES 8
 
 enum
 {
@@ -80,17 +86,28 @@ static struct
 static int picture_top = (SCREEN_H - SNES_HEIGHT) / 2;
 static int depth_lines;   /* lines from the top of the depth buffer */
 static int picture_height = SNES_HEIGHT;
+static uint32_t shown_screen_size;   /* cfg.screen_size of the frames shown */
 static unsigned screens_to_clear = ~0u;   /* one bit per screen buffer */
 
 static char rom_path[512];
 static char game_title[ROM_NAME_LEN + 1];
 static int current_slot = 1;
+static int menu_save_slot;   /* the menu's Save state slot, 0 for a new slot */
+static int start_slot;       /* emu_start_from_slot: the next start's state, 0 for none */
 
 static uint32 joypad;
 static int pending;
 static bool fast_forward;
 static enum Pace pace = PACE_NORMAL;
 static bool speed_test_running;
+
+/* Save state pictures (states.h): a state gets a picture of the frame it was
+ * saved at, without the FPS counter or messages over it. A save, the menu
+ * or leaving has one more frame drawn first (pace_frame, emu_run), which
+ * S9xDeinitUpdate shrinks into game_picture before anything goes over it. */
+#define PENDING_PICTURE (PENDING_SAVE | PENDING_MENU | PENDING_QUIT)
+static uint16_t game_picture[STATE_PICTURE_W * STATE_PICTURE_H];
+static bool picture_ready;   /* game_picture is the game as it is now */
 
 /* Frame pacing. The schedule is kept in 16.16 fixed-point ticks. */
 static uint32_t frame_period;
@@ -401,6 +418,12 @@ bool8 S9xInitUpdate ()
         picture_top = (SCREEN_H - height) / 2;
         clear_screens_later();
     }
+    /* A stretched picture filled the screens: clear them for the border. */
+    if (cfg.screen_size != shown_screen_size)
+    {
+        shown_screen_size = cfg.screen_size;
+        clear_screens_later();
+    }
 
     unsigned screen_bit = 1u << platform_screen_index();
     if (screens_to_clear & screen_bit)
@@ -431,12 +454,47 @@ static void overlay_text(const char *text, int x, int y, uint16_t color)
     platform_frame_copy(x, y, w, 14);
 }
 
+/* The frame the core has just drawn into game_picture: its middle 224
+ * lines (all of a shorter picture) shrunk to STATE_PICTURE_W x
+ * STATE_PICTURE_H, each pixel the average of the 2-3 by 2-3 it covers. */
+static void take_picture(void)
+{
+    static const uint32_t reciprocal[10] = { 0, 65536, 32768, 21846, 16384, 13108, 10923, 9363, 8192, 7282 };
+    int pitch = GFX.Pitch >> 1;
+    int lines = picture_height < SNES_HEIGHT ? picture_height : SNES_HEIGHT;
+    const uint16_t *src = (const uint16_t *) GFX.Screen + (picture_height - lines) / 2 * pitch;
+    uint16_t *out = game_picture;
+    for (int y = 0; y < STATE_PICTURE_H; y++)
+    {
+        int y0 = y * lines / STATE_PICTURE_H, y1 = (y + 1) * lines / STATE_PICTURE_H;
+        for (int x = 0; x < STATE_PICTURE_W; x++)
+        {
+            int x0 = x * SNES_WIDTH / STATE_PICTURE_W, x1 = (x + 1) * SNES_WIDTH / STATE_PICTURE_W;
+            uint32_t r = 0, g = 0, b = 0;
+            for (int j = y0; j < y1; j++)
+                for (int i = x0; i < x1; i++)
+                {
+                    uint16_t p = src[j * pitch + i];
+                    r += p >> 11;
+                    g += (p >> 5) & 63;
+                    b += p & 31;
+                }
+            uint32_t scale = reciprocal[(x1 - x0) * (y1 - y0)];
+            *out++ = (uint16_t) (((r * scale) >> 16) << 11 | ((g * scale) >> 16) << 5 | ((b * scale) >> 16));
+        }
+    }
+    picture_ready = true;
+}
+
 /* Called when the frame is drawn: add the overlays and show it. Only what
  * changed goes into the frame shown (platform_frame_begin): the picture and
  * the text over it, or everything when that frame buffer is out of date. */
 bool8 S9xDeinitUpdate (int, int, bool8)
 {
     uint32_t start = platform_ticks();
+
+    if ((pending & PENDING_PICTURE) && !picture_ready)
+        take_picture();
 
     draw_rect(PICTURE_LEFT - SPILL, picture_top, SPILL, picture_height, COLOR_BLACK);
     draw_rect(PICTURE_LEFT + SNES_WIDTH, picture_top, SPILL, picture_height, COLOR_BLACK);
@@ -469,10 +527,22 @@ bool8 S9xDeinitUpdate (int, int, bool8)
 
     /* A frame buffer that is out of date gets everything, but only once
      * platform_screen() has been cleared too: a message that just timed out
-     * is still in it until the next frame. */
+     * is still in it until the next frame. A stretched picture covers all
+     * of it anyway. */
     unsigned frame_bit = 1u << platform_frame_begin();
     unsigned screen_bit = 1u << platform_screen_index();
-    if ((screens_to_clear & frame_bit) && !(screens_to_clear & screen_bit))
+    if (cfg.screen_size != SCREEN_SIZE_ORIGINAL)
+    {
+        int top = picture_top, lines = picture_height;
+        if (cfg.screen_size == SCREEN_SIZE_FULL_CROP && lines - 2 * CROP_LINES >= SCALE_MIN_LINES)
+        {
+            top += CROP_LINES;
+            lines -= 2 * CROP_LINES;
+        }
+        platform_frame_copy_scaled(platform_screen() + top * SCREEN_W + PICTURE_LEFT, SCREEN_W, lines,
+                                   (int) cfg.smooth);
+    }
+    else if ((screens_to_clear & frame_bit) && !(screens_to_clear & screen_bit))
     {
         platform_frame_copy(0, 0, SCREEN_W, SCREEN_H);
         screens_to_clear &= ~frame_bit;
@@ -708,7 +778,7 @@ static void pace_frame(void)
         }
         next_frame = platform_ticks();
         next_frame_frac = 0;
-        IPPU.RenderThisFrame = draw;
+        IPPU.RenderThisFrame = draw || (pending & PENDING_PICTURE);
         return;
     }
 
@@ -746,7 +816,7 @@ static void pace_frame(void)
         next_frame = platform_ticks();
         next_frame_frac = 0;
     }
-    IPPU.RenderThisFrame = draw;
+    IPPU.RenderThisFrame = draw || (pending & PENDING_PICTURE);
 }
 
 /* Called by the core once per emulated frame, between frames. */
@@ -930,6 +1000,7 @@ int emu_load_game(const char *path)
         game_title[i] = 0;
 
     current_slot = states_newest() ? states_newest() : 1;
+    menu_save_slot = cfg.auto_increment ? 0 : current_slot;
     return 1;
 }
 
@@ -966,6 +1037,27 @@ int emu_save_target(void)
     return cfg.auto_increment ? states_next_new_slot() : current_slot;
 }
 
+int emu_menu_save_slot(void)
+{
+    return menu_save_slot;
+}
+
+int emu_menu_save_target(void)
+{
+    if (menu_save_slot)
+        return menu_save_slot;
+    return cfg.auto_increment ? states_next_new_slot() : current_slot;
+}
+
+void emu_step_menu_save_slot(int delta)
+{
+    /* Steps from the slot shown, "new slot 005" included (right: 006). Back
+     * on the next new slot it is "new slot" again, which follows saves. */
+    int from = emu_menu_save_target();
+    int slot = emu_step_slot(from ? from : states_newest(), delta);
+    menu_save_slot = cfg.auto_increment && slot == states_next_new_slot() ? 0 : slot;
+}
+
 int emu_step_slot(int slot, int delta)
 {
     /* Positions: the auto slot (when it's in use) at 0, then 1-999. */
@@ -991,10 +1083,10 @@ static int leaving_save_target(void)
 
 int emu_save_state(int slot)
 {
-    if (!states_save(slot))
-        return 0;
-    current_slot = slot;
-    return 1;
+    states_set_picture(cfg.state_pictures && picture_ready ? game_picture : NULL);
+    int saved = states_save(slot);
+    states_set_picture(NULL);
+    return saved;
 }
 
 int emu_load_state(int slot)
@@ -1003,6 +1095,7 @@ int emu_load_state(int slot)
     if (result == 1)
     {
         current_slot = slot;
+        picture_ready = false;
         clear_screens_later();
     }
     return result;
@@ -1011,6 +1104,7 @@ int emu_load_state(int slot)
 void emu_reset_game(void)
 {
     S9xReset ();
+    picture_ready = false;
     clear_screens_later();
 }
 
@@ -1043,6 +1137,18 @@ static const struct SpeedTestPart speed_test_parts[] =
 
 static const char *const cpu_core_names[NUM_CPU_CORES] = { "ARM", "C" };
 
+/* The picture's size for the results, e.g. "full screen, smooth". */
+static const char *screen_size_name(void)
+{
+    static const char *const names[NUM_SCREEN_SIZES][2] =
+    {
+        { "original", "original" },
+        { "full screen, sharp", "full screen, smooth" },
+        { "full, crop edges, sharp", "full, crop edges, smooth" }
+    };
+    return names[cfg.screen_size][cfg.smooth != 0];
+}
+
 /* Runs the game on the CPU core set (core < 0) or on the one given. The C
  * core runs SA-1 games anyway (S9xMainLoop), and is the only one in the PC
  * build. */
@@ -1065,8 +1171,16 @@ void emu_speed_test(int close_after_seconds)
     /* At the speed the game runs at (the menu runs at normal speed). */
     game_speed();
     uint32_t mhz = platform_cpu_mhz();
-    char clock_report[200];
+    char clock_report[400];
     platform_clock_report(clock_report, sizeof(clock_report));
+    {
+        size_t len = strlen(clock_report);
+        if (len + 2 < sizeof(clock_report))
+        {
+            strcpy(clock_report + len, "\n");
+            platform_code_report(clock_report + len + 1, sizeof(clock_report) - len - 1);
+        }
+    }
 
     if (!S9xFreezeToMemory(&snapshot, &snapshot_size))
     {
@@ -1137,9 +1251,9 @@ void emu_speed_test(int close_after_seconds)
     FILE *f = fopen(path, "w");
     if (f)
     {
-        fprintf(f, "== %s, build %s, cpu %u MHz, screen: %s, CPU core set: %s%s\n%s\n", game_title,
-                BUILD_NAME, (unsigned) mhz, platform_screen_mode_name(), cpu_core_names[cfg.cpu_core],
-                Settings.SA1 ? " (SA-1 game: C core)" : "", clock_report);
+        fprintf(f, "== %s, build %s, cpu %u MHz, screen: %s, %s, CPU core set: %s%s\n%s\n", game_title,
+                BUILD_NAME, (unsigned) mhz, platform_screen_mode_name(), screen_size_name(),
+                cpu_core_names[cfg.cpu_core], Settings.SA1 ? " (SA-1 game: C core)" : "", clock_report);
         for (int i = 0; i < done; i++)
             fprintf(f, "%s\n%s\n", results[i][0], results[i][1]);
         fclose(f);
@@ -1411,7 +1525,9 @@ static void game_speed(void)
     if (text[0])
         add_message(text);
     shown_multiplier = multiplier;
-    platform_set_game_frames_by_dma((int) cfg.screen_dma);
+    /* A stretched picture is always turned: by DMA it would need its own
+     * copy of the frame (slower), and DMA can tear. */
+    platform_set_game_frames_by_dma(cfg.screen_dma && cfg.screen_size == SCREEN_SIZE_ORIGINAL);
 }
 
 uint32_t emu_game_mhz(void)
@@ -1467,7 +1583,10 @@ static void save_state_hotkey(void)
     if (!slot)
         emu_show_message("All 999 slots are used");
     else if (emu_save_state(slot))
+    {
+        current_slot = slot;
         show_slot_message("Saved %s", slot);
+    }
     else
         show_slot_message("Couldn't save %s", slot);
     game_speed();
@@ -1500,6 +1619,11 @@ static void save_before_leaving(void)
                     slot ? "The calculator may be out of space." : "All 999 slots are used.");
 }
 
+void emu_start_from_slot(int slot)
+{
+    start_slot = slot;
+}
+
 enum EmuExit emu_run(int may_load_state)
 {
     fast_forward = false;
@@ -1509,7 +1633,16 @@ enum EmuExit emu_run(int may_load_state)
     perf_line[0] = 0;
     clear_screens_later();
 
-    if (may_load_state && cfg.load_on_start && states_newest())
+    if (start_slot)
+    {
+        int slot = start_slot;
+        start_slot = 0;
+        if (emu_load_state(slot) == 1)
+            show_slot_message("Started from %s", slot);
+        else
+            show_slot_message("Couldn't load %s", slot);
+    }
+    else if (may_load_state && cfg.load_on_start && states_newest())
     {
         int slot = states_newest();
         if (emu_load_state(slot) == 1)
@@ -1522,10 +1655,19 @@ enum EmuExit emu_run(int may_load_state)
     game_speed();
     reset_timing();
 
+    picture_ready = false;
+    int picture_waits = 0;
     for (;;)
     {
         use_cpu_core(-1);   /* the menu may have changed it */
         S9xMainLoop ();
+
+        /* A state saved now (here, in the menu or when leaving) gets a
+         * picture of this moment: the next frame is drawn and taken first
+         * (two frames at most, should one not be drawn). */
+        if ((pending & PENDING_PICTURE) && !picture_ready && picture_waits++ < 2)
+            continue;
+        picture_waits = 0;
 
         if (pending & PENDING_SAVE)
         {
@@ -1579,6 +1721,7 @@ enum EmuExit emu_run(int may_load_state)
             return EMU_QUIT;
         }
         pending = 0;
+        picture_ready = false;
 
         if (sram_dirty && cfg.sram_autosave &&
             platform_ticks() - sram_dirty_tick > platform_tick_hz() * 2)

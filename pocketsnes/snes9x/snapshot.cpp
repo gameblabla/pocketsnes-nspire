@@ -106,6 +106,7 @@
 #include "dma.h"
 #include "sa1.h"
 #include "srtc.h"
+#include "sdd1.h"
 #include "dsp1.h"
 #include "snapshot.h"
 
@@ -509,6 +510,11 @@ bool8 S9xUnfreezeFromMemory (const uint8 *data, uint32 size)
 
     if (Settings.SRTC)
 	S9xSRTCPostLoadState ();
+
+    /* The S-DD1's ROM banks, from $4804-$4807 (Snes9x 1.43 and snes9x2005
+     * never call this, so their banks stayed as they were before a load). */
+    if (Settings.SDD1)
+	S9xSDD1PostLoadState ();
 
     return TRUE;
 }

@@ -94,6 +94,8 @@
 #include "gfx.h"
 #include "tile.h"
 
+#include <stddef.h>	/* offsetof */
+
 static uint8 ConvertTile (uint8 *pCache, uint32 TileAddr)
 {
     register uint8 *tp = &Memory.VRAM[TileAddr];
@@ -773,6 +775,46 @@ static inline void DrawTileLine16Flipped (uint16 *__restrict Screen, uint8 *__re
 	TILE16_PIXEL (7, A & 0xff)
 }
 
+#ifdef ARM_ASM_GFX
+/* DrawTileLines16 in ARM assembler (pocketsnes/arm/gfx_arm.s), used with
+ * the ARM CPU core setting: [(Tile >> 14) & 3] by the flips (H_FLIP is bit
+ * 14, V_FLIP bit 15), and 4 on from there the clipped ones, with the masks.
+ * bp is the first line to draw; the others follow it in the cache (go back
+ * from it when flipped vertically). */
+typedef void (*TileLines16Asm) (uint16 *Screen, uint8 *Depth, const uint8 *bp,
+				const uint16 *ScreenColors, uint32 LineCount,
+				uint32 MaskA, uint32 MaskB);
+extern "C"
+{
+	void DrawTileLines16_n (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_h (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_v (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_hv (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_nm (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_hm (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_vm (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_hvm (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_un (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_uh (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_uv (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+	void DrawTileLines16_uhv (uint16 *, uint8 *, const uint8 *, const uint16 *, uint32, uint32, uint32);
+}
+/* ... and from 8 on the untested ones (no depth test: DrawBGTiles16) */
+static const TileLines16Asm DrawTileLines16Asm [12] = {
+	DrawTileLines16_n, DrawTileLines16_h, DrawTileLines16_v, DrawTileLines16_hv,
+	DrawTileLines16_nm, DrawTileLines16_hm, DrawTileLines16_vm, DrawTileLines16_hvm,
+	DrawTileLines16_un, DrawTileLines16_uh, DrawTileLines16_uv, DrawTileLines16_uhv
+};
+
+/* What gfx_arm.s reads from GFX (its GFX_ offsets) */
+#define TILE_CHECK_OFFSET(field, offset) \
+	static_assert (offsetof (struct SGFX, field) == (offset), \
+		       "SGFX." #field " moved: update pocketsnes/arm/gfx_arm.s")
+TILE_CHECK_OFFSET (PPL, 48);
+TILE_CHECK_OFFSET (Z1, 72);
+TILE_CHECK_OFFSET (Z2, 73);
+#endif
+
 /* Draws LineCount lines of the tile's cached pixels from bp (stepping by
  * Step bytes a line), with the words masked by MaskA and MaskB (pixel order,
  * see above). */
@@ -796,6 +838,248 @@ static inline void DrawTileLines16 (uint16 *Screen, uint8 *Depth, const uint8 *b
 	}
 }
 
+#ifdef ARM_ASM_GFX
+/* DrawBGTiles16's two passes in pocketsnes/arm/gfx_arm.s: ListBGTiles16
+ * lists the row's tiles to draw, DrawBGCommands16 draws them. */
+struct BGTileCommand
+{
+    const uint8 *bp;		/* the first line to draw in the cache (not flipped) */
+    const uint16 *Colors;
+    uint32 How;			/* column << 16 | a BGRowList How */
+};
+struct BGRowList
+{
+    uint32 How [8];		/* by the map entry's bits 13-15 (priority, flips): depth << 8 |
+				 * 8 low priority, 16 high | 4 untested | flips (1 h, 2 v) */
+    const uint16 *Colors [8];	/* by bits 10-12 (palette) */
+    const uint16 *t, *b1, *b2;
+    uint32 Quot, Count;
+    uint8 *Buffered;		/* BG.Buffered */
+    const uint8 *Buffer;	/* BG.Buffer + the first line to draw */
+    uint32 FirstTile, TileMask;
+    int32 t1;			/* 16x16 tiles: the half, 0 (top) or 16; 8x8: -1 */
+    struct BGTileCommand *Commands;
+    uint32 Last, Drawn;		/* out: the last map entry, the commands' hows ORed */
+};
+struct BGRowDraw
+{
+    uint16 *Screen;
+    uint8 *Depth;
+    uint32 LineCount;
+    int32 VFlip;		/* bp to the first line drawn when flipped vertically, + 4 */
+    uint32 PPL;
+};
+static_assert (sizeof (struct BGTileCommand) == 12, "BGTileCommand: update pocketsnes/arm/gfx_arm.s");
+static_assert (offsetof (struct BGRowList, t) == 64 && offsetof (struct BGRowList, Count) == 80 &&
+	       offsetof (struct BGRowList, Buffered) == 84 && offsetof (struct BGRowList, t1) == 100 &&
+	       offsetof (struct BGRowList, Drawn) == 112, "BGRowList moved: update pocketsnes/arm/gfx_arm.s");
+static_assert (offsetof (struct BGRowDraw, VFlip) == 12 && offsetof (struct BGRowDraw, PPL) == 16,
+	       "BGRowDraw moved: update pocketsnes/arm/gfx_arm.s");
+
+extern "C"
+{
+    struct BGTileCommand *ListBGTiles16 (struct BGRowList *L);
+    void DrawBGCommands16 (const struct BGTileCommand *c, const struct BGTileCommand *end,
+			   const struct BGRowDraw *row);
+    uint32 ConvertBGTile (uint32 TileNumber);
+}
+
+/* A tile into the cache, for ListBGTiles16: TRUE or BLANK_TILE */
+uint32 ConvertBGTile (uint32 TileNumber)
+{
+    return BG.Buffered [TileNumber] = ConvertTile (&BG.Buffer [TileNumber << 6], TileNumber << BG.TileShift);
+}
+
+/* For tests/asm/tile_test.cpp: the rows listed by ListBGTilesC */
+bool8 BGListInC = FALSE;
+
+/* ListBGTiles16's work in C, for any row: DrawBackground's own sums (for
+ * 16x16 tiles the map entry plus the quarter, carries into the flips and
+ * palette and all) */
+static struct BGTileCommand *ListBGTilesC (struct BGRowList &L)
+{
+    struct BGTileCommand *c = L.Commands;
+    const uint16 *t = L.t;
+    uint32 Quot = L.Quot;
+    for (uint32 Column = 0; Column < L.Count; Column++, Quot++)
+    {
+	uint32 Tile = L.Last = *t;
+	if (L.t1 >= 0)
+	{
+	    uint32 q = Quot & 1;
+	    Tile += (Tile & V_FLIP ? 16 - L.t1 : L.t1) + (Tile & H_FLIP ? 1 - q : q);
+	    t += q;
+	    if (Quot == 63)
+		t = L.b2;
+	    else if (Quot == 127)
+		t = L.b1;
+	}
+	else
+	{
+	    t++;
+	    if (Quot == 31)
+		t = L.b2;
+	    else if (Quot == 63)
+		t = L.b1;
+	}
+	uint32 TileNumber = (L.FirstTile + (Tile & 0x3ff)) & L.TileMask;
+	uint32 Cached = L.Buffered [TileNumber];
+	if (!Cached)
+	    Cached = ConvertBGTile (TileNumber);
+	if (Cached == BLANK_TILE)
+	    continue;
+	/* (the depth by the map entry's priority, the flips as added up) */
+	uint32 How = Column << 16 | L.How [((L.Last >> 13) & 1) | ((Tile >> 13) & 6)];
+	c->bp = L.Buffer + (TileNumber << 6);
+	c->Colors = L.Colors [(Tile >> 10) & 7];
+	c->How = How;
+	L.Drawn |= How;
+	c++;
+    }
+    L.t = t;
+    return c;
+}
+
+/* DrawBackground's unclipped tiles of one row, with the ARM CPU core
+ * setting, in two passes: ListBGTiles16 works out each tile with
+ * everything in registers (tables by the map entry's bits, blank tiles
+ * left out), DrawBGCommands16 draws the ones listed. t is the map entry
+ * of column Quot, b1 and b2 the two halves of the map row; t moves on and
+ * wraps as in DrawBackground and is returned for the next column. A tile
+ * whose depth is above Ceiling (no depth already on the row's lines is as
+ * high: gfx.cpp's LineMaxDepth) can't be hidden, so it's drawn without the
+ * depth test. *Drawn gets the highest depth drawn (0: nothing). The
+ * pixels, depths and GFX.Z1/Z2 come out as from DrawBackground's own loop
+ * calling DrawTile16 (tests/asm/run.sh compares every frame with the C
+ * setting's, tests/asm/tile_test.cpp rows of random tiles with Snes9x
+ * 1.43's loop). Needs BG.NameSelect 0, BG.TileAddress a whole number of
+ * tiles (as DrawBackground sets them) and Count 1-64. */
+const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2, uint32 s,
+			     uint32 Quot, int Count, uint32 StartLine, uint32 LineCount,
+			     uint32 t1, uint32 t2, const uint8 *depths, uint32 Ceiling, uint32 *Drawn)
+{
+    struct BGTileCommand Commands [64];
+    struct BGRowList L;
+    for (uint32 i = 0; i < 8; i++)
+    {
+	uint32 Z = depths [i & 1];
+	L.How [i] = Z << 8 | (i & 1 ? 16 : 8) | (Z > Ceiling ? 4 : 0) | i >> 1;
+	L.Colors [i] = &IPPU.ScreenColors [BG.StartPalette] + ((i & BG.PaletteMask) << BG.PaletteShift);
+    }
+    L.t = t;
+    L.b1 = b1;
+    L.b2 = b2;
+    L.Quot = Quot;
+    L.Count = (uint32) Count;
+    L.Buffered = BG.Buffered;
+    L.Buffer = BG.Buffer + StartLine;
+    L.FirstTile = BG.TileAddress >> BG.TileShift;
+    L.TileMask = 0xffff >> BG.TileShift;
+    L.t1 = BG.TileSize == 8 ? -1 : (int32) t1;	/* (t2 is 16 - t1) */
+    L.Commands = Commands;
+    L.Drawn = 0;
+    struct BGTileCommand *End = BGListInC ? NULL : ListBGTiles16 (&L);
+    if (!End)
+    {
+	L.t = t;
+	L.Quot = Quot;
+	L.Count = (uint32) Count;
+	End = ListBGTilesC (L);
+    }
+    if (End != Commands)
+    {
+	struct BGRowDraw Row = { (uint16 *) GFX.S + (int32) s, GFX.DB + (int32) s, LineCount,
+				 (int32) (56 + 4 - 2 * StartLine), GFX.PPL };
+	DrawBGCommands16 (Commands, End, &Row);
+    }
+    /* (DrawBackground set them for every tile, the last one included) */
+    GFX.Z1 = GFX.Z2 = depths [(L.Last & 0x2000) >> 13];
+    uint32 Highest = L.Drawn & 8 ? depths [0] : 0;
+    if ((L.Drawn & 16) && depths [1] > Highest)
+	Highest = depths [1];
+    *Drawn = Highest;
+    return L.t;
+}
+
+/* DrawOBJS's tiles of one sprite on one line, with the ARM CPU core setting
+ * and no windows: what its loop does with DrawTile16 (and DrawClippedTile16
+ * for the tiles the screen's edges cut), with the whole tiles listed first
+ * and then drawn by DrawOBJTiles16_n or _h (gfx_arm.s) in one call. Tile is
+ * BaseTile | TileX, TileX going on by TileInc (in 0-15) for each 8 pixels
+ * from X while X < Right and X <= 256; t is the line's tiles left (the time
+ * over limit). Needs DrawOBJS's BG fields, GFX.Z1 and GFX.Z2. */
+struct OBJTile
+{
+    const uint8 *bp;
+    int32 X;
+};
+struct OBJLine
+{
+    uint16 *Screen;
+    uint8 *Depth;
+    const uint16 *Colors;
+    uint32 Z1, Z2;
+};
+static_assert (sizeof (struct OBJTile) == 8 && offsetof (struct OBJLine, Z2) == 16,
+	       "OBJTile/OBJLine moved: update pocketsnes/arm/gfx_arm.s");
+extern "C"
+{
+    void DrawOBJTiles16_n (const struct OBJTile *, const struct OBJTile *, const struct OBJLine *);
+    void DrawOBJTiles16_h (const struct OBJTile *, const struct OBJTile *, const struct OBJLine *);
+}
+
+void DrawClippedTile16 (uint32 Tile, uint32 Offset, uint32 StartPixel, uint32 Width,
+			uint32 StartLine, uint32 LineCount);
+
+void DrawOBJTiles16 (uint32 BaseTile, uint32 TileX, int TileInc, uint32 TileLine, int X, int Right, int t,
+		     uint32 Offset)
+{
+    struct OBJTile Tiles [8];		/* (a sprite is at most 64 pixels across) */
+    struct OBJTile *n = Tiles;
+    for (uint32 O = Offset + X; X <= 256 && X < Right; TileX = (TileX + TileInc) & 0x0f, X += 8, O += 8)
+    {
+	if (X < -7 || --t < 0 || X == 256)
+	    continue;
+	uint32 Tile = BaseTile | TileX;
+	if (X < 0 || X > 256 - 8)
+	{
+	    /* (DrawOBJS's window loop cuts these at 0 and 256) */
+	    DrawClippedTile16 (Tile, O, X < 0 ? -X : 0, X < 0 ? X + 8 : 256 - X, TileLine, 1);
+	    continue;
+	}
+	uint32 TileAddr = BG.TileAddress + ((Tile & 0x3ff) << BG.TileShift);
+	if ((Tile & 0x1ff) >= 256)
+	    TileAddr += BG.NameSelect;
+	uint32 TileNumber = (TileAddr & 0xffff) >> BG.TileShift;
+	uint8 *pCache = &BG.Buffer [TileNumber << 6];
+	if (!BG.Buffered [TileNumber])
+	    BG.Buffered [TileNumber] = ConvertTile (pCache, TileAddr & 0xffff);
+	if (BG.Buffered [TileNumber] == BLANK_TILE)
+	    continue;
+	n->bp = pCache + TileLine;
+	n->X = X;
+	n++;
+    }
+    if (n == Tiles)
+	return;
+    struct OBJLine Line = { (uint16 *) GFX.S + (int32) Offset, GFX.DB + (int32) Offset,
+			    &IPPU.ScreenColors [(((BaseTile >> 10) & BG.PaletteMask) << BG.PaletteShift) + BG.StartPalette],
+			    GFX.Z1, GFX.Z2 };
+    (BaseTile & H_FLIP ? DrawOBJTiles16_h : DrawOBJTiles16_n) (Tiles, n, &Line);
+}
+
+/* Whether DrawTile16 or DrawClippedTile16 drew anything of Tile (as passed
+ * to it): not a blank tile in the cache (asked after drawing it). */
+bool8 TileWasDrawn (uint32 Tile)
+{
+    uint32 TileAddr = BG.TileAddress + ((Tile & 0x3ff) << BG.TileShift);
+    if ((Tile & 0x1ff) >= 256)
+	TileAddr += BG.NameSelect;
+    TileAddr &= 0xffff;
+    return BG.Buffered [TileAddr >> BG.TileShift] != BLANK_TILE;
+}
+#endif
+
 void DrawTile16 (uint32 Tile, uint32 Offset, uint32 StartLine,
 	         uint32 LineCount)
 {
@@ -803,6 +1087,15 @@ void DrawTile16 (uint32 Tile, uint32 Offset, uint32 StartLine,
 
 	uint16 *Screen = (uint16 *) GFX.S + (int32) Offset;
 	uint8 *Depth = GFX.DB + (int32) Offset;
+#ifdef ARM_ASM_GFX
+	if (Settings.AsmCPU)
+	{
+		DrawTileLines16Asm [(Tile >> 14) & 3] (Screen, Depth,
+			pCache + ((Tile & V_FLIP) ? 56 - StartLine : StartLine),
+			ScreenColors, LineCount, 0xffffffff, 0xffffffff);
+		return;
+	}
+#endif
 	if (Tile & V_FLIP)
 		DrawTileLines16 (Screen, Depth, pCache + 56 - StartLine, -8, LineCount,
 				 (Tile & H_FLIP) != 0, 0xffffffff, 0xffffffff, ScreenColors);
@@ -831,6 +1124,15 @@ void DrawClippedTile16 (uint32 Tile, uint32 Offset,
 
 	uint16 *Screen = (uint16 *) GFX.S + (int32) Offset;
 	uint8 *Depth = GFX.DB + (int32) Offset;
+#ifdef ARM_ASM_GFX
+	if (Settings.AsmCPU)
+	{
+		DrawTileLines16Asm [4 + ((Tile >> 14) & 3)] (Screen, Depth,
+			pCache + ((Tile & V_FLIP) ? 56 - StartLine : StartLine),
+			ScreenColors, LineCount, MaskA, MaskB);
+		return;
+	}
+#endif
 	if (Tile & V_FLIP)
 		DrawTileLines16 (Screen, Depth, pCache + 56 - StartLine, -8, LineCount,
 				 (Tile & H_FLIP) != 0, MaskA, MaskB, ScreenColors);
@@ -1149,12 +1451,158 @@ static void WRITE_4PIXELS16_FLIPPED_SUB1_2 (uint32 Offset, uint8 *Pixels, uint16
 	}
 }
 
+#ifdef ARM_ASM_GFX
+/* The colour maths drawers (DrawTile16Add and the others) with the ARM CPU
+ * core setting: what RENDER_TILE and RENDER_CLIPPED_TILE do with
+ * WRITE_4PIXELS16_ADD and the others (which reload GFX's fields after every
+ * pixel stored), with the lines drawn by DrawTileLinesMath16_X in ARM
+ * assembler (pocketsnes/arm/gfx_arm.s). A pixel drawn is mixed by the sub
+ * screen's depth under it: 0 nothing (its own colour), 1 the fixed colour,
+ * more the sub screen's pixel. For the fixed colour the drawers take the
+ * colour from FixedMathColours, the palette with it already mixed in. The
+ * depths are GFX.ZBuffer's and GFX.SubZBuffer's, as in the helpers. Direct
+ * colour tiles keep the C code. */
+enum TileMath
+{
+    MATH_ADD,		/* the sub screen or the fixed colour added */
+    MATH_ADD1_2,	/* ... the sub screen halved, the fixed colour not */
+    MATH_SUB,		/* ... subtracted */
+    MATH_SUB1_2,
+    MATH_FIXED_ADD1_2,	/* the fixed colour only, halved */
+    MATH_FIXED_SUB1_2
+};
+
+struct MathTile
+{
+    uint32 LineCount;
+    int32 Step;			/* 8, or -8 flipped vertically */
+    uint32 MaskA, MaskB;
+    uint32 PPL;
+    const uint16 *Fixed;	/* the colours with the fixed colour mixed in */
+    uint32 Z;			/* GFX.Z1 << 8 | GFX.Z2 */
+    int32 Sub, SubDepth;	/* bytes to the sub screen's pixel and depth */
+    const uint16 *Table;
+};
+static_assert (offsetof (struct MathTile, Fixed) == 20 && offsetof (struct MathTile, Z) == 24 &&
+	       offsetof (struct MathTile, Table) == 36, "MathTile moved: update pocketsnes/arm/gfx_arm.s");
+
+typedef void (*TileLinesMath16Asm) (uint16 *Screen, uint8 *Depth, const uint8 *bp, const uint16 *Colors,
+				    const struct MathTile *m);
+extern "C"
+{
+    void DrawTileLinesMath16_add (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_add_h (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_add1_2 (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_add1_2_h (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_sub (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_sub_h (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_sub1_2 (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_sub1_2_h (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_fixed (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+    void DrawTileLinesMath16_fixed_h (uint16 *, uint8 *, const uint8 *, const uint16 *, const struct MathTile *);
+}
+/* [TileMath][flipped horizontally] */
+static const TileLinesMath16Asm DrawTileLinesMath16Asm [6][2] = {
+    { DrawTileLinesMath16_add, DrawTileLinesMath16_add_h },
+    { DrawTileLinesMath16_add1_2, DrawTileLinesMath16_add1_2_h },
+    { DrawTileLinesMath16_sub, DrawTileLinesMath16_sub_h },
+    { DrawTileLinesMath16_sub1_2, DrawTileLinesMath16_sub1_2_h },
+    { DrawTileLinesMath16_fixed, DrawTileLinesMath16_fixed_h },
+    { DrawTileLinesMath16_fixed, DrawTileLinesMath16_fixed_h }
+};
+
+/* IPPU.ScreenColors with GFX.FixedColour mixed in, as the drawers mix it
+ * over a sub screen depth of 1, made 16 colours at a time when a tile first
+ * needs them. FixedMathMade is cleared whenever the colours, the fixed
+ * colour or the way of mixing may have changed (gfx.cpp, before drawing). */
+static uint16 FixedMathColours [256];
+uint32 FixedMathMade;		/* bit p: colours 16p to 16p + 15 */
+static uint32 FixedMathMix;	/* how they were mixed: a TileMath, the halved ones as their whole ones */
+
+static const uint16 *FixedMathFor (enum TileMath Math, const uint16 *Colors)
+{
+    uint32 Mix = Math == MATH_ADD1_2 ? MATH_ADD : Math == MATH_SUB1_2 ? MATH_SUB : Math;
+    if (Mix != FixedMathMix)
+    {
+	FixedMathMade = 0;
+	FixedMathMix = Mix;
+    }
+    uint32 First = (uint32) (Colors - IPPU.ScreenColors);
+    uint32 Last = First + (1u << BG.BitShift) - 1;
+    if (Last > 255)
+	Last = 255;
+    for (uint32 p = First >> 4; p <= Last >> 4; p++)
+	if (!(FixedMathMade & (1u << p)))
+	{
+	    const uint32 F = GFX.FixedColour;
+	    for (uint32 i = p * 16; i < p * 16 + 16; i++)
+	    {
+		uint32 C = IPPU.ScreenColors [i];
+		FixedMathColours [i] = (uint16) (Mix == MATH_ADD ? COLOR_ADD (C, F) :
+						 Mix == MATH_SUB ? (uint16) COLOR_SUB (C, F) :
+						 Mix == MATH_FIXED_ADD1_2 ? (uint16) COLOR_ADD1_2 (C, F) :
+						 COLOR_SUB1_2 (C, F));
+	    }
+	    FixedMathMade |= 1u << p;
+	}
+    return FixedMathColours + First;
+}
+
+/* A tile's lines; d1 and d2 as TILE_CLIP_PREAMBLE makes them (screen pixels
+ * 0-3 and 4-7; all set for an unclipped tile) */
+static inline void DrawTileMath16 (enum TileMath Math, uint32 Tile, uint32 Offset, const uint8 *pCache,
+				   uint32 StartLine, uint32 LineCount, uint32 d1, uint32 d2,
+				   const uint16 *ScreenColors)
+{
+    struct MathTile m;
+    m.MaskA = d1;
+    m.MaskB = d2;
+    if (Tile & H_FLIP)
+    {
+	SWAP_DWORD (d1);
+	SWAP_DWORD (d2);
+	m.MaskA = d2;
+	m.MaskB = d1;
+    }
+    m.LineCount = LineCount;
+    m.Step = Tile & V_FLIP ? -8 : 8;
+    m.PPL = GFX.PPL;
+    m.Fixed = FixedMathFor (Math, ScreenColors);
+    m.Z = GFX.Z1 << 8 | GFX.Z2;
+    m.Sub = GFX.Delta * 2;
+    m.SubDepth = (int32) (GFX.SubZBuffer - GFX.ZBuffer);
+    m.Table = Math == MATH_ADD ? GFX.X2 : Math == MATH_SUB ? GFX.ZERO_OR_X2 : GFX.ZERO;
+    DrawTileLinesMath16Asm [Math][(Tile & H_FLIP) != 0] ((uint16 *) GFX.S + (int32) Offset,
+							  GFX.ZBuffer + (int32) Offset,
+							  pCache + (Tile & V_FLIP ? 56 - StartLine : StartLine),
+							  ScreenColors, &m);
+}
+
+#define MATH_TILE(MATH) \
+	if (Settings.AsmCPU && !BG.DirectColourMode) \
+	{ \
+		DrawTileMath16 (MATH, Tile, Offset, pCache, StartLine, LineCount, 0xffffffff, 0xffffffff, \
+				ScreenColors); \
+		return; \
+	}
+#define MATH_CLIPPED_TILE(MATH) \
+	if (Settings.AsmCPU && !BG.DirectColourMode) \
+	{ \
+		DrawTileMath16 (MATH, Tile, Offset, pCache, StartLine, LineCount, d1, d2, ScreenColors); \
+		return; \
+	}
+#else
+#define MATH_TILE(MATH)
+#define MATH_CLIPPED_TILE(MATH)
+#endif
 
 void DrawTile16Add (uint32 Tile, uint32 Offset, uint32 StartLine,
 		    uint32 LineCount)
 {
 	TILE_PREAMBLE
 	register uint8 *bp;
+
+	MATH_TILE (MATH_ADD)
 
 	RENDER_TILE(WRITE_4PIXELS16_ADD, WRITE_4PIXELS16_FLIPPED_ADD, 4)
 }
@@ -1167,6 +1615,7 @@ void DrawClippedTile16Add (uint32 Tile, uint32 Offset,
     register uint8 *bp;
 
     TILE_CLIP_PREAMBLE
+    MATH_CLIPPED_TILE (MATH_ADD)
     RENDER_CLIPPED_TILE(WRITE_4PIXELS16_ADD, WRITE_4PIXELS16_FLIPPED_ADD, 4)
 }
 
@@ -1175,6 +1624,8 @@ void DrawTile16Add1_2 (uint32 Tile, uint32 Offset, uint32 StartLine,
 {
     TILE_PREAMBLE
     register uint8 *bp;
+
+    MATH_TILE (MATH_ADD1_2)
 
     RENDER_TILE(WRITE_4PIXELS16_ADD1_2, WRITE_4PIXELS16_FLIPPED_ADD1_2, 4)
 }
@@ -1187,6 +1638,7 @@ void DrawClippedTile16Add1_2 (uint32 Tile, uint32 Offset,
     register uint8 *bp;
 
     TILE_CLIP_PREAMBLE
+    MATH_CLIPPED_TILE (MATH_ADD1_2)
     RENDER_CLIPPED_TILE(WRITE_4PIXELS16_ADD1_2, WRITE_4PIXELS16_FLIPPED_ADD1_2, 4)
 }
 
@@ -1195,6 +1647,8 @@ void DrawTile16Sub (uint32 Tile, uint32 Offset, uint32 StartLine,
 {
     TILE_PREAMBLE
     register uint8 *bp;
+
+    MATH_TILE (MATH_SUB)
 
     RENDER_TILE(WRITE_4PIXELS16_SUB, WRITE_4PIXELS16_FLIPPED_SUB, 4)
 }
@@ -1207,6 +1661,7 @@ void DrawClippedTile16Sub (uint32 Tile, uint32 Offset,
     register uint8 *bp;
 
     TILE_CLIP_PREAMBLE
+    MATH_CLIPPED_TILE (MATH_SUB)
     RENDER_CLIPPED_TILE(WRITE_4PIXELS16_SUB, WRITE_4PIXELS16_FLIPPED_SUB, 4)
 }
 
@@ -1215,6 +1670,8 @@ void DrawTile16Sub1_2 (uint32 Tile, uint32 Offset, uint32 StartLine,
 {
     TILE_PREAMBLE
     register uint8 *bp;
+
+    MATH_TILE (MATH_SUB1_2)
 
     RENDER_TILE(WRITE_4PIXELS16_SUB1_2, WRITE_4PIXELS16_FLIPPED_SUB1_2, 4)
 }
@@ -1227,6 +1684,7 @@ void DrawClippedTile16Sub1_2 (uint32 Tile, uint32 Offset,
     register uint8 *bp;
 
     TILE_CLIP_PREAMBLE
+    MATH_CLIPPED_TILE (MATH_SUB1_2)
     RENDER_CLIPPED_TILE(WRITE_4PIXELS16_SUB1_2, WRITE_4PIXELS16_FLIPPED_SUB1_2, 4)
 }
 
@@ -1316,6 +1774,8 @@ void DrawTile16FixedAdd1_2 (uint32 Tile, uint32 Offset, uint32 StartLine,
     TILE_PREAMBLE
     register uint8 *bp;
 
+    MATH_TILE (MATH_FIXED_ADD1_2)
+
     RENDER_TILE(WRITE_4PIXELS16_ADDF1_2, WRITE_4PIXELS16_FLIPPED_ADDF1_2, 4)
 }
 
@@ -1327,6 +1787,7 @@ void DrawClippedTile16FixedAdd1_2 (uint32 Tile, uint32 Offset,
     register uint8 *bp;
 
     TILE_CLIP_PREAMBLE
+    MATH_CLIPPED_TILE (MATH_FIXED_ADD1_2)
     RENDER_CLIPPED_TILE(WRITE_4PIXELS16_ADDF1_2, 
 			WRITE_4PIXELS16_FLIPPED_ADDF1_2, 4)
 }
@@ -1336,6 +1797,8 @@ void DrawTile16FixedSub1_2 (uint32 Tile, uint32 Offset, uint32 StartLine,
 {
     TILE_PREAMBLE
     register uint8 *bp;
+
+    MATH_TILE (MATH_FIXED_SUB1_2)
 
     RENDER_TILE(WRITE_4PIXELS16_SUBF1_2, WRITE_4PIXELS16_FLIPPED_SUBF1_2, 4)
 }
@@ -1348,6 +1811,7 @@ void DrawClippedTile16FixedSub1_2 (uint32 Tile, uint32 Offset,
     register uint8 *bp;
 
     TILE_CLIP_PREAMBLE
+    MATH_CLIPPED_TILE (MATH_FIXED_SUB1_2)
     RENDER_CLIPPED_TILE(WRITE_4PIXELS16_SUBF1_2, 
 			WRITE_4PIXELS16_FLIPPED_SUBF1_2, 4)
 }

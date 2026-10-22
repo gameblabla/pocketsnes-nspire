@@ -111,6 +111,15 @@ void draw_shade(int x, int y, int w, int h, int amount)
     }
 }
 
+void draw_pixels(int x, int y, int w, int h, const uint16_t *pixels)
+{
+    uint16_t *screen = platform_screen();
+    int x0 = x < 0 ? 0 : x, x1 = x + w > SCREEN_W ? SCREEN_W : x + w;
+    for (int j = 0; j < h; j++)
+        if (y + j >= 0 && y + j < SCREEN_H && x0 < x1)
+            memcpy(screen + (y + j) * SCREEN_W + x0, pixels + j * w + (x0 - x), (x1 - x0) * 2);
+}
+
 /* The next character of UTF-8 text (bytes that aren't UTF-8 count as
  * Latin-1), moving past it. */
 static unsigned next_char(const char **text)

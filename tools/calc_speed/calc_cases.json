@@ -1,0 +1,74 @@
+[
+ {
+  "name": "YI flip",
+  "tree": "~/nspire/build/calib/eebf818",
+  "rom": "~/nspire/build/testroms/calc/Super Mario World 2 - Yoshi's Island.sfc.tns",
+  "state": "~/nspire/build/pocketsnes-asm/build/calc-saves/yi/sv010.tns",
+  "core": "asm",
+  "mode": "timing",
+  "frames": 275,
+  "cpu_ms": 9.1,
+  "gfx_ms": 7.8,
+  "imap": "~/nspire/build/calib/eebf818.imap"
+ },
+ {
+  "name": "YI undrawn ARM",
+  "tree": "~/nspire/build/calib/eebf818",
+  "rom": "~/nspire/build/testroms/calc/Super Mario World 2 - Yoshi's Island.sfc.tns",
+  "state": "~/nspire/build/pocketsnes-asm/build/calc-saves/yi/sv010.tns",
+  "core": "asm",
+  "mode": "norender",
+  "frames": 570,
+  "cpu_ms": 8.92,
+  "gfx_ms": 0,
+  "imap": "~/nspire/build/calib/eebf818.imap"
+ },
+ {
+  "name": "YI undrawn C",
+  "tree": "~/nspire/build/calib/eebf818",
+  "rom": "~/nspire/build/testroms/calc/Super Mario World 2 - Yoshi's Island.sfc.tns",
+  "state": "~/nspire/build/pocketsnes-asm/build/calc-saves/yi/sv010.tns",
+  "core": "c",
+  "mode": "norender",
+  "frames": 505,
+  "cpu_ms": 10.09,
+  "gfx_ms": 0,
+  "imap": "~/nspire/build/calib/eebf818.imap"
+ },
+ {
+  "name": "SMW turned",
+  "tree": "~/nspire/build/calib/e0cb368",
+  "rom": "~/nspire/build/testroms/Super Mario World (USA).sfc.tns",
+  "state": "~/nspire/build/romcompress-2026-10-11/orig/PocketSNES_saves/Super Mario World (USA).sfc.sv036.tns",
+  "core": "asm",
+  "mode": "timing",
+  "frames": 406,
+  "cpu_ms": 3.7,
+  "gfx_ms": 6.8,
+  "imap": "~/nspire/build/calib/e0cb368.imap"
+ },
+ {
+  "name": "SMW undrawn ARM",
+  "tree": "~/nspire/build/calib/e0cb368",
+  "rom": "~/nspire/build/testroms/Super Mario World (USA).sfc.tns",
+  "state": "~/nspire/build/romcompress-2026-10-11/orig/PocketSNES_saves/Super Mario World (USA).sfc.sv036.tns",
+  "core": "asm",
+  "mode": "norender",
+  "frames": 1360,
+  "cpu_ms": 3.7,
+  "gfx_ms": 0,
+  "imap": "~/nspire/build/calib/e0cb368.imap"
+ },
+ {
+  "name": "SMW undrawn C",
+  "tree": "~/nspire/build/calib/e0cb368",
+  "rom": "~/nspire/build/testroms/Super Mario World (USA).sfc.tns",
+  "state": "~/nspire/build/romcompress-2026-10-11/orig/PocketSNES_saves/Super Mario World (USA).sfc.sv036.tns",
+  "core": "c",
+  "mode": "norender",
+  "frames": 1064,
+  "cpu_ms": 4.74,
+  "gfx_ms": 0,
+  "imap": "~/nspire/build/calib/e0cb368.imap"
+ }
+]

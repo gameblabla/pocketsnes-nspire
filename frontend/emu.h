@@ -21,6 +21,9 @@ const char *emu_load_error(void);
  * state if may_load_state and "load the newest state when starting" are on,
  * and saves a state before leaving with "save a state when leaving" on. */
 enum EmuExit emu_run(int may_load_state);
+/* The next emu_run starts from this slot's state instead (the game list's
+ * Play from a state), whatever Load newest on start says. */
+void emu_start_from_slot(int slot);
 /* Writes the in-game save and the settings, and goes back to the settings
  * for all games. */
 void emu_close_game(void);
@@ -41,6 +44,13 @@ int  emu_save_target(void);
 /* The slot 'delta' steps from 'slot', round 001-999 and the auto slot
  * (before 001) when Saving > Auto save slot is on or it has a state. */
 int  emu_step_slot(int slot, int delta);
+/* The menu's Save state has its own slot, apart from Load state's (and the
+ * hotkeys'): 0 for "a new slot" (auto-increment on) or a slot 'delta' steps
+ * round. emu_menu_save_target is where a save there goes now (0: every slot
+ * is used). */
+int  emu_menu_save_slot(void);
+int  emu_menu_save_target(void);
+void emu_step_menu_save_slot(int delta);
 int  emu_save_state(int slot);    /* 1 on success */
 int  emu_load_state(int slot);    /* 1 ok, 0 empty slot, -1 unreadable */
 void emu_reset_game(void);

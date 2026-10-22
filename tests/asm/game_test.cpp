@@ -9,7 +9,10 @@
  * frame ("-" for none). INPUT picks the scripted controller: "none",
  * "start" (Start now and then), "walk" (right, jumps and runs) or "busy"
  * (all sorts of buttons); with "-norender" after it nothing is drawn and
- * nothing is printed (to time the CPU cores).
+ * nothing is printed (to time the CPU cores), and with "-timing" every frame
+ * is drawn but nothing is printed: tests/calc_speed.sh times that under
+ * qemu with tools/calc_speed's ARM926 model, which starts each frame at
+ * timing_frame_mark.
  * Built as game_trace (GAME_TRACE), two more arguments, FROM and TO, print
  * every opcode of those frames.
  * Runs on ARM (under qemu-arm on a PC). */
@@ -44,6 +47,14 @@ static const char *input_kind = "none";
  * keys, which must leave the same memory after every frame. */
 static bool replay;
 static bool no_render;   /* INPUT ends in "-norender": nothing drawn (for timing) */
+static bool timing;      /* INPUT ends in "-timing": drawn, but no checksums printed */
+
+/* Called at the start of every frame in timing runs; the speed model in
+ * tools/calc_speed counts each frame's cycles from one call to the next. */
+extern "C" void __attribute__ ((noinline)) timing_frame_mark (int frame)
+{
+    __asm__ volatile ("" : : "r" (frame) : "memory");
+}
 
 extern "C"
 {
@@ -329,6 +340,12 @@ int main (int argc, char **argv)
 	    *suffix = 0;
 	    no_render = true;
 	}
+	suffix = strstr (kind, "-timing");
+	if (suffix)
+	{
+	    *suffix = 0;
+	    timing = true;
+	}
 	suffix = strstr (kind, "-replay");
 	if (suffix)
 	{
@@ -384,6 +401,8 @@ int main (int argc, char **argv)
 
     for (frame_number = 1; frame_number <= frames; frame_number++)
     {
+	if (timing || no_render)
+	    timing_frame_mark (frame_number);
 	IPPU.RenderThisFrame = !no_render;
 #ifdef GAME_TRACE
 	if (!asm_core && !Settings.SA1)
@@ -392,7 +411,7 @@ int main (int argc, char **argv)
 #endif
 	S9xMainLoop ();
 
-	if (no_render)
+	if (no_render || timing)
 	    continue;   /* timing: no checksums either */
 	uint32 ram = crc32 (0, Memory.RAM, 0x20000);
 	uint32 vram = crc32 (0, Memory.VRAM, 0x10000);
@@ -416,6 +435,8 @@ int main (int argc, char **argv)
 	    write_png (path, (const uint16 *) screen_start, SNES_WIDTH, PPU.ScreenHeight, SCREEN_W);
 	}
     }
+    if (timing || no_render)
+	timing_frame_mark (frames + 1);   /* (the end of the last frame) */
 
     if (replay)
     {

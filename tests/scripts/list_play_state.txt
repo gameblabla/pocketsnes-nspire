@@ -1,0 +1,24 @@
+# The game list (starting in the exe folder): up a folder, into roms, down to
+# the game, its menu, Play from a state (its second entry, on the newest
+# state, 003), left twice to slot 001 (shot card.png), enter starts from it.
+wait 5
+press enter
+wait 5
+press down
+wait 3
+press enter
+wait 5
+press down
+wait 3
+press menu
+wait 5
+press down
+wait 3
+press left
+wait 3
+press left
+wait 3
+shot card.png
+press enter
+wait 10
+quit

@@ -1,10 +1,12 @@
-# On the first game: the game list's menu, "Move in the list" (the third
+# On the first game: the game list's menu, "Move in the list" (the fourth
 # entry), then down once and enter.
 wait 5
 press down
 wait 3
 press menu
 wait 5
+press down
+wait 3
 press down
 wait 3
 press down

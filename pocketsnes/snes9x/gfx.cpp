@@ -116,6 +116,64 @@ extern uint8 Depths[8][4];
 extern uint8 BGSizes [2];
 
 extern NormalTileRenderer DrawTilePtr;
+#ifdef ARM_ASM_GFX
+const uint16 *DrawBGTiles16 (const uint16 *t, const uint16 *b1, const uint16 *b2, uint32 s,
+			     uint32 Quot, int Count, uint32 StartLine, uint32 LineCount,
+			     uint32 t1, uint32 t2, const uint8 *depths, uint32 Ceiling, uint32 *Drawn);
+bool8 TileWasDrawn (uint32 Tile);
+extern uint32 FixedMathMade;
+void DrawOBJTiles16 (uint32 BaseTile, uint32 TileX, int TileInc, uint32 TileLine, int X, int Right, int t,
+		     uint32 Offset);
+
+/* With the ARM CPU core setting: for each line of the depth buffers
+ * ([0] GFX.ZBuffer, [1] GFX.SubZBuffer), a depth at least as high as any
+ * depth on the line: set when the line is cleared, and raised by whatever
+ * draws on it since (sprites for their lines, background rows for theirs
+ * by the depth of the tiles they drew, everything else for all the lines it
+ * draws). A background tile with a depth above it on all its lines can't
+ * be hidden, so DrawBGTiles16 draws it without the depth test. Not used for
+ * interlaced or double-height pictures. */
+uint8 LineMaxDepth [2][512];
+
+static inline uint8 *DepthCeilings (void)
+{
+    if (!Settings.AsmCPU || IPPU.Interlace || IPPU.DoubleHeightPixels)
+	return NULL;
+    if (GFX.DB == GFX.ZBuffer)
+	return LineMaxDepth [0];
+    if (GFX.DB == GFX.SubZBuffer)
+	return LineMaxDepth [1];
+    return NULL;
+}
+
+static inline uint32 HighestDepth (const uint8 *c, uint32 first, uint32 last)
+{
+    uint32 h = 0;
+    for (uint32 y = first; y <= last; y++)
+	if (c [y] > h)
+	    h = c [y];
+    return h;
+}
+
+static inline void RaiseDepth (uint8 *c, uint32 first, uint32 last, uint32 z)
+{
+    for (uint32 y = first; y <= last; y++)
+	if (c [y] < z)
+	    c [y] = (uint8) z;
+}
+
+/* After a drawer that didn't keep LineMaxDepth itself: all the lines it may
+ * have drawn on, to the highest depth it uses (or to 255 if the frame is
+ * one LineMaxDepth isn't kept for, where it doesn't matter). */
+static inline void RaiseDepthForLayer (uint32 z)
+{
+    if (!Settings.AsmCPU)
+	return;
+    uint8 *c = GFX.DB == GFX.ZBuffer ? LineMaxDepth [0] : GFX.DB == GFX.SubZBuffer ? LineMaxDepth [1] : NULL;
+    if (c)
+	RaiseDepth (c, GFX.StartY, GFX.EndY < 511 ? GFX.EndY : 511, z);
+}
+#endif
 extern ClippedTileRenderer DrawClippedTilePtr;
 extern NormalTileRenderer DrawHiResTilePtr;
 extern ClippedTileRenderer DrawHiResClippedTilePtr;
@@ -660,6 +718,7 @@ void S9xStartScreenRefresh ()
 
 		IPPU.RenderedFramesCount++;
 		IPPU.PreviousLine = IPPU.CurrentLine = 0;
+		S9xQueuedRenderLine = -1;
 		IPPU.MaxBrightness = PPU.Brightness;
 		IPPU.LatchedBlanking = PPU.ForcedBlanking;
 
@@ -741,10 +800,49 @@ void S9xStartScreenRefresh ()
     }
 }
 
+// RenderLine() takes a line's scroll positions and lets the line be drawn,
+// so register writes after it only change the lines below. The console
+// starts a line's pixels about 22 dots in, though: a write at the very start
+// of a line still changes it. Yoshi's Island turns the screen on at the end
+// of line 8's H-blank, and when an HDMA pushed that write a few dots into
+// line 9, line 9 stayed dark here and the top line of the picture flickered.
+// So the end of H-blank only queues the line, and it is taken at the first
+// PPU register write or redraw (VRAM and CG-RAM DMA) from dot 48 on, where
+// Snes9x 1.52 and later take each line, or at the next H-blank before HDMA
+// if nothing comes first.
+int  S9xQueuedRenderLine = -1;
+long S9xRenderLinePos;
+
+// The fixed colour ($2132) of each line, taken with the line like its scroll
+// positions (blue << 10 | green << 5 | red). A $2132 write then needs no
+// redraw of the lines above it when only the backdrop has colour maths: the
+// backdrop passes in DrawLines read each line's own value. Yoshi's Island
+// changes the fixed colour on nearly every line (its sky) and was drawn one
+// line at a time, about 210 times a frame, before.
+uint16 LineFixedColour [240];
+
+void S9xFlushQueuedRenderLine ()
+{
+    if (S9xQueuedRenderLine >= 0)
+    {
+	uint8 C = (uint8) S9xQueuedRenderLine;
+	S9xQueuedRenderLine = -1;
+	RenderLine (C);
+    }
+}
+
+void S9xQueueRenderLine (uint8 C)
+{
+    S9xFlushQueuedRenderLine ();
+    S9xQueuedRenderLine = C;
+}
+
 void RenderLine (uint8 C)
 {
     if (IPPU.RenderThisFrame)
 	{
+		LineFixedColour[C] = PPU.FixedColourRed | (PPU.FixedColourGreen << 5) |
+				     (PPU.FixedColourBlue << 10);
 		LineData[C].BG[0].VOffset = PPU.BG[0].VOffset + 1;
 		LineData[C].BG[0].HOffset = PPU.BG[0].HOffset;
 		LineData[C].BG[1].VOffset = PPU.BG[1].VOffset + 1;
@@ -787,6 +885,7 @@ void RenderLine (uint8 C)
 
 void S9xEndScreenRefresh ()
 {
+    S9xFlushQueuedRenderLine ();
     IPPU.HDMAStarted = FALSE;
     if (IPPU.RenderThisFrame)
 	{
@@ -1331,6 +1430,13 @@ if(Settings.BGLayering) {
 #endif
 	}
 	GFX.Z1 = D + 2;
+#ifdef ARM_ASM_GFX
+	uint8 *Ceilings = DepthCeilings ();
+	/* With the ARM CPU core setting and no windows, each sprite's tiles on a
+	 * line go to DrawOBJTiles16 (tile.cpp) in one go, when they're drawn
+	 * with DrawTile16 */
+	bool8 WholeTiles = Settings.AsmCPU && !clipcount && GFX.PixSize == 1;
+#endif
 
 	for(uint32 Y=GFX.StartY, Offset=Y*GFX.PPL; Y<=GFX.EndY; Y++, Offset+=GFX.PPL){
 #ifdef MK_DEBUG_RTO
@@ -1380,6 +1486,20 @@ if(Settings.BGLayering) {
 			}
 
 			GFX.Z2 = (PPU.OBJ[S].Priority + 1) * 4 + D;
+#ifdef ARM_ASM_GFX
+			if (Ceilings && Ceilings [Y] < GFX.Z2)
+				Ceilings [Y] = GFX.Z2;
+#endif
+
+#ifdef ARM_ASM_GFX
+			if (WholeTiles && DrawTilePtr == DrawTile16)
+			{
+				int X = PPU.OBJ[S].HPos; if (X == -256) X = 256;
+				DrawOBJTiles16 (BaseTile, TileX, TileInc, TileLine, X, PPU.OBJ[S].HPos + GFX.OBJWidths[S],
+						tiles, Offset);
+				continue;
+			}
+#endif
 
 			bool8 WinStat=TRUE;
 			int WinIdx=0, NextPos=-1000;
@@ -2352,6 +2472,9 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
     if (PPU.BGMosaic [bg] && PPU.Mosaic > 1)
     {
 		DrawBackgroundMosaic (BGMode, bg, Z1, Z2);
+#ifdef ARM_ASM_GFX
+		RaiseDepthForLayer (Z1 > Z2 ? Z1 : Z2);
+#endif
 		return;
 		
     }
@@ -2360,6 +2483,9 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
     case 2:
     case 4: // Used by Puzzle Bobble
         DrawBackgroundOffset (BGMode, bg, Z1, Z2);
+#ifdef ARM_ASM_GFX
+		RaiseDepthForLayer (Z1 > Z2 ? Z1 : Z2);
+#endif
 		return;
 		
     case 5:
@@ -2369,6 +2495,9 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 			if (!Settings.SupportHiRes)
 				SelectTileRenderer(TRUE /* normal */);
 			DrawBackgroundMode5 (BGMode, bg, Z1, Z2);
+#ifdef ARM_ASM_GFX
+			RaiseDepthForLayer (Z1 > Z2 ? Z1 : Z2);
+#endif
 			return;
 //		}
 		break;
@@ -2429,6 +2558,9 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 		OffsetMask = 0x1ff;
 		OffsetShift = 3;
     }
+#ifdef ARM_ASM_GFX
+    uint8 *Ceilings = DepthCeilings ();
+#endif
 	
     for (uint32 Y = GFX.StartY; Y <= GFX.EndY; Y += Lines)
     {
@@ -2469,6 +2601,12 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 			
 			b1 += (ScreenLine & 0x1f) << 5;
 			b2 += (ScreenLine & 0x1f) << 5;
+#ifdef ARM_ASM_GFX
+			/* the row's lines' LineMaxDepth (DrawBGTiles16), and the
+			 * highest depth the row draws, to raise it by */
+			uint32 RowCeiling = Ceilings ? HighestDepth (Ceilings, Y, Y + Lines - 1) : 255;
+			uint32 RowDrawn = 0;
+#endif
 			
 			int clipcount = GFX.pCurrentClip->Count [bg];
 			if (!clipcount)
@@ -2562,6 +2700,12 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 									Offset, Count, VirtAlign, Lines);
 							}
 					}
+#ifdef ARM_ASM_GFX
+					if (Ceilings && GFX.Z2 > RowDrawn &&
+					    TileWasDrawn (BG.TileSize == 8 ? Tile : Tile + (Tile & V_FLIP ? t2 : t1) +
+							  (Tile & H_FLIP ? 1 - (Quot & 1) : (Quot & 1))))
+						RowDrawn = GFX.Z2;
+#endif
 					
 					if (BG.TileSize == 8)
 					{
@@ -2587,6 +2731,29 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 				Count = Width - Count;
 				int Middle = Count >> 3;
 				Count &= 7;
+#ifdef ARM_ASM_GFX
+				// ... with the ARM CPU core setting, in one go (tile.cpp)
+				if (Settings.AsmCPU && Middle > 0 && Middle <= 64 && DrawTilePtr == DrawTile16 &&
+				    !BG.DirectColourMode && !IPPU.HalfWidthPixels && !BG.NameSelect &&
+				    !(BG.TileAddress & ((1u << BG.TileShift) - 1)))
+				{
+					uint32 Drawn;
+					t = (uint16 *) DrawBGTiles16 (t, b1, b2, s, Quot, Middle, VirtAlign, Lines, t1, t2, depths,
+								      RowCeiling, &Drawn);
+					if (Drawn > RowDrawn)
+						RowDrawn = Drawn;
+					s += Middle * 8;
+					Quot += Middle;
+					Middle = 0;
+				}
+				/* (drawn below with some other drawer: its depths may be anywhere) */
+				if (Middle > 0 && Ceilings)
+				{
+					uint32 z = depths [0] > depths [1] ? depths [0] : depths [1];
+					if (z > RowDrawn)
+						RowDrawn = z;
+				}
+#endif
 				for (int C = Middle; C > 0; s += (IPPU.HalfWidthPixels ? 4 : 8) * GFX.PixSize, Quot++, C--)
 				{
 					Tile = READ_2BYTES(t);
@@ -2693,8 +2860,18 @@ static void DrawBackground (uint32 BGMode, uint32 bg, uint8 Z1, uint8 Z2)
 								Lines);
 						}
 					}
+#ifdef ARM_ASM_GFX
+					if (Ceilings && GFX.Z2 > RowDrawn &&
+					    TileWasDrawn (BG.TileSize == 8 ? Tile : Tile + (Tile & V_FLIP ? t2 : t1) +
+							  (Tile & H_FLIP ? 1 - (Quot & 1) : (Quot & 1))))
+						RowDrawn = GFX.Z2;
+#endif
 				}
 		}
+#ifdef ARM_ASM_GFX
+		if (Ceilings && RowDrawn)
+			RaiseDepth (Ceilings, Y, Y + Lines - 1, RowDrawn);
+#endif
     }
 }
 
@@ -3505,6 +3682,9 @@ static void RenderScreen (uint8 *Screen, bool8 sub, bool8 force_no_add, uint8 D)
 					}
 				}
 			}
+#ifdef ARM_ASM_GFX
+			RaiseDepthForLayer (255);
+#endif
 		}
 		break;
 	default:
@@ -3639,6 +3819,39 @@ static void S9xDisplayString_text (const char *string)
  * in interlaced modes 5 and 6) into GFX.Screen and its depth and sub screen
  * buffers: everything S9xUpdateScreen does that works line by line. */
 /* Sets 'count' pixels from p on to 'colour', two at a time where it can. */
+#ifdef ARM_ASM_GFX
+/* pocketsnes/arm/gfx_arm.s: bytes (a multiple of 4) from p (word-aligned)
+ * set to pattern, with 8-word stores; used with the ARM CPU core setting */
+extern "C" void FillWords (void *p, uint32 pattern, uint32 bytes);
+#endif
+
+/* count bytes of a depth buffer from p set to depth */
+static inline void FillDepth (uint8 *p, uint8 depth, uint32 count)
+{
+#ifdef ARM_ASM_GFX
+    if (Settings.AsmCPU && !(((uintptr_t) p | count) & 3))
+    {
+	FillWords (p, depth * 0x01010101u, count);
+	return;
+    }
+#endif
+    memset (p, depth, count);
+}
+
+/* words words from p set to pattern */
+static inline void FillPattern (uint32 *p, uint32 pattern, uint32 words)
+{
+#ifdef ARM_ASM_GFX
+    if (Settings.AsmCPU)
+    {
+	FillWords (p, pattern, words * 4);
+	return;
+    }
+#endif
+    for (; words != 0; words--)
+	*p++ = pattern;
+}
+
 static inline void FillLine16 (uint16 *p, uint16 colour, uint32 count)
 {
     uint32 pair = colour | ((uint32) colour << 16);
@@ -3647,11 +3860,27 @@ static inline void FillLine16 (uint16 *p, uint16 colour, uint32 count)
 	*p++ = colour;
 	count--;
     }
+#ifdef ARM_ASM_GFX
+    if (Settings.AsmCPU)
+    {
+	FillWords (p, pair, (count & ~1u) * 2);
+	if (count & 1)
+	    p [count - 1] = colour;
+	return;
+    }
+#endif
     uint32 *q = (uint32 *) p;
     for (; count >= 2; count -= 2)
 	*q++ = pair;
     if (count)
 	*(uint16 *) q = colour;
+}
+
+// The fixed colour of the line drawn at row y, as a pixel
+static inline uint32 FixedColourOfLine (uint32 y)
+{
+    uint32 c = LineFixedColour [IPPU.DoubleHeightPixels ? y >> 1 : y];
+    return BUILD_PIXEL (IPPU.XB [c & 0x1f], IPPU.XB [(c >> 5) & 0x1f], IPPU.XB [c >> 10]);
 }
 
 static void DrawLines (uint32 starty, uint32 endy, int32 x2)
@@ -3681,6 +3910,9 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 			GFX.FixedColour = BUILD_PIXEL (IPPU.XB [PPU.FixedColourRed],
 				IPPU.XB [PPU.FixedColourGreen],
 				IPPU.XB [PPU.FixedColourBlue]);
+#ifdef ARM_ASM_GFX
+			FixedMathMade = 0;	/* (tile.cpp: made again with these colours) */
+#endif
 			
 			/* A common case of the backdrop pass at the end, done before the
 			 * main screen is drawn instead, a whole line at a time: no colour
@@ -3711,8 +3943,12 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 				// Colour window enabled.
 				for (uint32 y = starty; y <= endy; y++)
 				{
-					ZeroMemory (GFX.SubZBuffer + y * GFX.ZPitch, IPPU.RenderedScreenWidth);
-					ZeroMemory (GFX.ZBuffer + y * GFX.ZPitch, IPPU.RenderedScreenWidth);
+					FillDepth (GFX.SubZBuffer + y * GFX.ZPitch, 0, IPPU.RenderedScreenWidth);
+					FillDepth (GFX.ZBuffer + y * GFX.ZPitch, 0, IPPU.RenderedScreenWidth);
+#ifdef ARM_ASM_GFX
+					LineMaxDepth [0][y] = 0;
+					LineMaxDepth [1][y] = pClip->Count [5] ? 1 : 0;	/* (1 in the windows, below) */
+#endif
 
 					if (IPPU.Clip [0].Count [5])
 					{
@@ -3740,8 +3976,9 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 								uint16 *q = p + pClip->Right [c][5] * x2;
 								p += pClip->Left [c][5] * x2;
 
+								uint16 fixed = (uint16) FixedColourOfLine (y);
 								while (p < q)
-									*p++ = (uint16) GFX.FixedColour;
+									*p++ = fixed;
 							}
 						}
 					}
@@ -3751,11 +3988,15 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 			{
 				for (uint32 y = starty; y <= endy; y++)
 				{
-					ZeroMemory (GFX.ZBuffer + y * GFX.ZPitch, IPPU.RenderedScreenWidth);
-					memset (GFX.SubZBuffer + y * GFX.ZPitch, 1, IPPU.RenderedScreenWidth);
+					FillDepth (GFX.ZBuffer + y * GFX.ZPitch, 0, IPPU.RenderedScreenWidth);
+					FillDepth (GFX.SubZBuffer + y * GFX.ZPitch, 1, IPPU.RenderedScreenWidth);
+#ifdef ARM_ASM_GFX
+					LineMaxDepth [0][y] = 0;
+					LineMaxDepth [1][y] = 1;
+#endif
 					if (backdrop_from_sub)
 						FillLine16 ((uint16 *) (sub_screen + y * GFX.Pitch2),
-							    (uint16) GFX.FixedColour, 256 * x2);
+							    (uint16) FixedColourOfLine (y), 256 * x2);
 					
 					if (IPPU.Clip [0].Count [5])
 					{
@@ -3764,7 +4005,8 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 						// the main screen that will allow the sub-screen
 						// 'underneath' to show through.
 						
-						uint32 b = GFX.FixedColour | (GFX.FixedColour << 16);
+						uint32 fixed = FixedColourOfLine (y);
+						uint32 b = fixed | (fixed << 16);
 						uint32 *p = (uint32 *) (GFX.SubScreen + y * GFX.Pitch2);
 						uint32 *q = (uint32 *) ((uint16 *) p + IPPU.RenderedScreenWidth);
 						
@@ -3806,6 +4048,24 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 					memcpy (GFX.Screen + y * GFX.Pitch2, GFX.SubScreen + y * GFX.Pitch2,
 						256 * x2 * sizeof (uint16));
 			}
+
+#ifdef ARM_ASM_GFX
+			/* With the ARM CPU core setting, the backdrop pass at the end
+			 * for a backdrop without colour maths and no colour window (the
+			 * backdrop colour wherever nothing on the main screen was drawn,
+			 * one pixel at a time) is done here instead, a line at a time.
+			 * The main screen's drawers give every pixel they draw a depth
+			 * above 0 and never read the main screen's own pixels, so lines
+			 * filled with the backdrop colour first end up the same. */
+			bool8 backdrop_first = Settings.AsmCPU && !SUB_OR_ADD(5) && !IPPU.Clip [0].Count [5];
+			if (backdrop_first)
+			{
+				for (uint32 y = starty; y <= endy; y++)
+					FillLine16 ((uint16 *) (GFX.Screen + y * GFX.Pitch2), IPPU.ScreenColors [0], 256 * x2);
+			}
+#else
+			const bool8 backdrop_first = FALSE;
+#endif
 
 			GFX.DB = GFX.ZBuffer;
 			RenderScreen (GFX.Screen, FALSE, FALSE, MAIN_SCREEN_DEPTH);
@@ -3850,7 +4110,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 								register uint8 *d = GFX.ZBuffer + y * GFX.ZPitch;
 								register uint8 *s = GFX.SubZBuffer + y * GFX.ZPitch + Left;
 								register uint8 *e = d + Right;
-								uint16 back_fixed = COLOR_SUB (back, GFX.FixedColour);
+								uint16 back_fixed = COLOR_SUB (back, FixedColourOfLine (y));
 
 								d += Left;
 								while (d < e)
@@ -3879,7 +4139,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 								register uint8 *s = GFX.SubZBuffer + y * GFX.ZPitch + Left;
 								register uint8 *d = GFX.ZBuffer + y * GFX.ZPitch;
 								register uint8 *e = d + Right;
-								uint16 back_fixed = COLOR_SUB (back, GFX.FixedColour);
+								uint16 back_fixed = COLOR_SUB (back, FixedColourOfLine (y));
 								
 								d += Left;
 								while (d < e)
@@ -3908,7 +4168,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 							register uint8 *d = GFX.ZBuffer + y * GFX.ZPitch;
 							register uint8 *s = GFX.SubZBuffer + y * GFX.ZPitch + Left;
 							register uint8 *e = d + Right;
-							uint16 back_fixed = COLOR_ADD (back, GFX.FixedColour);
+							uint16 back_fixed = COLOR_ADD (back, FixedColourOfLine (y));
 							d += Left;
 							while (d < e)
 							{
@@ -3935,7 +4195,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 							register uint8 *d = GFX.ZBuffer + y * GFX.ZPitch;
 							register uint8 *s = GFX.SubZBuffer + y * GFX.ZPitch + Left;
 							register uint8 *e = d + Right;
-							uint16 back_fixed = COLOR_ADD (back, GFX.FixedColour);
+							uint16 back_fixed = COLOR_ADD (back, FixedColourOfLine (y));
 							d += Left;
 							while (d < e)
 							{
@@ -3968,6 +4228,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 								register uint8 *d = GFX.ZBuffer + y * GFX.ZPitch;
 								register uint8 *s = GFX.SubZBuffer + y * GFX.ZPitch + Left;
 								register uint8 *e = d + Right;
+								uint16 fixed = (uint16) FixedColourOfLine (y);
 								d += Left;
 								while (d < e)
 								{
@@ -3978,7 +4239,7 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 											if (*s != 1)
 												*p = *(p + GFX.Delta);
 											else	
-												*p = GFX.FixedColour;
+												*p = fixed;
 										}
 										else
 											*p = (uint16) back;
@@ -4021,14 +4282,14 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 						}
 					}
 				}
-				else
+				else if (!backdrop_first)	// (else done before the main screen)
 				{
 					for (uint32 y = starty; y <= endy; y++)
 					{
 						uint16 *p = (uint16 *) (GFX.Screen + y * GFX.Pitch2);
 						uint8 *d = GFX.ZBuffer + y * GFX.ZPitch;
 						uint8 *e = d + 256 * x2;
-					
+
 						while (d < e)
 						{
 							if (*d == 0)
@@ -4077,19 +4338,18 @@ static void DrawLines (uint32 starty, uint32 endy, int32 x2)
 			else
 			{
 				for (uint32 y = starty; y <= endy; y++)
-				{
-					uint32 *p = (uint32 *) (GFX.Screen + y * GFX.Pitch2);
-					uint32 *q = (uint32 *) ((uint16 *) p + IPPU.RenderedScreenWidth);
-					while (p < q)
-						*p++ = back;
-				}
+					FillPattern ((uint32 *) (GFX.Screen + y * GFX.Pitch2), back,
+						     IPPU.RenderedScreenWidth / 2);
 			}
 
 			if (!PPU.ForcedBlanking)
 			{
 				for (uint32 y = starty; y <= endy; y++)
 				{
-					ZeroMemory (GFX.ZBuffer + y * GFX.ZPitch, IPPU.RenderedScreenWidth);
+					FillDepth (GFX.ZBuffer + y * GFX.ZPitch, 0, IPPU.RenderedScreenWidth);
+#ifdef ARM_ASM_GFX
+					LineMaxDepth [0][y] = 0;
+#endif
 				}
 				GFX.DB = GFX.ZBuffer;
 				RenderScreen (GFX.Screen, FALSE, TRUE, SUB_SCREEN_DEPTH);
@@ -4112,7 +4372,16 @@ void S9xUpdateScreen ()
 {
     uint32 perf_start = S9xPerfTicks ();
     int32 x2 = 1;
-	
+
+#ifdef ARM_ASM_CPU
+    /* (the colours rebuilt unless the brightness is back to theirs) */
+    if (S9xBrightnessPending)
+    {
+		if (IPPU.XB != mul_brightness [PPU.Brightness])
+			S9xFixColourBrightness ();
+		S9xBrightnessPending = FALSE;
+    }
+#endif
     GFX.S = GFX.Screen;
     GFX.r2131 = Memory.FillRAM [0x2131];
     GFX.r212c = Memory.FillRAM [0x212c];

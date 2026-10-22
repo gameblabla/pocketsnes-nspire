@@ -1,0 +1,18 @@
+# The menu's Save state has its own slot: right goes from "new slot 002" to
+# slot 003 (shot pick.png), enter saves there; then Load state (still on
+# slot 001, the newest at the start) loads.
+wait 60
+press esc
+wait 5
+press down
+wait 3
+press right
+wait 3
+shot pick.png
+press enter
+wait 3
+press down
+wait 3
+press enter
+wait 10
+quit

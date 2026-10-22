@@ -304,6 +304,9 @@ void S9xUpdateScreen ();
 void S9xResetPPU ();
 void S9xSoftResetPPU ();
 void S9xFixColourBrightness ();
+#ifdef ARM_ASM_CPU
+extern bool8 S9xBrightnessPending;	/* (ppu.cpp) */
+#endif
 void S9xUpdateJoypads ();
 void S9xProcessMouse(int which1);
 void S9xSuperFXExec ();
