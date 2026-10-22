@@ -303,7 +303,11 @@ Files and launching:
   even with frameskip), so a hotkey save now happens on the frame after
   the key, the frame its picture shows (`roundtrip*.txt` wait 151). The
   menu draws the selected slot's picture on a card under *Load state*
-  (`draw_state_picture`), over the values of the rows below.
+  (`draw_state_picture`), over the values of the rows below. *Save state*
+  puts the same card in the same place for the slot the save goes to; a
+  slot without a state (a new one with auto-increment) shows
+  `emu_save_picture()`, the picture taken when the menu opened, which is
+  what the save will keep.
 * **File associations:** PocketSNES registers sfc, smc, fig, swc and zip
   with Ndless, and points existing PocketSNES associations at its current
   name, so opening a ROM in My Documents starts that game. It edits
@@ -575,6 +579,7 @@ History
 | 2026-10-20 | 1d9faa6 | Speed model with caches and memory, fitted to the calculator (`tools/calc_speed/calibrate.py`) |
 | 2026-10-20 | 4031b0b | The busiest code runs from the on-chip SRAM (CX II) |
 | 2026-10-20 | | Everything since PR #10 pushed (branch asm-cpu) as a new PR |
+| 2026-10-21 | | Save state shows a picture too (the state it replaces, or the game now) |
 
 `git log` has the details; every commit message says what changed and why.
 

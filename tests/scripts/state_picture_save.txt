@@ -1,0 +1,11 @@
+# Save state pictures at Save state: the menu's Save state row (its second
+# entry) shows the slot the save goes to. Shot savecard.png, then save there.
+wait 60
+press esc
+wait 5
+press down
+wait 3
+shot savecard.png
+press enter
+wait 3
+quit

@@ -414,6 +414,16 @@ play picoff tests/scripts/state_picture.txt MonsterFarmJump.sfc
 check "$(pic has "$OUT/picoff/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns")" no "with State pictures off a state has none"
 check "$(pic has "$s.sv002.tns")$(pic has "$OUT/storedrt/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns")" yesyes \
     "the save manager kept the pictures when it uncompressed the states; Compress saves off stores one too"
+# Save state shows its card in the same place as Load state's.
+setup picsave MonsterFarmJump.sfc config_version=3 show_fps=0 save_on_exit=0 load_on_start=0
+play picsave tests/scripts/state_picture_save.txt MonsterFarmJump.sfc
+check "$(pic card "$OUT/picsave/zPocketSNES_saves/MonsterFarmJump.sfc.sv001.tns" "$OUT/picsave/shots/savecard.png" 194 79)" same \
+    "Save state shows the picture a new slot will keep, and the save keeps it"
+setup picover MonsterFarmJump.sfc config_version=3 show_fps=0 save_on_exit=0 load_on_start=0 auto_increment=0
+cp "$p" "$OUT/picover/zPocketSNES_saves/"
+play picover tests/scripts/state_picture_save.txt MonsterFarmJump.sfc
+check "$(pic card "$p" "$OUT/picover/shots/savecard.png" 194 79)" same \
+    "with auto-increment off Save state shows the state it replaces"
 
 echo "== S-DD1 (Star Ocean, Street Fighter Alpha 2)"
 # backdrop NAME: green, red or other, from the centre of shots/end.png

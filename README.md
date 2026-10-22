@@ -152,7 +152,9 @@ them much:
 You can pick a slot in the menu (*Save state* / *Load state*, left/right
 choose the slot). Each state keeps a small picture of the moment it was
 saved, and *Load state* shows the picture of the slot you're on, so you can
-see which one you're loading (*Saving → State pictures*; states saved by
+see which one you're loading. *Save state* shows one too: the state a save
+would replace, or for a new slot the game as it is now, the picture the save
+will keep (*Saving → State pictures*; states saved by
 older versions have none). Everything a game saves goes in the `zPocketSNES_saves`
 folder in My Documents (the z keeps it below your game folders; the game
 list doesn't show it).
@@ -313,7 +315,7 @@ whenever that game runs.
 | Load newest on start | on | Games start from their newest state. *Play without a state* in the game list skips it once. |
 | Write in-game saves | automatic | When the game's own save is written to the calculator: a couple of seconds after the game saves, or only on exit. |
 | Compress saves | on | New states and in-game saves are compressed (a state: about 35–60 KB instead of 356 KB). Off: in-game saves are the plain `.srm` PC emulators read. |
-| State pictures | on | Each new state keeps a small picture of the game (a few KB), shown at *Load state* in the menu for the slot you're on. |
+| State pictures | on | Each new state keeps a small picture of the game (a few KB), shown at *Save state* and *Load state* in the menu for the slot you're on. |
 | Save manager | | This game's saves and their sizes; compress, uncompress or delete them. See [Saving](#saving). |
 
 ### SNES buttons and Hotkeys
