@@ -506,12 +506,15 @@ bool8 S9xDeinitUpdate (int, int, bool8)
         clear_screens_later();
     }
 
-    /* Counts the time between drawn frames, starting from the first one. */
-    uint32_t elapsed = start - fps_start;
+    /* Counts the time between drawn frames, starting from the first one, in
+     * real time even if the timer doesn't run (platform.h): then games aren't
+     * held back, and the counter shows how fast they go. */
+    uint32_t real = platform_real_ticks();
+    uint32_t elapsed = real - fps_start;
     if (!fps_started)
     {
         fps_started = true;
-        fps_start = start;
+        fps_start = real;
         fps_frames = 0;
     }
     else
@@ -520,8 +523,14 @@ bool8 S9xDeinitUpdate (int, int, bool8)
         if (elapsed >= platform_tick_hz() / 2)
         {
             fps_shown = (uint32_t) (((uint64_t) fps_frames * platform_tick_hz() + elapsed / 2) / elapsed);
-            fps_start = start;
+            fps_start = real;
             fps_frames = 0;
+            if (cfg.show_fps)
+            {
+                char line[32];
+                snprintf(line, sizeof(line), "fps %u/%u", (unsigned) fps_shown, (unsigned) fps_expected());
+                platform_log(line);   /* for the PC tests */
+            }
         }
     }
 
@@ -1171,7 +1180,7 @@ void emu_speed_test(int close_after_seconds)
     /* At the speed the game runs at (the menu runs at normal speed). */
     game_speed();
     uint32_t mhz = platform_cpu_mhz();
-    char clock_report[400];
+    char clock_report[560];
     platform_clock_report(clock_report, sizeof(clock_report));
     {
         size_t len = strlen(clock_report);
@@ -1179,6 +1188,12 @@ void emu_speed_test(int close_after_seconds)
         {
             strcpy(clock_report + len, "\n");
             platform_code_report(clock_report + len + 1, sizeof(clock_report) - len - 1);
+        }
+        len = strlen(clock_report);
+        if (len + 2 < sizeof(clock_report))
+        {
+            strcpy(clock_report + len, "\n");
+            platform_timer_report(clock_report + len + 1, sizeof(clock_report) - len - 1);
         }
     }
 

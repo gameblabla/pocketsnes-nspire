@@ -10,6 +10,7 @@
 #include "romtypes.h"
 #include "rotate.h"
 #include "scale.h"
+#include "tickrate.h"
 
 static void register_rom_types(const char *program_path);
 
@@ -67,12 +68,13 @@ static char program_path[256];
 
 static uint32_t saved_load, saved_control, saved_clock;
 
-/* The timer's clock comes from the 32768 Hz crystal on the CX and the CX II
- * alike (checked against the real-time clock; the speed test build reports
- * it). It used to be measured against the real-time clock while the program
- * ran, but loading a ROM or a state held up the measurement and it came out
- * 5-20% wrong, which made games run that much too slow and the FPS counter
- * and the measured CPU clock read high. */
+/* The timer is set up to count 32768 times a second, from the 32768 Hz
+ * crystal, and does on the CX II (checked against the real-time clock; the
+ * speed test build reports it). An older CX seems to count slower
+ * (gameblabla/pocketsnes-nspire#13), so it is checked against the real-time
+ * clock while the program runs and corrected if it is off (tickrate.h). The
+ * old check here was held up by loading a ROM or a state and came out 5-20%
+ * wrong; tickrate.cpp only times the clock's changes it saw closely. */
 static const uint32_t tick_hz = 32768;
 
 /* If the timer turns out not to run, time is only advanced by waiting, so
@@ -488,6 +490,7 @@ int platform_init(int *argc, char **argv)
     uint32_t first = *TIMER_VALUE;
     for (int i = 0; i < 400000 && !timer_works; i++)
         timer_works = *TIMER_VALUE != first;
+    tick_rate_start(tick_hz);
 
     start_cpsr = read_cpsr();
     read_lcd_regs(start_regs);
@@ -1703,8 +1706,11 @@ void platform_write_diagnostics(const char *path)
     fprintf(f, "== diagnostics\n");
     fprintf(f, "cpu %lu MHz, cpsr at start %08lx, now %08lx\n", (unsigned long) platform_cpu_mhz(),
             (unsigned long) start_cpsr, (unsigned long) read_cpsr());
-    fprintf(f, "timer: works %d, %lu ticks/s used, %lu measured against the real-time clock\n",
-            timer_works, (unsigned long) tick_hz, (unsigned long) (timer_works ? measure_tick_hz() : 0));
+    char timer_report[160];
+    platform_timer_report(timer_report, sizeof(timer_report));
+    fprintf(f, "timer: works %d, %lu ticks/s used, %lu measured against the real-time clock\n%s\n",
+            timer_works, (unsigned long) tick_hz, (unsigned long) (timer_works ? measure_tick_hz() : 0),
+            timer_report);
     fprintf(f, "lcd_type %d, CX II portrait LCD %d, screen output %s\n", (int) lcd_type(), fast_available,
             platform_screen_mode_name());
 
@@ -1896,7 +1902,23 @@ uint32_t platform_ticks(void)
 {
     if (!timer_works)
         return fallback_ticks;
-    return ~*TIMER_VALUE;   /* the timer counts down */
+    uint32_t raw = ~*TIMER_VALUE;   /* the timer counts down */
+    return tick_rate_ticks(raw, tick_rate_checked() ? 0 : *RTC_SECONDS);
+}
+
+uint32_t platform_real_ticks(void)
+{
+    if (!timer_works)
+        return *RTC_SECONDS * tick_hz;
+    return platform_ticks();
+}
+
+void platform_timer_report(char *text, size_t size)
+{
+    if (!timer_works)
+        snprintf(text, size, "timer: doesn't run, so games aren't held to their speed");
+    else
+        tick_rate_report(text, size);
 }
 
 uint32_t platform_tick_hz(void)

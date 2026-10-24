@@ -293,6 +293,22 @@ check "$(clock_log "$OUT/clockstuck/log.txt")" \
     "a clock that doesn't reach the speed goes back to normal and says so"
 check "$(exists "$OUT/clockstuck/zPocketSNES_saves/pocketsnes_clock.tns")" no "... and leaves no freeze marker"
 
+echo "== Game speed when the timer runs at another speed (gameblabla/pocketsnes-nspire#13)"
+# Seconds (to a tenth) between the two "time" lines of a test log, and the
+# FPS counter's last reading.
+time_between() { awk '/^time/ { t[++n] = $2 } END { printf "%.1f", (t[2] - t[1]) / 1000 }' "$1"; }
+last_fps() { grep '^fps' "$1" | tail -1; }
+for timer in 32768 8192 65536; do
+    setup "timer$timer" MonsterFarmJump.sfc config_version=3 show_fps=1 save_on_exit=0 load_on_start=0
+    play_logged "timer$timer" tests/scripts/timer_speed.txt MonsterFarmJump.sfc --timer-rate $timer
+    check "$(time_between "$OUT/timer$timer/log.txt") $(last_fps "$OUT/timer$timer/log.txt")" "10.0 fps 60/60" \
+        "a timer counting $timer times a second: 600 frames take 10 seconds once it is checked"
+done
+setup timerdead MonsterFarmJump.sfc config_version=3 show_fps=1 save_on_exit=0 load_on_start=0
+play_logged timerdead tests/scripts/timer_slow_cpu.txt MonsterFarmJump.sfc --dead-timer
+check "$(time_between "$OUT/timerdead/log.txt") $(last_fps "$OUT/timerdead/log.txt")" "40.0 fps 15/60" \
+    "a timer that doesn't run on a slow calculator: the FPS counter shows the real 15 fps, not 60"
+
 echo "== Overclock test"
 # In a game, on a PC acting like a calculator that doesn't go past 444 MHz:
 # 408 to 444 pass, 456 doesn't switch.

@@ -23,6 +23,7 @@
 #include "platform.h"
 #include "rotate.h"
 #include "scale.h"
+#include "tickrate.h"
 
 static int failures, checks;
 
@@ -703,6 +704,133 @@ static void test_brightness(void)
           "the nearest level of other values (the calculator's own)");
 }
 
+/* ---- The timer's speed against the real-time clock (tickrate.h) ---- */
+
+/* A pretend calculator: 'now' is real time in 32768ths of a second, its
+ * timer counts 'rate' times a second and its real-time clock reads
+ * now / 32768 + clock_offset. */
+static uint64_t tr_now;
+static uint32_t tr_rate, tr_offset, tr_last, tr_biggest_step;
+static int tr_backwards;
+
+static uint32_t tr_read(void)
+{
+    uint32_t ticks = tick_rate_ticks((uint32_t) (tr_now * tr_rate / 32768),
+                                     (uint32_t) (tr_now / 32768) + tr_offset);
+    if ((int32_t) (ticks - tr_last) < 0)
+        tr_backwards = 1;
+    else if (ticks - tr_last > tr_biggest_step)
+        tr_biggest_step = ticks - tr_last;
+    tr_last = ticks;
+    return ticks;
+}
+
+static void tr_start(uint32_t rate)
+{
+    tick_rate_start(32768);
+    tr_now = 5 * 32768 + 1234;   /* not on a second */
+    tr_rate = rate;
+    tr_offset = 1000;
+    tr_backwards = 0;
+    tr_last = (uint32_t) (tr_now * rate / 32768);
+    tr_biggest_step = 0;
+}
+
+/* Readings every 'step' 32768ths of a second for 'seconds' seconds. */
+static void tr_run(uint32_t step, uint32_t seconds)
+{
+    for (uint64_t end = tr_now + (uint64_t) seconds * 32768; tr_now < end; tr_now += step)
+        tr_read();
+}
+
+/* The ticks that go by in 'seconds' seconds of real time. */
+static uint32_t tr_ticks_in(uint32_t step, uint32_t seconds)
+{
+    uint32_t from = tr_read();
+    tr_run(step, seconds);
+    return tr_read() - from;
+}
+
+static int tr_near(uint32_t ticks, uint32_t expected, uint32_t per_mille)
+{
+    uint32_t diff = ticks > expected ? ticks - expected : expected - ticks;
+    return (uint64_t) diff * 1000 <= (uint64_t) expected * per_mille;
+}
+
+/* A report of a timer left alone, measured within 0.1% of 'hz'. */
+static int tr_report_near(const char *report, uint32_t hz)
+{
+    unsigned used, measured;
+    return sscanf(report, "timer: %u ticks/s (%u by the real-time clock)", &used, &measured) == 2 &&
+           used == hz && tr_near(measured, hz, 1);
+}
+
+static void test_tick_rate(void)
+{
+    char report[160];
+
+    /* The CX II: right already, left alone. */
+    tr_start(32768);
+    tr_run(300, 6);
+    tick_rate_report(report, sizeof(report));
+    CHECK(tick_rate_checked() && tr_report_near(report, 32768),
+          "a timer at 32768 a second is checked within 6 seconds and left alone (%s)", report);
+    CHECK(tr_read() == (uint32_t) (tr_now * 32768 / 32768), "its readings come back as they are");
+
+    /* The report in #13: a timer at a quarter of the speed. */
+    tr_start(8192);
+    tr_run(300, 6);
+    tick_rate_report(report, sizeof(report));
+    CHECK(tick_rate_checked() && strstr(report, "by the real-time clock, not 32768; corrected"),
+          "a timer at 8192 a second is found within 6 seconds (%s)", report);
+    uint32_t ticks = tr_ticks_in(300, 10);
+    CHECK(tr_near(ticks, 10 * 32768, 2), "after that, 10 seconds are 327680 ticks (%u)", (unsigned) ticks);
+    CHECK(!tr_backwards && tr_biggest_step <= 310, "the ticks never jumped or went back (biggest step %u)",
+          (unsigned) tr_biggest_step);
+
+    tr_start(40000);
+    tr_run(300, 6);
+    ticks = tr_ticks_in(300, 10);
+    CHECK(tick_rate_checked() && tr_near(ticks, 10 * 32768, 2) && !tr_backwards,
+          "a timer that runs fast (40000 a second) is corrected too (%u)", (unsigned) ticks);
+
+    tr_start(33000);
+    tr_run(300, 6);
+    tick_rate_report(report, sizeof(report));
+    CHECK(tick_rate_checked() && !strstr(report, "corrected"), "one 0.7%% off is left alone (%s)", report);
+
+    /* Readings with long gaps, as when a ROM or a state loads: the clock's
+     * changes during a gap don't time it well enough and aren't used. */
+    tr_start(8192);
+    for (int i = 0; i < 12; i++)
+    {
+        tr_run(300, 1);
+        tr_now += 32768 * 13 / 10;   /* 1.3 seconds without a reading */
+    }
+    ticks = tr_ticks_in(300, 10);
+    CHECK(tick_rate_checked() && tr_near(ticks, 10 * 32768, 2),
+          "readings with 1.3 second gaps in them still find the speed (%u)", (unsigned) ticks);
+
+    /* The real-time clock set while it is being timed. */
+    tr_start(32768);
+    tr_run(300, 3);
+    tr_offset += 3600;
+    tr_run(300, 1);
+    tr_offset -= 2;
+    tr_run(300, 8);
+    tick_rate_report(report, sizeof(report));
+    CHECK(tick_rate_checked() && tr_report_near(report, 32768),
+          "the clock set forward and back meanwhile doesn't throw it (%s)", report);
+
+    /* Readings too far apart to time anything: left as they are. */
+    tr_start(8192);
+    tr_run(32768 * 3 / 2, 30);
+    tick_rate_report(report, sizeof(report));
+    CHECK(!tick_rate_checked() && strstr(report, "not checked against the real-time clock yet"),
+          "readings 1.5 seconds apart don't time it (%s)", report);
+    CHECK(tr_read() == (uint32_t) (tr_now * 8192 / 32768), "... and its readings come back as they are");
+}
+
 /* ---- Key bindings ---- */
 
 static void test_bindings(void)
@@ -788,6 +916,7 @@ int main(void)
     test_scaling();
     test_config();
     test_brightness();
+    test_tick_rate();
     test_selfstore();
     test_reset_all();
     test_romtypes();

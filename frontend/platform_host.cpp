@@ -13,6 +13,7 @@
  *   cost TICKS      pretend every poll takes this long (32768 ticks = 1 s)
  *   drawcost TICKS  pretend every shown frame takes this long
  *   echo TEXT       print TEXT
+ *   time            log the pretend calculator's real time (with --log)
  *   quit            close, like closing the window
  *
  * KEY is a name from keys.cpp ("esc", "enter", "ctrl", "up", "S", ...) or a
@@ -30,7 +31,10 @@
  * calculator's own backlight value (0 brightest, 225 darkest; changes are
  * logged as "backlight N"). --landscape acts like a calculator whose LCD
  * isn't a CX II's: game frames are shown whole from platform_screen(), not
- * turned in pieces (as with the DMA setting, which the PC build follows). */
+ * turned in pieces (as with the DMA setting, which the PC build follows).
+ * In headless mode, --timer-rate N acts like a calculator whose timer counts
+ * N times a second instead of 32768, and --dead-timer like one whose timer
+ * doesn't run (gameblabla/pocketsnes-nspire#13, tickrate.h). */
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +52,7 @@
 #include "platform.h"
 #include "rotate.h"
 #include "scale.h"
+#include "tickrate.h"
 
 #define HOST_TICK_HZ 32768
 
@@ -66,6 +71,14 @@ static int quit_requested;
 
 static uint64_t virtual_ticks;
 static uint32_t cost_per_poll, cost_per_present;
+
+/* Headless, virtual_ticks is the pretend calculator's real time, and its
+ * real-time clock reads virtual_ticks / HOST_TICK_HZ seconds. Its timer
+ * counts timer_rate times a second, or not at all: the ticks then only move
+ * when waiting, as on the calculator. */
+static uint32_t timer_rate = HOST_TICK_HZ;
+static int timer_dead;
+static uint32_t fallback_ticks;
 
 static FILE *script;
 static int script_wait;
@@ -268,6 +281,13 @@ static void script_step(void)
             cost_per_present = (uint32_t) atoi(arg);
         else if (strcmp(cmd, "echo") == 0)
             printf("script: %s\n", line + 5);
+        else if (strcmp(cmd, "time") == 0)
+        {
+            char text[48];
+            snprintf(text, sizeof(text), "time %llu ms",
+                     (unsigned long long) (virtual_ticks * 1000 / HOST_TICK_HZ));
+            platform_log(text);
+        }
         else if (strcmp(cmd, "quit") == 0)
         {
             quit_requested = 1;
@@ -316,11 +336,16 @@ int platform_init(int *argc, char **argv)
             os_backlight = backlight = atoi(argv[++i]);
         else if (strcmp(argv[i], "--landscape") == 0)
             landscape_lcd = 1;
+        else if (strcmp(argv[i], "--timer-rate") == 0 && i + 1 < *argc)
+            timer_rate = (uint32_t) atoi(argv[++i]);
+        else if (strcmp(argv[i], "--dead-timer") == 0)
+            timer_dead = 1;
         else
             argv[out++] = argv[i];
     }
     *argc = out;
     argv[out] = NULL;
+    tick_rate_start(HOST_TICK_HZ);
 
     /* The calculator always gives absolute paths; do the same here. */
     char absolute[PATH_MAX];
@@ -685,12 +710,33 @@ int platform_first_key_down(void)
 uint32_t platform_ticks(void)
 {
     if (headless)
-        return (uint32_t) virtual_ticks;
+    {
+        if (timer_dead)
+            return fallback_ticks;
+        uint32_t raw = (uint32_t) (virtual_ticks * timer_rate / HOST_TICK_HZ);
+        return tick_rate_ticks(raw, (uint32_t) (virtual_ticks / HOST_TICK_HZ));
+    }
 
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint32_t) (((uint64_t) ts.tv_sec * HOST_TICK_HZ) +
-                       ((uint64_t) ts.tv_nsec * HOST_TICK_HZ) / 1000000000u);
+    uint32_t raw = (uint32_t) (((uint64_t) ts.tv_sec * HOST_TICK_HZ) +
+                               ((uint64_t) ts.tv_nsec * HOST_TICK_HZ) / 1000000000u);
+    return tick_rate_ticks(raw, (uint32_t) ts.tv_sec);
+}
+
+uint32_t platform_real_ticks(void)
+{
+    if (headless && timer_dead)
+        return (uint32_t) (virtual_ticks / HOST_TICK_HZ * HOST_TICK_HZ);
+    return platform_ticks();
+}
+
+void platform_timer_report(char *text, size_t size)
+{
+    if (headless && timer_dead)
+        snprintf(text, size, "timer: doesn't run, so games aren't held to their speed");
+    else
+        tick_rate_report(text, size);
 }
 
 uint32_t platform_tick_hz(void)
@@ -702,9 +748,22 @@ void platform_wait_until(uint32_t tick)
 {
     if (headless)
     {
-        int32_t ahead = (int32_t) (tick - (uint32_t) virtual_ticks);
-        if (ahead > 0)
-            virtual_ticks += (uint32_t) ahead;
+        if (timer_dead)
+        {
+            if ((int32_t) (tick - fallback_ticks) > 0)
+                fallback_ticks = tick;
+            return;
+        }
+        /* In steps of 1 ms at most, as the calculator reads its timer over and
+         * over while it waits: tickrate.cpp times the real-time clock's
+         * changes by those readings. */
+        for (;;)
+        {
+            int32_t ahead = (int32_t) (tick - platform_ticks());
+            if (ahead <= 0)
+                break;
+            virtual_ticks += (uint32_t) (ahead < HOST_TICK_HZ / 1000 ? ahead : HOST_TICK_HZ / 1000);
+        }
         return;
     }
 

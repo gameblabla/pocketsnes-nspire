@@ -1,0 +1,8 @@
+# timer_speed.txt on a calculator that takes 4 frames' time for each frame
+# (about what a CX does), for the timer that doesn't run (tests/run.sh)
+cost 2184
+wait 600
+time
+wait 600
+time
+quit

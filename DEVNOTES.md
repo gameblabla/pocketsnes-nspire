@@ -84,8 +84,8 @@ README.md → Building has the full list.
 
 ### Test (before every calculator build)
 
-    tests/run.sh          # 103 checks: scripted runs of the PC build, screenshots in tests/out/
-    make unit-tests       # 102 checks: tile drawing, frame turning, settings, program-file settings, ndless.cfg.tns, file list
+    tests/run.sh          # 112 checks: scripted runs of the PC build, screenshots in tests/out/
+    make unit-tests       # 113 checks: tile drawing, frame turning, settings, program-file settings, ndless.cfg.tns, file list, timer speed
     tests/asm/run.sh      # ARM core vs C core under qemu-arm: every opcode, 12 games x 3600 frames, replays
     tests/render_compare.sh   # pixel compare against ./pocketsnes-host-ref (old renderer)
 
@@ -479,6 +479,14 @@ Gotchas
   crashes in Chrono Trigger's intro: a 64-bit-only `DepthDelta` bug.
 * Writing 0x90140030 alone never changes the clock on OS 6.4; the switch
   has to follow the OS's own sequence from SRAM (FINDINGS.md).
+* **The timer may not count 32768 a second on an older CX.** Issue #13
+  (a CX with Nover 3): games at a quarter of their speed, FPS counter at
+  60/60, which a timer at about 8192 a second does. `tickrate.cpp` times it
+  against the real-time clock (two stretches of 2+ seconds that agree) and
+  scales its count if it is more than 5% off; the CX II measures 32768.
+  The PC build acts out other timers with `--timer-rate N` and
+  `--dead-timer` (tests: "Game speed when the timer runs at another
+  speed").
 
 
 Status on hardware
@@ -593,6 +601,8 @@ History
 | 2026-10-21 | 18c1bde | The menu's Save state picks its own slot (any slot, auto-increment on too) |
 | 2026-10-21 | 1996c06 | Save state's card says "Empty slot" for an empty or new slot |
 | 2026-10-21 | | Save state steps from the new slot's number; game list's Play from a state |
+| 2026-10-22 | | PR #12 merged upstream |
+| 2026-10-24 | | Issue #13: the timer checked against the real-time clock and corrected; FPS counter in real time (branch fix-cx-timer) |
 
 `git log` has the details; every commit message says what changed and why.
 
@@ -601,6 +611,11 @@ Open items and ideas
 --------------------
 
 Waiting on the owner:
+
+* Issue #13 (older CX, quarter speed): the fix-cx-timer build is untested
+  on a CX. The reporter's speed test results say what the timer did (the
+  "timer:" line). On the owner's CX II it should say "timer: 32768 ticks/s
+  (32768 by the real-time clock)" and play as before.
 
 * A speed test of Yoshi's Island on the calculator with 4031b0b (uploaded
   2026-10-20), from the owner's busiest save (state 14, in

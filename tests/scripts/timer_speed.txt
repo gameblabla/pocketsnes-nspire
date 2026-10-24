@@ -1,0 +1,6 @@
+# Game speed by the pretend calculator's real time (tests/run.sh: the timer checks)
+wait 600
+time
+wait 600
+time
+quit

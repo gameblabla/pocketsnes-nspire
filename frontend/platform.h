@@ -227,10 +227,18 @@ int  platform_key_pressed(int key);   /* went down at the last poll */
 int  platform_any_key_down(void);
 int  platform_first_key_down(void);   /* lowest held key number, or 0 */
 
-/* Free-running tick counter; platform_tick_hz() ticks per second. */
+/* Free-running tick counter; platform_tick_hz() ticks per second. Its timer
+ * is checked against the real-time clock and corrected if it runs at another
+ * speed (tickrate.h). If it doesn't run at all, the ticks only move when
+ * waiting, so games aren't held back (and run as fast as they can). */
 uint32_t platform_ticks(void);
 uint32_t platform_tick_hz(void);
 void platform_wait_until(uint32_t tick);
+/* Like platform_ticks(), but always moving with real time: with a timer that
+ * doesn't run, the real-time clock's whole seconds. For the FPS counter. */
+uint32_t platform_real_ticks(void);
+/* A line about the timer for the speed test results. */
+void platform_timer_report(char *text, size_t size);
 
 /* Directory holding the program, for the config file. No trailing slash. */
 const char *platform_exe_dir(void);
