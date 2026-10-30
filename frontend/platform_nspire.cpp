@@ -25,9 +25,15 @@ static void register_rom_types(const char *program_path);
  * frame to the LCD buffer, the next one is drawn into the other buffer.
  * If the DMA controller fails its test, each frame is turned in software
  * (rotate.cpp) into one of three portrait buffers and the LCD is pointed at
- * it ("flip"). Screens without the CX II layout use lcd_blit. The speed test
- * compares all three. See FINDINGS.md. The game's buffers have spare lines
- * around the picture (see platform.h). */
+ * it ("flip"). A CX before the II (not the HW-W revision) reads a plain
+ * 320x240 landscape buffer, the same layout the game draws, so there the LCD
+ * is simply pointed at the game buffer just drawn and the next frame goes
+ * into the other one: no copy at all (also "flip"; a copy with lcd_blit
+ * would cost about a quarter of a frame at 132 MHz). HW-W CXs have the
+ * portrait layout and get the turned "flip" (no DMA controller there). Any
+ * other screen uses lcd_blit. The speed test compares the outputs. See
+ * FINDINGS.md. The game's buffers have spare lines around the picture (see
+ * platform.h). */
 #define GUARD_LINES 16
 /* Interlaced Mode 5 draws up to twice the lines (the old 480-line buffer). */
 #define BELOW_LINES 272
@@ -35,11 +41,13 @@ static void register_rom_types(const char *program_path);
 #define GAME_SCREENS 2
 static uint16_t screen_memory[GAME_SCREENS][(GUARD_LINES + SCREEN_H + BELOW_LINES) * SCREEN_W]
     __attribute__ ((aligned (32)));
-static uint32_t screen_physical[GAME_SCREENS];   /* where the DMA controller reads them */
+static uint32_t screen_physical[GAME_SCREENS];   /* where the DMA controller and the LCD read them */
 static int game_screen;                          /* the one being drawn into */
 static uint16_t portrait_screens[PLATFORM_MAX_SCREENS][SCREEN_PIXELS] __attribute__ ((aligned (32)));
+static uint32_t portrait_physical[PLATFORM_MAX_SCREENS];   /* where the LCD reads them */
 static int current_screen;   /* the portrait buffer "flip" writes next */
-static int fast_available;   /* a CX II LCD with the layout described above */
+static int fast_available;   /* a portrait LCD (CX II, HW-W CX): frames turned into portrait_screens */
+static int landscape_flip;   /* a 320x240 landscape LCD (older CX): the LCD reads the game buffers */
 static int dma_works;        /* the DMA controller copied a frame at startup */
 static int dma_failed;       /* ... but a copy failed later */
 static int forced_output = OUTPUT_BEST;   /* the speed test's choice */
@@ -252,6 +260,44 @@ static uint16_t *game_screen_start(int index)
     return screen_memory[index] + GUARD_LINES * SCREEN_W;
 }
 
+/* The physical address of a frame buffer, for the LCD and the DMA
+ * controller, or 0 if it isn't mapped or isn't in one piece. */
+static uint32_t buffer_physical(const uint16_t *buffer)
+{
+    uint32_t first, second;
+    uint32_t va = (uint32_t) buffer;
+    uint32_t pa = mmu_lookup(va, &first, &second);
+    if (pa >= 0xFFFFFFFE || !physically_contiguous(va, pa, SCREEN_PIXELS * 2))
+        return 0;
+    return pa;
+}
+
+static int game_screens_physical(void)
+{
+    for (int i = 0; i < GAME_SCREENS; i++)
+        if (!(screen_physical[i] = buffer_physical(game_screen_start(i))))
+            return 0;
+    return 1;
+}
+
+/* Where the LCD reads the portrait buffers. On a CX II they are where they
+ * are mapped (seen: the flip output pointed the LCD at their addresses from
+ * the start), so a failed lookup falls back to that there. */
+static int portrait_screens_physical(void)
+{
+    int all = 1;
+    for (int i = 0; i < PLATFORM_MAX_SCREENS; i++)
+    {
+        portrait_physical[i] = buffer_physical(portrait_screens[i]);
+        if (!portrait_physical[i])
+        {
+            all = 0;
+            portrait_physical[i] = (uint32_t) portrait_screens[i];
+        }
+    }
+    return all;
+}
+
 /* Gets the DMA controller ready and has it copy a frame (black) to the LCD.
  * Returns 0 if it can't be used. */
 static int dma_init(void)
@@ -263,14 +309,8 @@ static int dma_init(void)
     dma_mapped = 1;
     read_dma_regs(dma_start_regs, dma_start_channels);
 
-    for (int i = 0; i < GAME_SCREENS; i++)
-    {
-        uint32_t va = (uint32_t) game_screen_start(i);
-        uint32_t pa = mmu_lookup(va, &first, &second);
-        if (pa >= 0xFFFFFFFE || !physically_contiguous(va, pa, SCREEN_PIXELS * 2))
-            return 0;
-        screen_physical[i] = pa;
-    }
+    if (!game_screens_physical())
+        return 0;
 
     /* 8-word bursts: the fastest measured from normal memory (the OS uses
      * 256-word ones). */
@@ -402,14 +442,26 @@ static void interrupts_restore(uint32_t old)
 /* For the diagnostics file: the LCD registers and CPU state at startup. */
 static uint32_t start_regs[LCD_REGS], start_cpsr;
 
-/* The CX II LCD layout the fast output is written for: 240 clocks per line
- * (PL111 timing 2), 320 lines (timing 1), 16-bit 5:6:5 pixels. */
-static int lcd_is_cx2_portrait(void)
+/* The LCD's layout from its PL111 registers: clocks per line (timing 0),
+ * lines (timing 1) and 16-bit 5:6:5 pixels (control, bpp code 6). The CX II
+ * and HW-W CX read 320 lines of 240 pixels (portrait), older CXs 240 lines
+ * of 320 (landscape, the same as the game's buffers). */
+static int lcd_layout_is(uint32_t width, uint32_t height)
 {
     uint32_t clocks_per_line = ((*(volatile uint32_t *) 0xC0000008 >> 16) & 0x3FF) + 1;
     uint32_t lines = (LCD_TIMING1 & 0x3FF) + 1;
     uint32_t bpp = (*(volatile uint32_t *) 0xC0000018 >> 1) & 7;
-    return is_cx2 && clocks_per_line == SCREEN_H && lines == SCREEN_W && bpp == 6;
+    return clocks_per_line == width && lines == height && bpp == 6;
+}
+
+static int lcd_is_portrait(void)
+{
+    return lcd_layout_is(SCREEN_H, SCREEN_W);
+}
+
+static int lcd_is_landscape(void)
+{
+    return lcd_layout_is(SCREEN_W, SCREEN_H);
 }
 
 /* The CX II's LCD backlight (Hackspire, "Memory-mapped I/O ports on CX II",
@@ -500,15 +552,23 @@ int platform_init(int *argc, char **argv)
         return 0;
     }
     os_framebuffer = LCD_BASE;
-    fast_available = lcd_is_cx2_portrait();
     memset(screen_memory, 0, sizeof(screen_memory));
     memset(portrait_screens, 0, sizeof(portrait_screens));
-    if (fast_available)
+    fast_available = landscape_flip = 0;
+    if (lcd_is_portrait())
     {
-        dma_works = dma_init();
-        if (SRAM_RENDERING)
-            sram_init();
+        /* Without a lookup of where the buffers are, only a CX II is known
+         * to show them from their mapped addresses. */
+        fast_available = portrait_screens_physical() || is_cx2;
+        if (fast_available && is_cx2)
+        {
+            dma_works = dma_init();
+            if (SRAM_RENDERING)
+                sram_init();
+        }
     }
+    else if (lcd_is_landscape())
+        landscape_flip = game_screens_physical();
     sram_code_init();
     platform_present();
     return 1;
@@ -586,11 +646,15 @@ uint8_t *platform_fast_depth_buffer(int *lines)
     return SRAM_DEPTH;
 }
 
-enum Output { SHOWN_BY_DMA, SHOWN_BY_FLIP, SHOWN_BY_LCD_BLIT };
+enum Output { SHOWN_BY_DMA, SHOWN_BY_FLIP, SHOWN_BY_LANDSCAPE_FLIP, SHOWN_BY_LCD_BLIT };
 
 static enum Output output_now(void)
 {
-    if (!fast_available || forced_output == OUTPUT_LCD_BLIT)
+    if (forced_output == OUTPUT_LCD_BLIT)
+        return SHOWN_BY_LCD_BLIT;
+    if (landscape_flip)
+        return SHOWN_BY_LANDSCAPE_FLIP;
+    if (!fast_available)
         return SHOWN_BY_LCD_BLIT;
     if (forced_output == OUTPUT_FLIP || !dma_works)
         return SHOWN_BY_FLIP;
@@ -634,10 +698,19 @@ void platform_present(void)
         uint16_t *buffer = portrait_screens[current_screen];
         rotate_frame(screen, buffer, ROTATE_FLIP_COLUMNS);
         clean_dcache(buffer, SCREEN_PIXELS * 2);
-        LCD_BASE = (uint32_t) buffer;
+        LCD_BASE = portrait_physical[current_screen];
         current_screen = (current_screen + 1) % PLATFORM_MAX_SCREENS;
         return;
     }
+    case SHOWN_BY_LANDSCAPE_FLIP:
+        /* The LCD reads this buffer from its next refresh on; the next
+         * frame goes into the other one. With two buffers a frame drawn
+         * faster than the LCD refreshes can be the one still shown: a
+         * tear at worst, which costs nothing. */
+        clean_dcache(screen, SCREEN_PIXELS * 2);
+        LCD_BASE = screen_physical[game_screen];
+        game_screen = (game_screen + 1) % GAME_SCREENS;
+        return;
     case SHOWN_BY_LCD_BLIT:
         show_os_framebuffer();
         lcd_blit(screen, SCR_320x240_565);
@@ -686,7 +759,7 @@ int platform_frame_begin(void)
     }
     frame_target = portrait_screens[current_screen];
 
-    uint32_t start = (uint32_t) frame_target, end = start + SCREEN_PIXELS * 2;
+    uint32_t start = portrait_physical[current_screen], end = start + SCREEN_PIXELS * 2;
     uint32_t since = platform_ticks();
     for (int polls = 0; polls < LCD_WAIT_POLLS; polls++)
     {
@@ -732,7 +805,7 @@ void platform_frame_present(void)
         return;
     }
     __asm__ volatile ("mcr p15, 0, %0, c7, c10, 4" : : "r" (0) : "memory");   /* drain the write buffer */
-    LCD_BASE = (uint32_t) frame_target;
+    LCD_BASE = portrait_physical[current_screen];
     current_screen = (current_screen + 1) % PLATFORM_MAX_SCREENS;
     frame_target = NULL;
     last_frame_turned = 1;
@@ -748,6 +821,8 @@ const char *platform_screen_mode_name(void)
         return "dma";
     case SHOWN_BY_FLIP:
         return dma_failed && forced_output == OUTPUT_BEST ? "flip (dma failed)" : "flip";
+    case SHOWN_BY_LANDSCAPE_FLIP:
+        return "flip (no copy)";
     default:
         return "lcd_blit";
     }
@@ -1711,8 +1786,8 @@ void platform_write_diagnostics(const char *path)
     fprintf(f, "timer: works %d, %lu ticks/s used, %lu measured against the real-time clock\n%s\n",
             timer_works, (unsigned long) tick_hz, (unsigned long) (timer_works ? measure_tick_hz() : 0),
             timer_report);
-    fprintf(f, "lcd_type %d, CX II portrait LCD %d, screen output %s\n", (int) lcd_type(), fast_available,
-            platform_screen_mode_name());
+    fprintf(f, "lcd_type %d, portrait LCD %d, landscape LCD %d, screen output %s\n", (int) lcd_type(),
+            fast_available, landscape_flip, platform_screen_mode_name());
 
     read_lcd_regs(regs);
     fprintf(f, "LCD registers (offset: at start / now):\n");
@@ -1825,14 +1900,14 @@ void platform_write_memory_tests(const char *path)
 
 int platform_set_screen_output(int output)
 {
-    if (output != OUTPUT_BEST && !fast_available)
+    if (output != OUTPUT_BEST && !fast_available && !landscape_flip)
         return 0;   /* only lcd_blit works on this screen */
     if (output == OUTPUT_DMA && !dma_works)
         return 0;
     /* A copy may still be writing the LCD buffer. */
     dma_finish();
     forced_output = output;
-    if (output_now() != SHOWN_BY_FLIP)
+    if (output_now() != SHOWN_BY_FLIP && output_now() != SHOWN_BY_LANDSCAPE_FLIP)
         show_os_framebuffer();
     return 1;
 }
