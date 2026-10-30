@@ -207,8 +207,10 @@ Screen and speed:
   ruled out because it tears. Earlier, tearing was accepted for speed; that
   was reversed on 2026-10-05.
 * **Fast flip is the only CPU output**; the compatible and mirrored modes
-  were removed. `lcd_blit` stays as the automatic fallback on calculators
-  that aren't a CX II, and in the speed test's comparison.
+  were removed. On a CX II or HW-W CX (portrait LCD) frames are turned into
+  portrait buffers; an older CX (320x240 landscape LCD) shows the game
+  buffers themselves, no copy (e31da90). `lcd_blit` is the fallback on any
+  other screen, and in the speed test's comparison.
 * **The FPS counter shows just "drawn/expected"** (e.g. 49/60).
 * **The ARM CPU core is the default** (about 28% faster CPU emulation on
   the calculator); SA-1 games always use the C core.
@@ -603,6 +605,7 @@ History
 | 2026-10-21 | | Save state steps from the new slot's number; game list's Play from a state |
 | 2026-10-22 | | PR #12 merged upstream |
 | 2026-10-24 | | Issue #13: the timer checked against the real-time clock and corrected; FPS counter in real time (branch fix-cx-timer) |
+| 2026-10-30 | e31da90 | Older CXs: the LCD reads the game buffers, no copy; portrait flip on HW-W CX too; LCD given physical addresses |
 
 `git log` has the details; every commit message says what changed and why.
 
