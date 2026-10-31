@@ -107,6 +107,14 @@ void platform_set_backlight(int)
 {
 }
 
+/* The pretend calculator's clock step: a CX II's 12 MHz, or an older CX's 6. */
+static int unit_cpu_step = 12;
+
+int platform_cpu_step_mhz(void)
+{
+    return unit_cpu_step;
+}
+
 /* ---- Tile drawing ---- */
 
 /* The drawers under test (tile.cpp; gfx.cpp declares them the same way). */
@@ -519,6 +527,22 @@ static void test_config(void)
           "CPU speed reset in the game's own settings");
     CHECK(config_cpu_multiplier(CPU_SPEED_NORMAL) == 0 && config_cpu_multiplier(CPU_SPEED_480) == 40 &&
           config_cpu_multiplier(CPU_SPEED_432) == 36, "CPU speeds are 12 MHz times 36, 38, 40");
+
+    /* An older CX: 6 MHz steps, 180 to 264 MHz in the same places, and a
+     * CX II's test result means nothing there (nor the other way round). */
+    uint32_t was_tested = config_tested_mhz();
+    config_set_tested_mhz(432);
+    CHECK(config_cpu_multiplier(CPU_SPEED_TESTED) == 36, "highest tested 432 MHz: x36 on a CX II");
+    unit_cpu_step = 6;
+    CHECK(config_raised_mhz(0) == 180 && config_raised_mhz(CPU_RAISED_SPEEDS - 1) == 264 &&
+          config_cpu_multiplier(CPU_SPEED_408) == 30 && config_cpu_multiplier(CPU_SPEED_432) == 33,
+          "older CX: 180 MHz (x30) and 198 MHz (x33) in the 408 and 432 places");
+    CHECK(config_cpu_multiplier(CPU_SPEED_TESTED) == 0, "a CX II's tested 432 MHz means nothing on a CX");
+    config_set_tested_mhz(234);
+    CHECK(config_cpu_multiplier(CPU_SPEED_TESTED) == 39, "tested 234 MHz: x39 on a CX");
+    unit_cpu_step = 12;
+    CHECK(config_cpu_multiplier(CPU_SPEED_TESTED) == 0, "a CX's tested 234 MHz means nothing on a CX II");
+    config_set_tested_mhz(was_tested);
 }
 
 /* ---- Brightness levels ---- */

@@ -60,7 +60,7 @@ int main(int argc, char **argv)
     {
         char line[64];
         config_reset_cpu_speed(crashed_rom);
-        snprintf(line, sizeof(line), "PocketSNES didn't close normally at %d MHz.", crashed_multiplier * 12);
+        snprintf(line, sizeof(line), "PocketSNES didn't close normally at %d MHz.", crashed_multiplier * platform_cpu_step_mhz());
         gui_message(line, "CPU speed is back to normal (Graphics & speed).");
     }
     /* The overclock test froze: it keeps the highest speed that passed. */

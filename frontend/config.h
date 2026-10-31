@@ -59,7 +59,9 @@ enum FrameskipType
 #define MAX_FRAMESKIP_VALUE 9
 
 /* CPU speeds (cfg.cpu_speed): the calculator's own, the highest one the
- * overclock test passed, then raised ones in steps of 12 MHz. */
+ * overclock test passed, then CPU_RAISED_SPEEDS raised ones. The names are
+ * the CX II's (408 to 504 MHz in steps of 12); an older CX has its own
+ * speeds in the same places (config_raised_mhz). */
 enum CpuSpeed
 {
     CPU_SPEED_NORMAL,
@@ -98,9 +100,18 @@ enum ScreenSize
     NUM_SCREEN_SIZES
 };
 
-/* The multiplier of 12 MHz for a raised speed, 0 for the normal one (and for
- * "highest tested" before the overclock test has passed a speed). */
+/* The clock multiplier for a raised speed (MHz / platform_cpu_step_mhz()),
+ * 0 for the normal one, for "highest tested" before the overclock test has
+ * passed a speed (or when its result is another model's) and where the
+ * clock can't be set. */
 int config_cpu_multiplier(uint32_t cpu_speed);
+
+#define CPU_RAISED_SPEEDS (NUM_CPU_SPEEDS - CPU_SPEED_408)
+/* The index'th raised speed in MHz (0 .. CPU_RAISED_SPEEDS - 1) on this
+ * calculator: 408 to 504 MHz on a CX II, 180 to 264 MHz on an older CX
+ * (none of them runs its memory faster than its own 66 MHz), 0 where the
+ * clock can't be set. */
+uint32_t config_raised_mhz(int index);
 
 /* The highest speed in MHz the overclock test passed on this calculator, 0
  * if none. Kept in the settings for all games; set it with

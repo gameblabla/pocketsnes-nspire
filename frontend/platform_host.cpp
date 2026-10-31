@@ -92,6 +92,7 @@ static int clock_limit = 63;
 static int glitch_above = 63;
 static char program_path[1024];
 static int landscape_lcd;   /* --landscape */
+static int cx_mode;         /* --cx: an older CX's clock (6 MHz steps, 132 MHz normal) */
 static int frames_by_dma;   /* platform_set_game_frames_by_dma */
 
 #ifdef HOST_SDL
@@ -340,6 +341,8 @@ int platform_init(int *argc, char **argv)
             timer_rate = (uint32_t) atoi(argv[++i]);
         else if (strcmp(argv[i], "--dead-timer") == 0)
             timer_dead = 1;
+        else if (strcmp(argv[i], "--cx") == 0)
+            cx_mode = 1;
         else
             argv[out++] = argv[i];
     }
@@ -560,12 +563,18 @@ uint32_t platform_set_cpu_multiplier(int multiplier)
         platform_log(line);
     }
     cpu_multiplier = multiplier;
-    return multiplier && !clock_stuck && multiplier <= clock_limit ? (uint32_t) multiplier * 12 : 396;
+    return multiplier && !clock_stuck && multiplier <= clock_limit
+        ? (uint32_t) (multiplier * platform_cpu_step_mhz()) : platform_cpu_normal_mhz();
+}
+
+int platform_cpu_step_mhz(void)
+{
+    return cx_mode ? 6 : 12;
 }
 
 uint32_t platform_cpu_normal_mhz(void)
 {
-    return 396;
+    return cx_mode ? 132 : 396;
 }
 
 const char *platform_program_path(void)
@@ -601,7 +610,7 @@ void platform_set_backlight(int value)
 
 int platform_cpu_multiplier(void)
 {
-    return cpu_multiplier ? cpu_multiplier : 33;
+    return cpu_multiplier ? cpu_multiplier : cx_mode ? 22 : 33;
 }
 
 void platform_code_report(char *text, size_t size)

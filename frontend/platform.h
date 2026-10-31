@@ -171,12 +171,16 @@ uint32_t platform_cpu_mhz(void);
 
 /* The CPU clock of the CX II is 12 MHz times a multiplier (33: 396 MHz, the
  * calculator's own on battery; 24: 288 MHz on USB). Raising it speeds up
- * memory too, and too high a value freezes the calculator.
+ * memory too, and too high a value freezes the calculator. An older CX's
+ * is 6 MHz times one (22: 132 MHz), with its memory bus kept at most at
+ * 66 MHz, its own. platform_cpu_step_mhz() says which (12 or 6), 0 where
+ * the clock can't be set.
  * platform_set_cpu_multiplier(0) puts back the calculator's own setting,
  * which platform_shutdown() also does. Returns the clock afterwards in MHz,
  * measured after a change (the PC build reports what was asked for), or 0
  * where it can't be set. */
 uint32_t platform_set_cpu_multiplier(int multiplier);
+int platform_cpu_step_mhz(void);
 /* The calculator's own clock in MHz (0 if not known), for the menu. */
 uint32_t platform_cpu_normal_mhz(void);
 /* The multiplier in the clock register now, or 0 if it can't be read. */

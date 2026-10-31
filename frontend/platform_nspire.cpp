@@ -1004,6 +1004,157 @@ static uint32_t switch_clock(uint32_t value)
     return mhz;
 }
 
+/* ---- The older CX's clock ----
+ *
+ * Its power controller (0x900B0000) has the clock setting in one register,
+ * decoded as Linux's clk-nspire.c does: the base clock is 6 MHz times bits
+ * 15-20 (48 MHz if bit 8 is set), the CPU's is the base divided by bits 1-7
+ * times bits 21-22, the memory bus's (AHB) is the CPU's divided by bits 12-14
+ * plus 1, and the APB's is half that. Writing 4 to 0x900B000C starts a
+ * switch to the value written to 0x900B0000; it happens while the CPU waits
+ * for an interrupt (Hackspire: with interrupts off it only happens after
+ * the program), and the power controller raises interrupt 15 when it's done
+ * (0x900B0014 bit 1). 0x900B0024 reads the setting in use. nLaunchy (by
+ * Nover's author) writes 0x0030A002: base 198 MHz, CPU 198, bus 66, the
+ * calculator's own bus speed; others report flash corruption with the bus
+ * at 72 MHz. So a raised speed here is the base clock itself (bits 21-22 1,
+ * bits 1-7 1) with the bus divided to at most 66 MHz. The switch waits the
+ * way Ndless's msleep does on a CX, with only the power controller's and
+ * the second timer's interrupts (19, a timeout) able to wake the CPU. */
+#define CX_CLOCK_LOAD  (*(volatile uint32_t *) 0x900B0000)
+#define CX_CLOCK_APPLY (*(volatile uint32_t *) 0x900B000C)
+#define CX_POWER_FLAGS (*(volatile uint32_t *) 0x900B0014)
+#define CX_CLOCK_NOW   (*(volatile uint32_t *) 0x900B0024)
+#define VIC_ENABLED    (*(volatile uint32_t *) 0xDC000010)
+#define VIC_DISABLE    (*(volatile uint32_t *) 0xDC000014)
+#define T2_RAW         (*(volatile uint32_t *) 0x900D0010)
+#define CX_FIELDS      (0xFEu | 0x100u | (7u << 12) | (0x3Fu << 15) | (3u << 21))
+#define CX_BUS_MAX_MHZ 66
+#define CX_TIMEOUT_TICKS 3277   /* 0.1 s */
+
+static uint32_t cx_cpu_mhz(uint32_t value)
+{
+    uint32_t base = (value & 0x100) ? 48 : 6 * ((value >> 15) & 0x3F);
+    uint32_t ratio = ((value >> 1) & 0x7F) * ((value >> 21) & 3);
+    return ratio ? base / ratio : 0;
+}
+
+static uint32_t cx_bus_mhz(uint32_t value)
+{
+    return cx_cpu_mhz(value) / (((value >> 12) & 7) + 1);
+}
+
+/* The setting the OS left: an older CX (not a CX II, not a monochrome
+ * model) at 60 to 300 MHz with the bus at most at 66 MHz, or 0 if it's
+ * something else (then the clock is left alone). */
+static uint32_t cx_os_setting(void)
+{
+    if (is_cx2 || is_classic)
+        return 0;
+    uint32_t value = clock_raised ? os_clock_control : CX_CLOCK_NOW;
+    uint32_t mhz = cx_cpu_mhz(value);
+    if ((value & 0x100) || mhz < 60 || mhz > 300 || cx_bus_mhz(value) > CX_BUS_MAX_MHZ)
+        return 0;
+    return value;
+}
+
+/* The setting for 6 MHz times 'multiplier', from the OS's. */
+static uint32_t cx_setting(uint32_t os, int multiplier)
+{
+    uint32_t mhz = (uint32_t) multiplier * 6;
+    uint32_t divider = (mhz + CX_BUS_MAX_MHZ - 1) / CX_BUS_MAX_MHZ;
+    return (os & ~CX_FIELDS) | (uint32_t) multiplier << 15 | 1u << 21 | (divider - 1) << 12 | 1u << 1;
+}
+
+static uint32_t cx_switch_clock(uint32_t value)
+{
+    uint32_t now = CX_CLOCK_NOW;
+    if (now == value)
+        return measure_mhz(QUICK_LOOPS);
+    last_switch.before = now;
+    last_switch.target = value;
+    last_switch.result = last_switch.ticks = 0;
+    last_switch.refused = NULL;
+    if (!cx_cpu_mhz(value) || cx_bus_mhz(value) > CX_BUS_MAX_MHZ || (value & 0x100))
+        last_switch.refused = "setting out of range";
+    else if (CX_POWER_FLAGS & 2)
+        last_switch.refused = "power controller busy";
+
+    if (!last_switch.refused)
+    {
+        uint32_t cpsr = interrupts_off();
+        uint32_t enabled = VIC_ENABLED;
+        uint32_t control = T2_CONTROL, load = T2_LOAD, speed = T2_SPEED;
+        __asm__ volatile ("mcr p15, 0, %0, c7, c10, 4" : : "r" (0) : "memory");   /* drain the write buffer */
+        /* The timeout: the second timer counts down once at 32768 Hz. */
+        T2_CONTROL = 0;
+        T2_CLEAR = 1;
+        T2_SPEED = 0xA;
+        T2_LOAD = CX_TIMEOUT_TICKS;
+        T2_CONTROL = 0x63;   /* one-shot, 32-bit, interrupt, not running yet */
+        VIC_DISABLE = 0xFFFFFFFF;
+        VIC_ENABLED = (1u << 15) | (1u << 19);
+        uint32_t start = platform_ticks();
+        T2_CONTROL = 0xE3;
+        CX_CLOCK_LOAD = value;
+        CX_CLOCK_APPLY = 4;
+        uint32_t waits = 0;
+        while (!(CX_POWER_FLAGS & 2) && !(T2_RAW & 1) && waits < 64)
+        {
+            __asm__ volatile ("mcr p15, 0, %0, c7, c0, 4" : : "r" (0) : "memory");   /* wait for interrupt */
+            waits++;
+        }
+        last_switch.ticks = platform_ticks() - start;
+        last_switch.result = waits | (CX_POWER_FLAGS & 2 ? 0x100 : 0) | (T2_RAW & 1 ? 0x200 : 0);
+        CX_POWER_FLAGS = 2;   /* done: acknowledged */
+        T2_CONTROL = 0;
+        T2_CLEAR = 1;
+        T2_SPEED = speed;
+        T2_CONTROL = control & 0x7F;
+        T2_LOAD = load;
+        T2_CONTROL = control;
+        VIC_DISABLE = 0xFFFFFFFF;
+        VIC_ENABLED = enabled;
+        interrupts_restore(cpsr);
+    }
+    uint32_t mhz = measure_mhz(QUICK_LOOPS);
+    last_switch.after = CX_CLOCK_NOW;
+    last_switch.mhz = mhz;
+    return mhz;
+}
+
+static uint32_t cx_set_multiplier(int multiplier)
+{
+    uint32_t os = cx_os_setting();
+    if (!os || multiplier < 0 || multiplier > 46)   /* 276 MHz */
+        return 0;
+    if (!multiplier)
+    {
+        if (clock_raised)
+        {
+            clock_raised = 0;
+            clock_mhz = cx_switch_clock(os_clock_control);
+        }
+        return clock_mhz ? clock_mhz : cx_cpu_mhz(CX_CLOCK_NOW);
+    }
+    if (!clock_raised)
+        os_clock_control = os;
+    uint32_t value = cx_setting(os, multiplier);
+    if (!clock_raised || value != CX_CLOCK_NOW)
+        clock_mhz = cx_switch_clock(value);
+    clock_raised = 1;
+    /* One that didn't get there is put back by the caller (it compares the
+     * clock returned with the one asked for). */
+    return clock_mhz ? clock_mhz : cx_cpu_mhz(CX_CLOCK_NOW);
+}
+
+int platform_cpu_step_mhz(void)
+{
+    if (is_cx2)
+        return 12;
+    return cx_os_setting() ? 6 : 0;
+}
+
 /* The clock now: measured after the last switch, or the register's. */
 static uint32_t clock_now_mhz(void)
 {
@@ -1012,7 +1163,9 @@ static uint32_t clock_now_mhz(void)
 
 uint32_t platform_set_cpu_multiplier(int multiplier)
 {
-    if (!is_cx2 || multiplier < 0 || multiplier > 63)
+    if (!is_cx2)
+        return cx_set_multiplier(multiplier);
+    if (multiplier < 0 || multiplier > 63)
         return 0;
     if (!multiplier)
     {
@@ -1035,13 +1188,15 @@ uint32_t platform_set_cpu_multiplier(int multiplier)
 uint32_t platform_cpu_normal_mhz(void)
 {
     if (!is_cx2)
-        return 0;
+        return cx_cpu_mhz(cx_os_setting());
     return (uint32_t) CLOCK_MULTIPLIER(clock_raised ? os_clock_control : CLOCK_CONTROL) * 12;
 }
 
 int platform_cpu_multiplier(void)
 {
-    return is_cx2 ? CLOCK_MULTIPLIER(CLOCK_CONTROL) : 0;
+    if (!is_cx2)
+        return cx_os_setting() ? (int) (cx_cpu_mhz(CX_CLOCK_NOW) / 6) : 0;
+    return CLOCK_MULTIPLIER(CLOCK_CONTROL);
 }
 
 int platform_test_glitch(void)
@@ -1053,7 +1208,26 @@ void platform_clock_report(char *text, size_t size)
 {
     if (!is_cx2)
     {
-        snprintf(text, size, "clock register: not a CX II");
+        uint32_t now = CX_CLOCK_NOW;
+        snprintf(text, size, "clock register %08lx (cpu %lu MHz, bus %lu MHz)%s", (unsigned long) now,
+                 (unsigned long) cx_cpu_mhz(now), (unsigned long) cx_bus_mhz(now),
+                 cx_os_setting() ? "" : ", not set here (unknown setting)");
+        if (!last_switch.target)
+            return;
+        size_t len = strlen(text);
+        if (last_switch.refused)
+            snprintf(text + len, size - len, "; last switch %08lx -> %08lx not tried: %s",
+                     (unsigned long) last_switch.before, (unsigned long) last_switch.target, last_switch.refused);
+        else
+            snprintf(text + len, size - len,
+                     "; last switch %08lx -> %08lx: %lu waits%s%s in %lu.%02lu ms, register %08lx, %lu MHz",
+                     (unsigned long) last_switch.before, (unsigned long) last_switch.target,
+                     (unsigned long) (last_switch.result & 0xFF),
+                     last_switch.result & 0x100 ? ", done" : ", no done flag",
+                     last_switch.result & 0x200 ? ", timed out" : "",
+                     (unsigned long) (last_switch.ticks * 1000 / tick_hz),
+                     (unsigned long) (last_switch.ticks * 100000 / tick_hz % 100),
+                     (unsigned long) last_switch.after, (unsigned long) last_switch.mhz);
         return;
     }
     snprintf(text, size, "clock register %08lx (x%d)", (unsigned long) CLOCK_CONTROL,
@@ -1441,7 +1615,13 @@ static void write_cpu_report(FILE *f)
 static void write_clock_report(FILE *f)
 {
     if (!is_cx2)
+    {
+        char line[200];
+        platform_clock_report(line, sizeof(line));
+        fprintf(f, "Older CX: %s; power controller 00 %08lx, 14 %08lx; second timer speed %08lx\n", line,
+                (unsigned long) CX_CLOCK_LOAD, (unsigned long) CX_POWER_FLAGS, (unsigned long) T2_SPEED);
         return;
+    }
     uint32_t original = CLOCK_CONTROL;
     int multiplier = CLOCK_MULTIPLIER(original);
     fprintf(f, "Clock register %08lx (x%d); power controller 20 %08lx, 24 %08lx, 810 %08lx; "

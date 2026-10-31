@@ -1484,10 +1484,10 @@ void emu_game_check_end(void)
 
 static bool clock_marker_written;
 
-/* Within 2% of 12 MHz times the multiplier. */
+/* Within 2% of the multiplier times the clock step (12 or 6 MHz). */
 static bool clock_reached(uint32_t mhz, int multiplier)
 {
-    uint32_t want = (uint32_t) multiplier * 12;
+    uint32_t want = (uint32_t) multiplier * (uint32_t) platform_cpu_step_mhz();
     return mhz * 50 >= want * 49 && mhz * 50 <= want * 51;
 }
 

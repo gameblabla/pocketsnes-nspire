@@ -254,11 +254,18 @@ static_assert(sizeof(screen_sizes) / sizeof(screen_sizes[0]) == NUM_SCREEN_SIZES
 static char normal_cpu_speed[24] = "normal";
 static char tested_cpu_speed[32] = "highest tested";
 static char tested_result[24] = "no result";
+/* The raised speeds: this calculator's (config_raised_mhz). */
+static char raised_cpu_speeds[CPU_RAISED_SPEEDS][12] =
+{
+    "408 MHz", "420 MHz", "432 MHz", "444 MHz", "456 MHz", "468 MHz", "480 MHz", "492 MHz", "504 MHz"
+};
 static const char *const cpu_speeds[] =
 {
-    normal_cpu_speed, tested_cpu_speed, "408 MHz", "420 MHz", "432 MHz", "444 MHz", "456 MHz",
-    "468 MHz", "480 MHz", "492 MHz", "504 MHz"
+    normal_cpu_speed, tested_cpu_speed, raised_cpu_speeds[0], raised_cpu_speeds[1], raised_cpu_speeds[2],
+    raised_cpu_speeds[3], raised_cpu_speeds[4], raised_cpu_speeds[5], raised_cpu_speeds[6],
+    raised_cpu_speeds[7], raised_cpu_speeds[8]
 };
+static_assert(CPU_RAISED_SPEEDS == 9, "a raised_cpu_speeds name in cpu_speeds for each");
 static_assert(sizeof(cpu_speeds) / sizeof(cpu_speeds[0]) == NUM_CPU_SPEEDS, "a name for each CPU speed");
 
 static const char *const cpu_cores[] = { "ARM (fast)", "C" };
@@ -273,6 +280,9 @@ static_assert(sizeof(brightness_levels) / sizeof(brightness_levels[0]) == BRIGHT
 
 static void update_speed_names(void)
 {
+    for (int i = 0; i < CPU_RAISED_SPEEDS; i++)
+        if (config_raised_mhz(i))
+            snprintf(raised_cpu_speeds[i], sizeof(raised_cpu_speeds[i]), "%u MHz", (unsigned) config_raised_mhz(i));
     if (platform_cpu_normal_mhz())
         snprintf(normal_cpu_speed, sizeof(normal_cpu_speed), "normal (%u MHz)",
                  (unsigned) platform_cpu_normal_mhz());

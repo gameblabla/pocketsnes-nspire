@@ -11,13 +11,14 @@
 #include "platform.h"
 #include "ui.h"
 
-/* 408 to 504 MHz: the CX II runs at 396 MHz (x33), and the best calculators
- * reported reach about 492 MHz. Raising the CPU clock raises the memory's
- * too (its bus runs at half the CPU clock) with the same timings, so the
- * memory is usually what gives out first. */
-#define FIRST_MULTIPLIER 34
-#define LAST_MULTIPLIER  42
-#define SPEEDS (LAST_MULTIPLIER - FIRST_MULTIPLIER + 1)
+/* The menu's raised speeds (config_raised_mhz). CX II: 408 to 504 MHz; it
+ * runs at 396 MHz (x33), and the best calculators reported reach about
+ * 492 MHz. Raising its CPU clock raises the memory's too (its bus runs at
+ * half the CPU clock) with the same timings, so the memory is usually what
+ * gives out first. Older CX: 180 to 264 MHz; it runs at 132, and Nover
+ * finds most reach 210 to 234; the memory bus stays at most at its own
+ * 66 MHz, so there it's the CPU that gives out. */
+#define SPEEDS CPU_RAISED_SPEEDS
 #define ROUNDS 2
 #define GAME_SECONDS 6     /* of the game recorded at normal speed */
 #define MEMORY_SECONDS 2   /* of memory and CPU checks after it, each round */
@@ -42,13 +43,13 @@ static uint32_t best_mhz;      /* the highest that passed in this run */
 
 static int speed_mhz(int index)
 {
-    return (FIRST_MULTIPLIER + index) * 12;
+    return (int) config_raised_mhz(index);
 }
 
-/* Within 2% of 12 MHz times the multiplier. */
+/* Within 2% of the multiplier times the clock step. */
 static int reached(uint32_t mhz, int multiplier)
 {
-    uint32_t want = (uint32_t) multiplier * 12;
+    uint32_t want = (uint32_t) multiplier * (uint32_t) platform_cpu_step_mhz();
     return mhz * 50 >= want * 49 && mhz * 50 <= want * 51;
 }
 
@@ -338,7 +339,7 @@ void overclock_test_run(int in_game)
 
     if (!platform_cpu_normal_mhz())
     {
-        gui_message("The overclock test is for the TI-Nspire CX II.", NULL);
+        gui_message("The CPU speed can't be set on this calculator.", NULL);
         return;
     }
     if (!in_game)
@@ -373,7 +374,7 @@ void overclock_test_run(int in_game)
     for (int i = 0; i < SPEEDS; i++)
     {
         struct SpeedResult *r = &results[i];
-        int multiplier = FIRST_MULTIPLIER + i;
+        int multiplier = speed_mhz(i) / platform_cpu_step_mhz();
 
         /* The marker and the results so far go to files at normal speed. */
         testing = i;

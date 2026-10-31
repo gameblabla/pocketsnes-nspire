@@ -562,12 +562,42 @@ void config_set_game_keys(int own)
         memcpy(cfg.keys, global.keys, sizeof(cfg.keys));
 }
 
+uint32_t config_raised_mhz(int index)
+{
+    /* The older CX: 6 MHz times the multiplier, its memory bus a whole
+     * fraction of that, at most 66 MHz (its own; faster has corrupted
+     * flash memory for others). 198 and 264 MHz keep it at 66 (CPU / 3 and
+     * CPU / 4); 210 to 234 MHz are where Nover finds most CXs' limit, with
+     * the bus at 52 to 58 MHz. */
+    static const uint16_t cx_speeds[CPU_RAISED_SPEEDS] = { 180, 192, 198, 210, 222, 234, 240, 252, 264 };
+    if (index < 0 || index >= CPU_RAISED_SPEEDS)
+        return 0;
+    switch (platform_cpu_step_mhz())
+    {
+    case 12:
+        return 408 + 12 * (uint32_t) index;
+    case 6:
+        return cx_speeds[index];
+    default:
+        return 0;
+    }
+}
+
 int config_cpu_multiplier(uint32_t cpu_speed)
 {
+    uint32_t step = (uint32_t) platform_cpu_step_mhz();
+    if (!step)
+        return 0;
     if (cpu_speed == CPU_SPEED_TESTED)
-        return (int) (tested_mhz / 12);
+    {
+        /* A CX II's result means nothing on a CX and the other way round:
+         * their speeds don't overlap. */
+        if (tested_mhz < config_raised_mhz(0) || tested_mhz > config_raised_mhz(CPU_RAISED_SPEEDS - 1))
+            return 0;
+        return (int) (tested_mhz / step);
+    }
     if (cpu_speed >= CPU_SPEED_408 && cpu_speed < NUM_CPU_SPEEDS)
-        return 34 + (int) (cpu_speed - CPU_SPEED_408);
+        return (int) (config_raised_mhz((int) (cpu_speed - CPU_SPEED_408)) / step);
     return 0;
 }
 
