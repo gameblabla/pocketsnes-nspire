@@ -98,6 +98,8 @@ int main(int argc, char **argv)
 
         if (!emu_load_game(rom))
         {
+            if (emu_load_cancelled())
+                continue;   /* Q: back to the list */
             const char *slash = strrchr(rom, '/');
             char line[600];
             snprintf(line, sizeof(line), "Couldn't load %s", slash ? slash + 1 : rom);
@@ -106,6 +108,11 @@ int main(int argc, char **argv)
         }
 
         enum EmuExit result = emu_run(start != BROWSER_START_WITHOUT_STATE);
+        if (result == EMU_CANCELLED)
+        {
+            emu_drop_game();
+            continue;
+        }
         emu_close_game();
         if (result == EMU_QUIT || platform_quit_requested())
             break;

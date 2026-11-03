@@ -31,6 +31,7 @@ enum Action
     ACTION_RESTART,
     ACTION_BRIGHTER,
     ACTION_DIMMER,
+    ACTION_TURBO,       /* held with a button: that button repeats (turbo) */
     NUM_ACTIONS
 };
 
@@ -106,6 +107,16 @@ enum ScreenSize
  * clock can't be set. */
 int config_cpu_multiplier(uint32_t cpu_speed);
 
+/* Turbo: with 'on' (cfg.turbo, or the Turbo key held), each held button in
+ * masks[0..count-1] (at most 8) is pressed and released over and over,
+ * speed_index + 1 (1-30) times a second of the game: frame n of the hold (the
+ * game's frames, so fast forward doesn't change what the game sees) is down
+ * while n * speed / 30 is even. The first frame is down, so a tap is an
+ * ordinary press; 30 a second is a frame down, a frame up. (keys.cpp) */
+#define TURBO_SPEEDS 30
+#define TURBO_SPEED_DEFAULT 14   /* 15 a second */
+uint32_t turbo_buttons(uint32_t buttons, int on, uint32_t speed_index, const uint32_t *masks, int count);
+
 #define CPU_RAISED_SPEEDS (NUM_CPU_SPEEDS - CPU_SPEED_408)
 /* The index'th raised speed in MHz (0 .. CPU_RAISED_SPEEDS - 1) on this
  * calculator: 408 to 504 MHz on a CX II, 180 to 264 MHz on an older CX
@@ -139,6 +150,8 @@ struct Config
     uint32_t cpu_speed;         /* enum CpuSpeed */
     uint32_t cpu_core;          /* enum CpuCore */
     uint32_t brightness;        /* 0 the calculator's own, 1-10 (brightness.h) */
+    uint32_t turbo;             /* held A B X Y L R repeat (turbo_buttons) */
+    uint32_t turbo_speed;       /* presses a second - 1 (0-29) */
     /* Keys: for all games, or a game's own (config_set_game_keys). */
     struct Binding keys[NUM_ACTIONS][KEY_SLOTS];
     /* For all games only. */

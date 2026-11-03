@@ -726,3 +726,31 @@ CPU that libretro never turns on; it lacks OBC1 and DSP-4. Porting its
 DrawTile16 into `tile.cpp` (same signature, same GFX fields) is the
 suggested next speed step; the gain is a guess (20-40% of drawing time).
 The CPU side was done instead with psnes's core (2026-10-08).
+
+## Cancel loading, turbo (2026-11-02)
+
+- **Q cancels loading.** The ROM is read 128 KB at a time
+  (`rom_read_pieces`, romzip.cpp; memmap.cpp's FileLoader uses it for plain
+  files, romzip_read for stored zips and every 8 inflate chunks), calling
+  `rom_read_poll` between pieces; emu.cpp's `poll_cancel` reads the keys
+  and stops at a new Q press (the poll before the read is the baseline, so
+  a Q held from before doesn't count). Cancelled: `emu_load_game` returns 0
+  with `emu_load_cancelled()` set and main goes back to the list (on that
+  game) without a message; nothing is opened or written. `emu_run` checks
+  again before and after the state a game starts from: `EMU_CANCELLED` ->
+  `emu_drop_game` (back to the settings for all games, no in-game save, no
+  settings written). "[Q] Cancel" is drawn under the Loading panel.
+  On the PC host every poll takes a script line, so loading now uses a few
+  (one per 128 KB + 2): sdd1_wait.txt waits 60, timer_speed.txt 604.
+- **Turbo.** SNES buttons menu: Turbo (on: held A B X Y L R repeat), Turbo
+  speed 1-30 a second (`turbo_speed` = speed - 1), Turbo key (action
+  ACTION_TURBO, "key_turbo", default = like gpSP): held with a button, that
+  button repeats with Turbo off. `turbo_buttons` (keys.cpp) counts the
+  game's frames since each button went down: down while n * speed / 30 is
+  even (first frame down, so a tap is a press; 30 a second = a frame down, a
+  frame up). Applied in read_joypad (once per emulated frame). Older
+  settings files: off, 15, the Turbo key on = where the file leaves = free
+  (drop_clashing_defaults). The bench is unchanged (same instructions per
+  frame in every scene).
+- Tests: unit_tests `test_turbo`; run.sh "Q cancels loading a game; turbo"
+  (plain, deflate and stored zip cancel, Q held, the menu).

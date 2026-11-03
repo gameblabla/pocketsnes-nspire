@@ -148,13 +148,14 @@ static void reset_actions(int first, int last)
 static enum Step reset_buttons(void)
 {
     reset_actions(0, FIRST_HOTKEY - 1);
+    reset_actions(ACTION_TURBO, ACTION_TURBO);   /* on this page too */
     set_status("SNES buttons are back to the default keys.");
     return STEP_STAY;
 }
 
 static enum Step reset_hotkeys(void)
 {
-    reset_actions(FIRST_HOTKEY, NUM_ACTIONS - 1);
+    reset_actions(FIRST_HOTKEY, ACTION_DIMMER);
     set_status("Hotkeys are back to the defaults.");
     return STEP_STAY;
 }
@@ -243,6 +244,11 @@ static void own_keys_changed(void) { config_set_game_keys((int) own_keys); }
 
 static const char *const frameskip_types[] = { "automatic", "manual", "off" };
 static const char *const off_on[] = { "off", "on" };
+static const char *const turbo_speeds[TURBO_SPEEDS] =
+{
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
+    "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30"
+};
 static const char *const fps_modes[] = { "off", "on", "detailed" };
 static const char *const sram_write_modes[] = { "on exit", "automatic" };
 static const char *const scopes[] = { "all games", "this game" };
@@ -406,9 +412,16 @@ static struct Option button_options[] =
     BINDING_OPTION(ACTION_R, 9),
     BINDING_OPTION(ACTION_START, 10),
     BINDING_OPTION(ACTION_SELECT, 11),
-    ACTION("Reset to defaults", "Puts the default keys back. The arrows always work as the d-pad.",
-           13, reset_buttons, ICON_RESTART),
-    BACK_OPTION(14),
+    CHOICE("Turbo",
+           "On: held A B X Y L R press again and again. Off: only while the Turbo key is held too.",
+           13, &cfg.turbo, off_on, 1, ICON_NONE),
+    CHOICE("Turbo speed",
+           "Presses per second, 1-30. 30 is the most a game can see: one frame down, one up.",
+           14, &cfg.turbo_speed, turbo_speeds, TURBO_SPEEDS - 1, ICON_NONE),
+    BINDING_OPTION(ACTION_TURBO, 15),
+    ACTION("Reset to defaults", "Puts the default keys back (= for Turbo). The arrows always work as the d-pad.",
+           17, reset_buttons, ICON_RESTART),
+    BACK_OPTION(18),
 };
 
 static struct Option hotkey_options[] =
@@ -876,6 +889,8 @@ static const char *short_action_name(int action)
         return "Brighter";
     if (action == ACTION_DIMMER)
         return "Dimmer";
+    if (action == ACTION_TURBO)
+        return "Turbo";
     return action_names[action];
 }
 

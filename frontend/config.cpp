@@ -13,7 +13,9 @@
  * Version 2 added the second key slots, key combinations, save_on_exit and
  * load_on_start (which replace auto_resume) and per-game files. Version 3
  * numbers the CPU speeds differently (enum CpuSpeed) and adds
- * highest_tested_mhz. */
+ * highest_tested_mhz. turbo, turbo_speed and key_turbo came later in version
+ * 3: files without them get turbo off, 15 a second, and the Turbo key on =
+ * where the file's keys leave = free. */
 #define CONFIG_FILE "pocketsnes.cfg.tns"
 #define CONFIG_VERSION 3
 
@@ -33,7 +35,7 @@ const char *const action_names[NUM_ACTIONS] =
     "A", "B", "X", "Y", "L", "R", "Start", "Select",
     "Menu", "Quit", "Fast forward", "Save state", "Load state",
     "Load newest", "Next slot", "Previous slot", "FPS counter", "Restart game",
-    "Brightness up", "Brightness down"
+    "Brightness up", "Brightness down", "Turbo key"
 };
 
 /* Short names used in the config file. */
@@ -42,20 +44,21 @@ static const char *const action_ids[NUM_ACTIONS] =
     "up", "down", "left", "right", "a", "b", "x", "y", "l", "r", "start", "select",
     "menu", "quit", "fast_forward", "save_state", "load_state",
     "load_newest", "next_slot", "previous_slot", "show_fps", "restart",
-    "brighter", "dimmer"
+    "brighter", "dimmer", "turbo"
 };
 
 /* The default layout (README.md): the one played with while PocketSNES was
  * developed. The d-pad on 8 4 6 5, A B X Y on shift del ctrl var (the
  * SNES's diamond), L R on tab menu, Start Select on cat frac; brightness on
- * + and -, as in gpSP (and the OS, with ctrl). */
+ * + and -, as in gpSP (and the OS, with ctrl); the Turbo key on =, under
+ * ctrl (gpSP's too). */
 static const uint8_t default_keys[NUM_ACTIONS] =
 {
     KEY_8, KEY_5, KEY_4, KEY_6,
     KEY_SHIFT, KEY_DEL, KEY_CTRL, KEY_VAR, KEY_TAB, KEY_MENU, KEY_CAT, KEY_FRAC,
     KEY_ESC, KEY_Q, KEY_F, KEY_S, KEY_L,
     KEY_N, KEY_RPAREN, KEY_LPAREN, 0, KEY_R,
-    KEY_PLUS, KEY_MINUS
+    KEY_PLUS, KEY_MINUS, KEY_EQUALS
 };
 
 static void config_path(char *path, size_t size)
@@ -98,6 +101,8 @@ static void default_settings_into(struct Config *c)
     c->cpu_speed = CPU_SPEED_NORMAL;
     c->cpu_core = CPU_CORE_ARM;
     c->brightness = 0;
+    c->turbo = 0;
+    c->turbo_speed = TURBO_SPEED_DEFAULT;
 }
 
 void config_reset_all(void)
@@ -130,6 +135,8 @@ static void copy_settings(struct Config *to, const struct Config *from)
     to->cpu_speed = from->cpu_speed;
     to->cpu_core = from->cpu_core;
     to->brightness = from->brightness;
+    to->turbo = from->turbo;
+    to->turbo_speed = from->turbo_speed;
 }
 
 static uint32_t clamp(long value, uint32_t max)
@@ -317,6 +324,10 @@ static void read_text(const char *text, struct Config *c, struct FileInfo *info)
             c->cpu_core = clamp(number, NUM_CPU_CORES - 1);
         else if (strcmp(line, "brightness") == 0)
             c->brightness = clamp(number, BRIGHTNESS_LEVELS);
+        else if (strcmp(line, "turbo") == 0)
+            c->turbo = clamp(number, 1);
+        else if (strcmp(line, "turbo_speed") == 0)
+            c->turbo_speed = clamp(number, TURBO_SPEEDS - 1);
         else if (strcmp(line, "auto_slot") == 0)
             c->auto_slot = clamp(number, 1);
         else if (strcmp(line, "quit_new_save") == 0)
@@ -408,6 +419,8 @@ static void write_settings(FILE *f, const struct Config *c)
     fprintf(f, "cpu_speed=%u\n", (unsigned) c->cpu_speed);
     fprintf(f, "cpu_core=%u\n", (unsigned) c->cpu_core);
     fprintf(f, "brightness=%u\n", (unsigned) c->brightness);
+    fprintf(f, "turbo=%u\n", (unsigned) c->turbo);
+    fprintf(f, "turbo_speed=%u\n", (unsigned) c->turbo_speed);
     fprintf(f, "auto_slot=%u\n", (unsigned) c->auto_slot);
     fprintf(f, "quit_new_save=%u\n", (unsigned) c->quit_new_save);
 }

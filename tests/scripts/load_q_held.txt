@@ -1,0 +1,10 @@
+# Q held from before the load doesn't cancel it, and letting it go in the
+# game doesn't quit (Q is the Quit hotkey); then quit.
+wait 10
+down Q
+press 1
+wait 60
+up Q
+wait 60
+shot game.png
+quit

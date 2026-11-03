@@ -931,6 +931,96 @@ bool8 S9xReadSuperScopePosition (int &, int &, uint32 &) { return FALSE; }
 void S9xAutoSaveSRAM (void) {}
 }
 
+/* Turbo: the press pattern, a tap, every speed's presses per second,
+ * buttons on their own phases; the settings files keep turbo, its speed and
+ * the Turbo key; older files get it off, 15 a second, and = where free. */
+static int turbo_presses(uint32_t speed_index, int frames)
+{
+    static const uint32_t a[1] = { 0x80 };
+    int presses = 0;
+    uint32_t last = 0;
+    turbo_buttons(0, 1, speed_index, a, 1);
+    for (int f = 0; f < frames; f++)
+    {
+        uint32_t b = turbo_buttons(0x80, 1, speed_index, a, 1);
+        presses += (b & 0x80) && !(last & 0x80);
+        last = b;
+    }
+    return presses;
+}
+
+static void turbo_pattern(uint32_t speed_index, int frames, char *out)
+{
+    static const uint32_t a[1] = { 0x80 };
+    turbo_buttons(0, 1, speed_index, a, 1);
+    for (int f = 0; f < frames; f++)
+        out[f] = (turbo_buttons(0x80, 1, speed_index, a, 1) & 0x80) ? '1' : '0';
+    out[frames] = 0;
+}
+
+static void test_turbo(void)
+{
+    static const uint32_t ab[2] = { 0x80, 0x8000 };
+    char got[64];
+
+    turbo_pattern(29, 8, got);
+    CHECK(strcmp(got, "10101010") == 0, "turbo 30 a second: %s", got);
+    turbo_pattern(14, 8, got);
+    CHECK(strcmp(got, "11001100") == 0, "turbo 15 a second: %s", got);
+    turbo_pattern(9, 12, got);
+    CHECK(strcmp(got, "111000111000") == 0, "turbo 10 a second: %s", got);
+    int every = 1;
+    for (uint32_t speed = 0; speed < TURBO_SPEEDS; speed++)
+        if (turbo_presses(speed, 600) != (int) (speed + 1) * 10)
+        {
+            CHECK(0, "turbo speed %u: %d presses in 10 s", speed + 1, turbo_presses(speed, 600));
+            every = 0;
+        }
+    CHECK(every, "turbo: every speed 1-30 gives that many presses a second");
+    turbo_buttons(0, 1, 29, ab, 2);
+    CHECK(turbo_buttons(0x80, 1, 29, ab, 2) == 0x80 && turbo_buttons(0, 1, 29, ab, 2) == 0, "turbo: a tap is a press");
+    CHECK(turbo_buttons(0x8080, 0, 29, ab, 2) == 0x8080 && turbo_buttons(0x8080, 0, 29, ab, 2) == 0x8080,
+          "turbo off: held stays held");
+    turbo_buttons(0, 1, 29, ab, 2);
+    CHECK(turbo_buttons(0x0080, 1, 29, ab, 2) == 0x0080, "turbo: A down");
+    CHECK(turbo_buttons(0x8080, 1, 29, ab, 2) == 0x8000, "turbo: B starts down as A goes up");
+    CHECK(turbo_buttons(0x8080, 1, 29, ab, 2) == 0x0080, "turbo: each on its own phase");
+    CHECK(turbo_buttons(0x0F00, 1, 29, ab, 2) == 0x0F00 && turbo_buttons(0x0F00, 1, 29, ab, 2) == 0x0F00,
+          "turbo: buttons not in the list never repeat");
+    turbo_buttons(0, 0, 0, ab, 2);
+
+    char global_path[600];
+    snprintf(global_path, sizeof(global_path), "%s/zPocketSNES_saves/pocketsnes.cfg.tns", documents_dir);
+    remove(global_path);
+    config_load();
+    CHECK(cfg.turbo == 0 && cfg.turbo_speed == TURBO_SPEED_DEFAULT && cfg.keys[ACTION_TURBO][0].key == KEY_EQUALS,
+          "turbo defaults: off, 15 a second, the Turbo key on =");
+    cfg.turbo = 1;
+    cfg.turbo_speed = 29;
+    cfg.keys[ACTION_TURBO][1].with = KEY_SHIFT;
+    cfg.keys[ACTION_TURBO][1].key = KEY_7;
+    config_save();
+    CHECK(file_has_line(global_path, "turbo=1") && file_has_line(global_path, "turbo_speed=29") &&
+          file_has_line(global_path, "key_turbo=72") && file_has_line(global_path, "key_turbo_2=121+56"),
+          "turbo written");
+    config_load();
+    CHECK(cfg.turbo == 1 && cfg.turbo_speed == 29 && cfg.keys[ACTION_TURBO][1].key == KEY_7 &&
+          cfg.keys[ACTION_TURBO][1].with == KEY_SHIFT, "turbo read back");
+    write_file(global_path, "config_version=3\nbrightness=2\n");
+    config_load();
+    CHECK(cfg.turbo == 0 && cfg.turbo_speed == TURBO_SPEED_DEFAULT && cfg.keys[ACTION_TURBO][0].key == KEY_EQUALS,
+          "a file from before turbo: off, 15, the Turbo key on =");
+    write_file(global_path, "config_version=3\nkey_l=72\nkey_l_2=0\n");
+    config_load();
+    CHECK(cfg.keys[ACTION_L][0].key == KEY_EQUALS && !cfg.keys[ACTION_TURBO][0].key && !cfg.keys[ACTION_TURBO][1].key,
+          "a file from before turbo with = on L: no Turbo key");
+    write_file(global_path, "config_version=3\nturbo=5\nturbo_speed=99\n");
+    config_load();
+    CHECK(cfg.turbo == 1 && cfg.turbo_speed == TURBO_SPEEDS - 1, "turbo values clamped");
+    remove(global_path);
+    config_load();
+}
+
 int main(void)
 {
     char dir_template[] = "/tmp/pocketsnes-unit-XXXXXX";
@@ -955,6 +1045,7 @@ int main(void)
     test_romtypes();
     test_file_list();
     test_bindings();
+    test_turbo();
 
     char command[700];
     snprintf(command, sizeof(command), "rm -rf '%s'", dir);

@@ -715,7 +715,9 @@ static void read_joypad(void)
     if (held(ACTION_R)) buttons |= SNES_TR_MASK;
     if (held(ACTION_START)) buttons |= SNES_START_MASK;
     if (held(ACTION_SELECT)) buttons |= SNES_SELECT_MASK;
-    joypad = buttons;
+    static const uint32_t turbo_masks[6] =
+        { SNES_A_MASK, SNES_B_MASK, SNES_X_MASK, SNES_Y_MASK, SNES_TL_MASK, SNES_TR_MASK };
+    joypad = turbo_buttons(buttons, cfg.turbo || held(ACTION_TURBO), cfg.turbo_speed, turbo_masks, 6);
 }
 
 static void change_slot(int delta)
@@ -980,9 +982,30 @@ static bool looks_like_rom(const char *path)
     return false;
 }
 
+/* Q on the loading screen: a new press since the load started (a Q held
+ * from before doesn't count). Read every 128 KB of the ROM (romzip.h) and
+ * before and after the state a game starts from. */
+static int load_cancelled;
+
+static int poll_cancel(void)
+{
+    if (!load_cancelled)
+    {
+        platform_poll_keys();
+        load_cancelled = platform_key_pressed(KEY_Q);
+    }
+    return load_cancelled;
+}
+
+int emu_load_cancelled(void)
+{
+    return load_cancelled;
+}
+
 int emu_load_game(const char *path)
 {
     snprintf(rom_path, sizeof(rom_path), "%s", path);
+    load_cancelled = 0;
     if (!looks_like_rom(rom_path))
         return 0;
     load_error = "Is it a SNES ROM? It may also be too big for the memory free.";
@@ -993,10 +1016,26 @@ int emu_load_game(const char *path)
     draw_icon(ICON_CART, 44, 104, COLOR_SELECT_EDGE);
     draw_string(FONT_MEDIUM, "Loading", 64, 100, COLOR_TEXT);
     draw_string_fit(FONT_SMALL, S9xBasename(rom_path), 64, 120, 216, COLOR_TEXT_DIM);
+    {
+        /* [Q] Cancel, under the panel in the middle */
+        int w = ui_key_width("Q") + 4 + text_width(FONT_SMALL, "Cancel");
+        int x = 160 - w / 2;
+        x += ui_key("Q", x, 152, false) + 4;
+        draw_string(FONT_SMALL, "Cancel", x, 153, COLOR_TEXT_DIM);
+    }
     platform_present();
 
-    if (!Memory.LoadROM (rom_path))
+    platform_poll_keys();   /* Q counts from here */
+    rom_read_cancelled = 0;
+    rom_read_poll = poll_cancel;
+    bool8 loaded = Memory.LoadROM (rom_path);
+    rom_read_poll = NULL;
+    if (!loaded || poll_cancel())
+    {
+        if (load_cancelled)
+            load_error = "Cancelled.";
         return 0;
+    }
     S9xReset ();
 
     states_open_game(rom_path);
@@ -1018,6 +1057,12 @@ void emu_close_game(void)
     perf_log_flush();
     write_sram();
     config_save();
+    config_close_game();
+}
+
+void emu_drop_game(void)
+{
+    sram_dirty = false;
     config_close_game();
 }
 
@@ -1652,18 +1697,26 @@ enum EmuExit emu_run(int may_load_state)
     {
         int slot = start_slot;
         start_slot = 0;
+        if (poll_cancel())
+            return EMU_CANCELLED;
         if (emu_load_state(slot) == 1)
             show_slot_message("Started from %s", slot);
         else
             show_slot_message("Couldn't load %s", slot);
+        if (poll_cancel())
+            return EMU_CANCELLED;
     }
     else if (may_load_state && cfg.load_on_start && states_newest())
     {
         int slot = states_newest();
+        if (poll_cancel())
+            return EMU_CANCELLED;
         if (emu_load_state(slot) == 1)
             show_slot_message("Resumed from %s", slot);
         else
             show_slot_message("Couldn't resume from %s", slot);
+        if (poll_cancel())
+            return EMU_CANCELLED;
     }
 
     gui_wait_release();

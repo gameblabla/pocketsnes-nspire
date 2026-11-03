@@ -1,0 +1,5 @@
+# The S-DD1 cartridge: its test runs ~40 frames; loading its 2 MB ROM reads
+# the keys 16 times (Q cancels), which take lines of this script too.
+wait 60
+shot end.png
+quit

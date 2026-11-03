@@ -465,11 +465,11 @@ p = Image.open('$OUT/$1/shots/end.png').convert('RGB').getpixel((160, 120))
 print('green' if p[1] > 200 and p[0] < 50 else 'red' if p[0] > 200 and p[1] < 50 else 'other')" 2>/dev/null || echo none
 }
 setup sdd1 SDD1Test.sfc config_version=3 show_fps=0 save_on_exit=1 load_on_start=0
-play sdd1 tests/scripts/wait_shot_quit.txt SDD1Test.sfc
+play sdd1 tests/scripts/sdd1_wait.txt SDD1Test.sfc
 check "$(backdrop sdd1)" green "the S-DD1 test cartridge passes (bank registers, 8 decompressing DMAs, \$4801 cleared)"
 mv "$OUT/sdd1/shots/end.png" "$OUT/sdd1/shots/first.png"
 sed -i 's/^load_on_start=0$/load_on_start=1/' "$OUT/sdd1/zPocketSNES_saves/pocketsnes.cfg.tns"
-play sdd1 tests/scripts/wait_shot_quit.txt SDD1Test.sfc
+play sdd1 tests/scripts/sdd1_wait.txt SDD1Test.sfc
 check "$(backdrop sdd1)" green "loading its state on a fresh start puts the S-DD1 banks back"
 
 echo "== Menu"
@@ -639,6 +639,34 @@ setup_list menumove
 play menumove tests/scripts/list_menu_move.txt
 check "$(order "$OUT/menumove/zPocketSNES_saves/game_order_roms.txt.tns")" \
     "Rings.sfc.tns MonsterFarmJump.sfc.tns RotZoom.sfc.tns " "Move in the list (game list menu) moves the game"
+
+echo "== Q cancels loading a game; turbo"
+# A 2 MB ROM (the S-DD1 test cartridge): sixteen 128 KB pieces to read.
+for kind in plain deflate store; do
+    setup "qcancel_$kind" SDD1Test.sfc config_version=3 save_on_exit=1 load_on_start=1 \
+        "rom_dir=$(realpath "$OUT")/qcancel_$kind/roms"
+    rom=SDD1Test.sfc
+    if [ "$kind" != plain ]; then
+        python3 tests/make_zip.py "$OUT/qcancel_$kind/roms/SDD1Test.zip.tns" $kind "$ROMS/SDD1Test.sfc"
+        rm "$OUT/qcancel_$kind/roms/SDD1Test.sfc.tns"
+        rom=SDD1Test.zip
+    fi
+    play "qcancel_$kind" tests/scripts/load_cancel.txt
+    d=$OUT/qcancel_$kind
+    check "$(same "$d/shots/list.png" "$d/shots/cancelled.png")$(same "$d/shots/list.png" "$d/shots/game.png")" \
+        samedifferent "Q while a $kind ROM loads: back to the list; 1 then starts it"
+    check "$(ls "$d/zPocketSNES_saves" | grep -c '\.sv0')" 1 \
+        "... the cancelled start wrote no state, the played one saved one when Q quit it ($kind)"
+done
+setup qheld SDD1Test.sfc config_version=3 save_on_exit=1 load_on_start=1 "rom_dir=$(realpath "$OUT")/qheld/roms"
+play qheld tests/scripts/load_q_held.txt
+check "$(exists "$OUT/qheld/shots/game.png")$(ls "$OUT/qheld/zPocketSNES_saves" | grep -c '\.sv0')" yes1 \
+    "a Q held from before the load doesn't cancel it, and letting it go doesn't quit"
+setup turbomenu MonsterFarmJump.sfc config_version=3 save_on_exit=0 load_on_start=0
+play turbomenu tests/scripts/turbo_menu.txt MonsterFarmJump.sfc
+c=$OUT/turbomenu/zPocketSNES_saves/pocketsnes.cfg.tns
+check "$(grep -c -e '^turbo=1$' -e '^turbo_speed=13$' -e '^key_turbo=72$' "$c")" 3 \
+    "the SNES buttons menu: Turbo on, Turbo speed 14, the Turbo key on = (saved)"
 
 echo
 echo "$PASS passed, $FAIL failed. Screenshots and files are in $OUT"

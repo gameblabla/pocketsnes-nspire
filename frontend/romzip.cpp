@@ -6,6 +6,34 @@
 
 #include "romzip.h"
 
+int (*rom_read_poll)(void) = NULL;
+int rom_read_cancelled = 0;
+
+#define ROM_PIECE (128 * 1024)
+
+static int read_stopped(void)
+{
+    if (!rom_read_cancelled && rom_read_poll && rom_read_poll())
+        rom_read_cancelled = 1;
+    return rom_read_cancelled;
+}
+
+size_t rom_read_pieces(void *dst, size_t max, FILE *f)
+{
+    size_t total = 0;
+    while (total < max)
+    {
+        size_t want = max - total < ROM_PIECE ? max - total : ROM_PIECE;
+        size_t got = fread((char *) dst + total, 1, want, f);
+        total += got;
+        if (read_stopped())
+            return 0;
+        if (got < want)
+            break;
+    }
+    return total;
+}
+
 static uint32_t get16(const unsigned char *p) { return p[0] | (p[1] << 8); }
 static uint32_t get32(const unsigned char *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t) p[3] << 24); }
 
@@ -153,7 +181,7 @@ uint32_t romzip_read(const char *path, uint8_t *buffer, uint32_t max)
 
     if (rom.method == 0)
     {
-        if (fread(buffer, 1, rom.size, f) == rom.size)
+        if (rom_read_pieces(buffer, rom.size, f) == rom.size)
             result = rom.size;
     }
     else
@@ -167,10 +195,14 @@ uint32_t romzip_read(const char *path, uint8_t *buffer, uint32_t max)
             z.next_out = buffer;
             z.avail_out = rom.size;
             int status = Z_OK;
+            int chunks = 0;
             while (status == Z_OK)
             {
                 if (z.avail_in == 0)
                 {
+                    /* every 8 chunks: 128 KB read */
+                    if ((++chunks & 7) == 0 && read_stopped())
+                        break;
                     uint32_t want = left < sizeof(chunk) ? left : sizeof(chunk);
                     if (want == 0 || fread(chunk, 1, want, f) != want)
                         break;
@@ -186,6 +218,8 @@ uint32_t romzip_read(const char *path, uint8_t *buffer, uint32_t max)
         }
     }
     fclose(f);
+    if (rom_read_cancelled)
+        return 0;
     /* A damaged zip mustn't start as a damaged game. */
     if (result && crc32(crc32(0, NULL, 0), buffer, result) != rom.crc)
         result = 0;
