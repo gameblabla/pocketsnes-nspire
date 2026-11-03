@@ -94,6 +94,7 @@ void gui_present(void)
 {
     brightness_update();
     platform_present();
+    platform_present_wait_shown();   /* an older CX: don't draw into the frame on show */
 
     uint32_t now = platform_ticks();
     if ((int32_t) (frame_end - now) > (int32_t) platform_tick_hz() || (int32_t) (frame_end - now) < 0)

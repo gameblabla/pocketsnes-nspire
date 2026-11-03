@@ -462,6 +462,10 @@ static void show_frame(void)
 #endif
 }
 
+void platform_present_wait_shown(void)
+{
+}
+
 void platform_present(void)
 {
     memcpy(shown, platform_screen(), sizeof(shown));

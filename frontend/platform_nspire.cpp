@@ -742,6 +742,24 @@ void platform_present(void)
     }
 }
 
+void platform_present_wait_shown(void)
+{
+    if (output_now() != SHOWN_BY_LANDSCAPE_FLIP)
+        return;
+    /* The next frame goes into screen_physical[game_screen], which the LCD
+     * read until platform_present pointed it at the other one; it takes the
+     * new address at its next refresh. Counted in polls, not the timer (an
+     * older CX's may not run): about 1-2 refreshes at most. */
+    uint32_t start = screen_physical[game_screen];   /* the picture's first line */
+    uint32_t end = start + SCREEN_PIXELS * 2;
+    for (int polls = 0; polls < 2000000; polls++)
+    {
+        uint32_t reading = *(volatile uint32_t *) 0xC000002C;   /* the LCD's current address */
+        if (reading < start || reading >= end)
+            break;
+    }
+}
+
 /* Game frames (platform.h). On the CX II LCD the parts of a frame that
  * changed are turned into one of the three portrait buffers, which the LCD
  * is pointed at when the frame is done; the LCD only switches buffers at its

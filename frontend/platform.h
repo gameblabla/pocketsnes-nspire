@@ -110,6 +110,13 @@ void platform_shutdown(void);
 uint16_t *platform_screen(void);
 int platform_screen_index(void);
 void platform_present(void);
+/* After a menu frame (gui_present): waits until the LCD isn't reading the
+ * buffer the next frame is drawn into. Only an older CX needs it: its LCD
+ * reads the drawing buffers themselves, and a menu redraws its whole screen
+ * (background first, then text) each frame, so drawing into the one still
+ * shown made the menus flash. At most about a refresh; game frames don't
+ * wait (a tear at worst). */
+void platform_present_wait_shown(void);
 
 /* On the calculator the frame before may still be being copied out of the
  * buffer in the background. platform_screen() waits for that to finish; the
