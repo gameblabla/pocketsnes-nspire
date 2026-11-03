@@ -390,6 +390,15 @@ static void test_config(void)
     CHECK(cfg.keys[ACTION_LOAD_NEWEST][0].key == KEY_N && cfg.keys[ACTION_SHOW_FPS][0].key == 0,
           "defaults: Load newest on N, the FPS counter hotkey has no key");
     CHECK(cfg.frameskip_type == FRAMESKIP_OFF && cfg.show_fps == 1, "defaults: frameskip off, FPS counter on");
+    unit_cpu_step = 6;
+    config_reset_all();
+    CHECK(cfg.frameskip_type == FRAMESKIP_AUTO && cfg.frameskip_value == 5,
+          "defaults on an older CX: automatic frameskip, at most 5 frames in a row");
+    unit_cpu_step = 0;
+    config_reset_all();
+    CHECK(cfg.frameskip_type == FRAMESKIP_AUTO, "defaults where the clock is unknown: automatic frameskip");
+    unit_cpu_step = 12;
+    config_reset_all();
     CHECK(cfg.state_pictures == 1, "defaults: save state pictures on");
     CHECK(cfg.auto_slot == 0 && cfg.quit_new_save == 1 && cfg.brightness == 0,
           "defaults: no auto slot, a new save on quit, the calculator's own brightness");

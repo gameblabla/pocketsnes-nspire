@@ -77,7 +77,11 @@ void config_default_keys(void)
 
 static void default_settings_into(struct Config *c)
 {
-    c->frameskip_type = FRAMESKIP_OFF;
+    /* A CX II draws every frame at full speed. Anything slower (an older
+     * CX at 132 MHz takes about twice a frame's time to run and draw one)
+     * starts with automatic frameskip, so games keep their speed and draw
+     * as many frames as they can (issue #13). */
+    c->frameskip_type = platform_cpu_step_mhz() == 12 ? FRAMESKIP_OFF : FRAMESKIP_AUTO;
     c->frameskip_value = 5;
     c->show_fps = 1;
     c->auto_increment = 1;
