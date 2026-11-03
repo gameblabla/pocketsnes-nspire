@@ -6,7 +6,7 @@ set -u
 cd "$(dirname "$0")/../.."
 ROOT=$HOME/nspire/build
 command -v arm-none-eabi-g++ >/dev/null || . "$ROOT/env.sh" >/dev/null 2>&1
-line=$(grep -v '^ *#' tools/perf/scenes.txt | awk -F'|' -v n="$1" '{gsub(/^ +| +$/, "", $1)} $1 == n')
+line=$(grep -v '^ *#' tools/perf/scenes.txt | awk -F'|' -v OFS='|' -v n="$1" '{gsub(/^ +| +$/, "", $1)} $1 == n')
 [ -n "$line" ] || { echo "no scene $1 in tools/perf/scenes.txt"; exit 1; }
 IFS='|' read -r name rom state frames <<< "$line"
 trim() { echo "$1" | sed 's/^ *//; s/ *$//'; }
