@@ -1,0 +1,8 @@
+# scene | rom | state (or -) | frames      (paths relative to $HOME/nspire/build)
+smw-level   | testroms/Super Mario World (USA).sfc.tns | testroms/smw.sv001.tns | 300
+smw-user    | testroms/Super Mario World (USA).sfc.tns | pocketsnes-asm/build/calc-saves/smw/sv048.tns | 300
+yi-busy     | testroms/calc/Super Mario World 2 - Yoshi's Island.sfc.tns | pocketsnes-asm/build/calc-saves/yi/sv010.tns | 300
+yi-14       | testroms/calc/Super Mario World 2 - Yoshi's Island.sfc.tns | pocketsnes-asm/build/calc-saves/2026-10-20/yi.sv014.tns | 300
+ct-field    | testroms/calc/Chrono Trigger (USA).sfc.tns | pocketsnes-asm/build/calc-saves/ct/sv001.tns | 300
+alttp-intro | testroms/calc/Legend of Zelda, The - A Link to the Past (USA).sfc.tns | - | 300
+sfa2-fight  | testroms/calc/Street Fighter Alpha 2 (USA).sfc | pocketsnes-asm/build/calc-saves/sfa2/sv001.tns | 300
