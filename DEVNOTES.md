@@ -610,6 +610,7 @@ History
 | 2026-10-30 | e31da90 | Older CXs: the LCD reads the game buffers, no copy; portrait flip on HW-W CX too; LCD given physical addresses |
 | 2026-10-30 | e487fb2 | CPU speed on the older CX: 180-264 MHz through 0x900B0000 (bus kept at 66 MHz); menu speeds, overclock test and "highest tested" per model; PC `--cx` |
 | 2026-10-30 | c0f3c37 | Agent pipeline for CX speed: CLAUDE.md, `.claude/agents/ps-*`, `pocketsnes-improve` workflow, `tools/perf` (bench/profile/ptest) |
+| 2026-11-02 | | Brightness on the older CX: its LCD contrast at 0x900F0020 (0x11A-0x1CE, higher brighter), converted to and from the CX II's units (brightness.h); not yet run on a CX |
 | 2026-11-02 | | Saves folder `zPocketSNES_files` (zPocketSNES_saves moves in); the OS's file list read again at exit only when a saves-folder name is gone or something else moved (a new state no longer makes quitting slow) |
 
 `git log` has the details; every commit message says what changed and why.

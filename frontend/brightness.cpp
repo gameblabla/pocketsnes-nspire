@@ -52,3 +52,27 @@ int brightness_step(int delta)
     brightness_update();
     return level;
 }
+
+/* An older CX's backlight is its LCD contrast (0x900F0020), higher brighter:
+ * 0x11A to 0x1CE is the range Hackspire gives for it (0x174 normal, 0x100
+ * off). The CX II's 0..225 maps onto it in a straight line. */
+#define CX_DIMMEST 0x11A
+#define CX_BRIGHTEST 0x1CE
+
+int brightness_cx_register(int value)
+{
+    if (value < 0)
+        value = 0;
+    if (value > DARKEST)
+        value = DARKEST;
+    return CX_BRIGHTEST - (value * (CX_BRIGHTEST - CX_DIMMEST) + DARKEST / 2) / DARKEST;
+}
+
+int brightness_from_cx_register(int reg)
+{
+    if (reg < CX_DIMMEST)
+        reg = CX_DIMMEST;
+    if (reg > CX_BRIGHTEST)
+        reg = CX_BRIGHTEST;
+    return ((CX_BRIGHTEST - reg) * DARKEST + (CX_BRIGHTEST - CX_DIMMEST) / 2) / (CX_BRIGHTEST - CX_DIMMEST);
+}

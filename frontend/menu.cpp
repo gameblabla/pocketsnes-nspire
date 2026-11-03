@@ -334,7 +334,7 @@ static void update_speed_names(void)
            "No tearing (best): every frame shows whole. DMA: a little faster, can tear (original size).", \
            5, &cfg.screen_dma, screen_outputs, 1, ICON_NONE), \
     CHOICE("Brightness", \
-           "The screen while PocketSNES runs (CX II); yours comes back after. Keys: + and -.", \
+           "The screen while PocketSNES runs; yours comes back after. Keys: + and -.", \
            6, &cfg.brightness, brightness_levels, BRIGHTNESS_LEVELS, ICON_NONE), \
     CHOICE("CPU speed", \
            "Overclocks the CX II in games. Highest tested is what the overclock test passed.", \

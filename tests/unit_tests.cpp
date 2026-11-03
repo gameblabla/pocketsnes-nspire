@@ -680,6 +680,24 @@ static void test_romtypes(void)
 
 /* ---- Whether the OS's file list needs reading again (paths.h) ---- */
 
+/* ---- An older CX's backlight register (brightness.h) ---- */
+
+static void test_cx_brightness(void)
+{
+    CHECK(brightness_cx_register(0) == 0x1CE && brightness_cx_register(225) == 0x11A,
+          "CX: the CX II's brightest and darkest are 0x1ce and 0x11a");
+    for (int level = 1; level <= BRIGHTNESS_LEVELS; level++)
+    {
+        int reg = brightness_cx_register(brightness_value(level));
+        CHECK(reg >= 0x11A && reg <= 0x1CE, "CX: level %d in range (%x)", level, reg);
+        CHECK(brightness_level(brightness_from_cx_register(reg)) == level, "CX: level %d round trip", level);
+        if (level > 1)
+            CHECK(reg > brightness_cx_register(brightness_value(level - 1)), "CX: level %d brighter", level);
+    }
+    int normal = brightness_level(brightness_from_cx_register(0x174));
+    CHECK(normal == 5 || normal == 6, "CX: the OS's normal 0x174 is mid-range (level %d)", normal);
+}
+
 static void test_file_list(void)
 {
     char state[800], other[800];
@@ -1049,6 +1067,7 @@ int main(void)
     test_reset_all();
     test_romtypes();
     test_file_list();
+    test_cx_brightness();
     test_bindings();
     test_turbo();
 

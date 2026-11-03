@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "brightness.h"
 #include "paths.h"
 #include "platform.h"
 #include "romtypes.h"
@@ -469,8 +470,15 @@ static int lcd_is_landscape(void)
  * to 225 (darkest). Something other than the OS's 0..255 in it means it
  * isn't what it seems, and the backlight is left alone. */
 #define BACKLIGHT (*(volatile uint32_t *) 0x90130014)
+/* An older CX's backlight is its LCD contrast (Hackspire, "Memory-mapped
+ * I/O ports on CX", 900F0020): 0x100 off, about 0x1D0 brightest, higher
+ * brighter. Its value goes through brightness.h's CX conversion, so the
+ * rest of PocketSNES sees the CX II's units; the OS's own value is kept
+ * exactly for the end. Only a lit backlight up to 0x1FF is taken. */
+#define CX_BACKLIGHT (*(volatile uint32_t *) 0x900F0020)
 
 static int os_backlight = -1;
+static uint32_t os_cx_backlight;
 static int backlight_changed;
 
 static void backlight_init(void)
@@ -478,7 +486,14 @@ static void backlight_init(void)
     os_backlight = -1;
     backlight_changed = 0;
     if (!is_cx2)
+    {
+        uint32_t value = CX_BACKLIGHT;
+        if (is_classic || value <= 0x100 || value > 0x1FF)
+            return;
+        os_cx_backlight = value;
+        os_backlight = brightness_from_cx_register((int) value);
         return;
+    }
     uint32_t value = BACKLIGHT;
     if (value <= 255)
         os_backlight = (int) value;
@@ -497,12 +512,20 @@ void platform_set_backlight(int value)
     {
         if (!backlight_changed)
             return;
-        value = os_backlight;
         backlight_changed = 0;
+        if (!is_cx2)
+        {
+            CX_BACKLIGHT = os_cx_backlight;
+            return;
+        }
+        value = os_backlight;
     }
     else
         backlight_changed = 1;
-    BACKLIGHT = (uint32_t) (value > 255 ? 255 : value);
+    if (!is_cx2)
+        CX_BACKLIGHT = (uint32_t) brightness_cx_register(value);
+    else
+        BACKLIGHT = (uint32_t) (value > 255 ? 255 : value);
 }
 
 int platform_init(int *argc, char **argv)

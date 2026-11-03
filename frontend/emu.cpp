@@ -764,7 +764,7 @@ static void read_hotkeys(void)
         if (level)
             snprintf(text, sizeof(text), "Brightness %d/%d", level, BRIGHTNESS_LEVELS);
         else
-            snprintf(text, sizeof(text), "Brightness: CX II only");
+            snprintf(text, sizeof(text), "Brightness: not on this calculator");
         emu_show_message(text);
     }
 }

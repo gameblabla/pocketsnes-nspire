@@ -201,10 +201,11 @@ int platform_test_glitch(void);
  * --program FILE). */
 const char *platform_program_path(void);
 
-/* The screen's backlight on a CX II, in the value the OS writes to its
- * register: 0 (brightest) to 225 (darkest). platform_os_backlight() is the
+/* The screen's backlight, in the value the CX II's OS writes to its
+ * register: 0 (brightest) to 225 (darkest); an older CX's register is
+ * converted to and from that (brightness.h). platform_os_backlight() is the
  * value at startup (the calculator's own brightness), or -1 where it can't
- * be changed (not a CX II). platform_set_backlight(-1) puts the calculator's
+ * be changed (a register reading out of its range). platform_set_backlight(-1) puts the calculator's
  * own back, as platform_shutdown() does. */
 int platform_os_backlight(void);
 void platform_set_backlight(int value);
