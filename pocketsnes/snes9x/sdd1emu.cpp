@@ -100,6 +100,8 @@
  * S-DD1 issue in the past.
  */
 
+#include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include "port.h"
 #include "sdd1emu.h"
@@ -314,6 +316,49 @@ void SDD1_decompress(uint8 *out, uint8 *in, int len){
         } while(--len);
         break;
     }
+}
+
+#define SDD1_CACHE_BYTES   (256 * 1024)
+#define SDD1_CACHE_ENTRIES 64
+
+static uint8 *sdd1_cache;
+static int sdd1_cache_used, sdd1_cache_count;
+static struct { const uint8 *in; int len, offset; } sdd1_cache_entry[SDD1_CACHE_ENTRIES];
+
+void SDD1_cache_reset(void){
+    sdd1_cache_used = sdd1_cache_count = 0;
+}
+
+uint8 *SDD1_decompress_cached(uint8 *out, uint8 *in, int len,
+                              const uint8 *rom, uint32 rom_size){
+    if(len==0) len=0x10000;
+    if(in < rom || in >= rom + rom_size){
+        SDD1_decompress(out, in, len);
+        return out;
+    }
+    for(int i = 0; i < sdd1_cache_count; i++)
+        if(sdd1_cache_entry[i].in == in && sdd1_cache_entry[i].len >= len){
+#ifdef SDD1_CACHE_CHECK
+            SDD1_decompress(out, in, len);
+            if(memcmp(out, sdd1_cache + sdd1_cache_entry[i].offset, len)) abort();
+            static int hits; if(++hits % 50 == 0) fprintf(stderr, "sdd1 cache: %d checked hits\n", hits);
+#endif
+            return sdd1_cache + sdd1_cache_entry[i].offset;
+        }
+
+    SDD1_decompress(out, in, len);
+    if(!sdd1_cache && !(sdd1_cache = (uint8 *) malloc(SDD1_CACHE_BYTES)))
+        return out;
+    if(sdd1_cache_count == SDD1_CACHE_ENTRIES || sdd1_cache_used + len > SDD1_CACHE_BYTES)
+        SDD1_cache_reset();
+    /* A shorter copy of the same source is left unused; the next reset frees it. */
+    sdd1_cache_entry[sdd1_cache_count].in = in;
+    sdd1_cache_entry[sdd1_cache_count].len = len;
+    sdd1_cache_entry[sdd1_cache_count].offset = sdd1_cache_used;
+    memcpy(sdd1_cache + sdd1_cache_used, out, len);
+    sdd1_cache_used += (len + 3) & ~3;
+    sdd1_cache_count++;
+    return out;
 }
 
 static uint8 cur_plane;

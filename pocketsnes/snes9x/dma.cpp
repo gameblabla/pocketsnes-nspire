@@ -185,9 +185,11 @@ void S9xDoDMA (uint8 Channel)
 			if (in_ptr)
 			{
 				in_ptr += d->AAddress;
-				SDD1_decompress(buffer, in_ptr, d->TransferBytes);
+				in_sdd1_dma = SDD1_decompress_cached(buffer, in_ptr, d->TransferBytes,
+				                                     Memory.ROM, Memory.CalculatedSize);
 			}
-			in_sdd1_dma = buffer;
+			else
+				in_sdd1_dma = buffer;
 		}
 
 		Memory.FillRAM [0x4801] = 0;

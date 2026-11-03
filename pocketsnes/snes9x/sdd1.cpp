@@ -91,6 +91,7 @@
 #include "memmap.h"
 #include "ppu.h"
 #include "sdd1.h"
+#include "sdd1emu.h"
 #include "display.h"
 
 #ifdef __linux
@@ -116,6 +117,7 @@ void S9xSetSDD1MemoryMap (uint32 bank, uint32 value)
 
 void S9xResetSDD1 ()
 {
+    SDD1_cache_reset ();
     memset (&Memory.FillRAM [0x4800], 0, 4);
     for (int i = 0; i < 4; i++)
     {
