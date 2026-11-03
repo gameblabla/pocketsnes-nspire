@@ -373,9 +373,9 @@ static int file_exists(const char *path)
 static void test_config(void)
 {
     char global_path[600], rom[600], game_path[700];
-    snprintf(global_path, sizeof(global_path), "%s/zPocketSNES_saves/pocketsnes.cfg.tns", documents_dir);
+    snprintf(global_path, sizeof(global_path), "%s/zPocketSNES_files/pocketsnes.cfg.tns", documents_dir);
     snprintf(rom, sizeof(rom), "%s/Game (USA).sfc.tns", exe_dir);
-    snprintf(game_path, sizeof(game_path), "%s/zPocketSNES_saves/Game (USA).sfc.cfg.tns", documents_dir);
+    snprintf(game_path, sizeof(game_path), "%s/zPocketSNES_files/Game (USA).sfc.cfg.tns", documents_dir);
     remove(global_path);
 
     /* Defaults with no file. */
@@ -576,7 +576,7 @@ static void test_selfstore(void)
     for (size_t i = 0; i < sizeof(program); i++)
         program[i] = (unsigned char) (i * 7 + 1);
     snprintf(program_file, sizeof(program_file), "%s/_PocketSNES.tns", exe_dir);
-    snprintf(backup, sizeof(backup), "%s/zPocketSNES_saves/pocketsnes.cfg.tns", documents_dir);
+    snprintf(backup, sizeof(backup), "%s/zPocketSNES_files/pocketsnes.cfg.tns", documents_dir);
     FILE *f = fopen(program_file, "wb");
     fwrite(program, 1, sizeof(program), f);
     fclose(f);
@@ -607,7 +607,7 @@ static void test_selfstore(void)
     fwrite(program, 1, sizeof(program), f);
     fclose(f);
     config_load();
-    CHECK(cfg.show_fps == 2 && cfg.brightness == 9, "a new program file picks up the copy in zPocketSNES_saves");
+    CHECK(cfg.show_fps == 2 && cfg.brightness == 9, "a new program file picks up the copy in zPocketSNES_files");
     config_save();
     char *text = selfstore_read(program_file);
     CHECK(text && strstr(text, "brightness=9\n"), "... and stores it in itself at the next save");
@@ -698,12 +698,17 @@ static void test_file_list(void)
     CHECK(!paths_file_list_changed(), "a state written over (same name): no refresh");
     f = fopen(other, "wb");
     fclose(f);
-    CHECK(paths_file_list_changed(), "a new state: refresh");
+    CHECK(!paths_file_list_changed(), "a new state (only added): no refresh");
     remove(other);
     CHECK(!paths_file_list_changed(), "... gone again: the same names as at start");
     rename(state, other);
-    CHECK(paths_file_list_changed(), "a state renamed: refresh");
+    CHECK(paths_file_list_changed(), "a state renamed (its old name gone): refresh");
     rename(other, state);
+    CHECK(!paths_file_list_changed(), "... back: no refresh");
+    remove(state);
+    CHECK(paths_file_list_changed(), "a state deleted: refresh");
+    f = fopen(state, "wb");
+    fclose(f);
     paths_file_list_touched();
     CHECK(paths_file_list_changed(), "a name changed outside the saves folder: refresh");
     remove(state);
@@ -990,7 +995,7 @@ static void test_turbo(void)
     turbo_buttons(0, 0, 0, ab, 2);
 
     char global_path[600];
-    snprintf(global_path, sizeof(global_path), "%s/zPocketSNES_saves/pocketsnes.cfg.tns", documents_dir);
+    snprintf(global_path, sizeof(global_path), "%s/zPocketSNES_files/pocketsnes.cfg.tns", documents_dir);
     remove(global_path);
     config_load();
     CHECK(cfg.turbo == 0 && cfg.turbo_speed == TURBO_SPEED_DEFAULT && cfg.keys[ACTION_TURBO][0].key == KEY_EQUALS,

@@ -20,7 +20,7 @@ struct Entry
 {
     char name[256];
     int is_dir;
-    int saves;    /* save states in zPocketSNES_saves */
+    int saves;    /* save states in zPocketSNES_files */
     int rank;     /* place in the folder's game order, INT_MAX if not in it */
 };
 
@@ -87,7 +87,7 @@ static void add_entry(const char *name, int is_dir)
 }
 
 /* The order of the games in a folder, when it has been changed (Move): one
- * ROM file name per line in the folder's order file in zPocketSNES_saves
+ * ROM file name per line in the folder's order file in zPocketSNES_files
  * (paths_order_file). */
 static void read_order(void)
 {
@@ -133,7 +133,7 @@ static int nth_game(int n)
 }
 
 /* How many save states each game has: "<ROM name without .tns>.svNNN.tns"
- * in zPocketSNES_saves (states.cpp). */
+ * in zPocketSNES_files (states.cpp). */
 static void count_saves(void)
 {
     char path[800];
