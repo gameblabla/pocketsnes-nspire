@@ -148,13 +148,14 @@ static void reset_actions(int first, int last)
 static enum Step reset_buttons(void)
 {
     reset_actions(0, FIRST_HOTKEY - 1);
+    reset_actions(ACTION_TURBO, ACTION_TURBO);   /* on this page too */
     set_status("SNES buttons are back to the default keys.");
     return STEP_STAY;
 }
 
 static enum Step reset_hotkeys(void)
 {
-    reset_actions(FIRST_HOTKEY, NUM_ACTIONS - 1);
+    reset_actions(FIRST_HOTKEY, ACTION_DIMMER);
     set_status("Hotkeys are back to the defaults.");
     return STEP_STAY;
 }
@@ -243,6 +244,11 @@ static void own_keys_changed(void) { config_set_game_keys((int) own_keys); }
 
 static const char *const frameskip_types[] = { "automatic", "manual", "off" };
 static const char *const off_on[] = { "off", "on" };
+static const char *const turbo_speeds[TURBO_SPEEDS] =
+{
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
+    "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30"
+};
 static const char *const fps_modes[] = { "off", "on", "detailed" };
 static const char *const sram_write_modes[] = { "on exit", "automatic" };
 static const char *const scopes[] = { "all games", "this game" };
@@ -254,11 +260,18 @@ static_assert(sizeof(screen_sizes) / sizeof(screen_sizes[0]) == NUM_SCREEN_SIZES
 static char normal_cpu_speed[24] = "normal";
 static char tested_cpu_speed[32] = "highest tested";
 static char tested_result[24] = "no result";
+/* The raised speeds: this calculator's (config_raised_mhz). */
+static char raised_cpu_speeds[CPU_RAISED_SPEEDS][12] =
+{
+    "408 MHz", "420 MHz", "432 MHz", "444 MHz", "456 MHz", "468 MHz", "480 MHz", "492 MHz", "504 MHz"
+};
 static const char *const cpu_speeds[] =
 {
-    normal_cpu_speed, tested_cpu_speed, "408 MHz", "420 MHz", "432 MHz", "444 MHz", "456 MHz",
-    "468 MHz", "480 MHz", "492 MHz", "504 MHz"
+    normal_cpu_speed, tested_cpu_speed, raised_cpu_speeds[0], raised_cpu_speeds[1], raised_cpu_speeds[2],
+    raised_cpu_speeds[3], raised_cpu_speeds[4], raised_cpu_speeds[5], raised_cpu_speeds[6],
+    raised_cpu_speeds[7], raised_cpu_speeds[8]
 };
+static_assert(CPU_RAISED_SPEEDS == 9, "a raised_cpu_speeds name in cpu_speeds for each");
 static_assert(sizeof(cpu_speeds) / sizeof(cpu_speeds[0]) == NUM_CPU_SPEEDS, "a name for each CPU speed");
 
 static const char *const cpu_cores[] = { "ARM (fast)", "C" };
@@ -273,6 +286,9 @@ static_assert(sizeof(brightness_levels) / sizeof(brightness_levels[0]) == BRIGHT
 
 static void update_speed_names(void)
 {
+    for (int i = 0; i < CPU_RAISED_SPEEDS; i++)
+        if (config_raised_mhz(i))
+            snprintf(raised_cpu_speeds[i], sizeof(raised_cpu_speeds[i]), "%u MHz", (unsigned) config_raised_mhz(i));
     if (platform_cpu_normal_mhz())
         snprintf(normal_cpu_speed, sizeof(normal_cpu_speed), "normal (%u MHz)",
                  (unsigned) platform_cpu_normal_mhz());
@@ -318,7 +334,7 @@ static void update_speed_names(void)
            "No tearing (best): every frame shows whole. DMA: a little faster, can tear (original size).", \
            5, &cfg.screen_dma, screen_outputs, 1, ICON_NONE), \
     CHOICE("Brightness", \
-           "The screen while PocketSNES runs (CX II); yours comes back after. Keys: + and -.", \
+           "The screen while PocketSNES runs; yours comes back after. Keys: + and -.", \
            6, &cfg.brightness, brightness_levels, BRIGHTNESS_LEVELS, ICON_NONE), \
     CHOICE("CPU speed", \
            "Overclocks the CX II in games. Highest tested is what the overclock test passed.", \
@@ -396,9 +412,16 @@ static struct Option button_options[] =
     BINDING_OPTION(ACTION_R, 9),
     BINDING_OPTION(ACTION_START, 10),
     BINDING_OPTION(ACTION_SELECT, 11),
-    ACTION("Reset to defaults", "Puts the default keys back. The arrows always work as the d-pad.",
-           13, reset_buttons, ICON_RESTART),
-    BACK_OPTION(14),
+    CHOICE("Turbo",
+           "On: held A B X Y L R press again and again. Off: only while the Turbo key is held too.",
+           13, &cfg.turbo, off_on, 1, ICON_NONE),
+    CHOICE("Turbo speed",
+           "Presses per second, 1-30. 30 is the most a game can see: one frame down, one up.",
+           14, &cfg.turbo_speed, turbo_speeds, TURBO_SPEEDS - 1, ICON_NONE),
+    BINDING_OPTION(ACTION_TURBO, 15),
+    ACTION("Reset to defaults", "Puts the default keys back (= for Turbo). The arrows always work as the d-pad.",
+           17, reset_buttons, ICON_RESTART),
+    BACK_OPTION(18),
 };
 
 static struct Option hotkey_options[] =
@@ -866,6 +889,8 @@ static const char *short_action_name(int action)
         return "Brighter";
     if (action == ACTION_DIMMER)
         return "Dimmer";
+    if (action == ACTION_TURBO)
+        return "Turbo";
     return action_names[action];
 }
 

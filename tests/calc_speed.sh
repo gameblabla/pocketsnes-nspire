@@ -56,10 +56,10 @@ fi
 
 # Semihosting splits the command line at spaces: link the files under plain names
 mkdir -p "$BUILD/files"
-ln -sf "$(realpath "$ROM")" "$BUILD/files/rom"
+ln -sfn "$(realpath "$ROM")" "$BUILD/files/rom"
 state_arg=-
 if [ "$STATE" != - ]; then
-    ln -sf "$(realpath "$STATE")" "$BUILD/files/state"
+    ln -sfn "$(realpath "$STATE")" "$BUILD/files/state"
     state_arg=$BUILD/files/state
 fi
 OUT=$BUILD/files/model.out

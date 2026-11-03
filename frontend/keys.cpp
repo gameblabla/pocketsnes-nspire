@@ -55,3 +55,25 @@ const char *binding_name(struct Binding b, char *text, size_t size)
         snprintf(text, size, "%s", key);
     return text;
 }
+
+/* ---- Turbo (config.h) ---- */
+
+static uint32_t turbo_frame[8];   /* frames since that button went down */
+
+uint32_t turbo_buttons(uint32_t buttons, int on, uint32_t speed_index, const uint32_t *masks, int count)
+{
+    uint32_t speed = speed_index % TURBO_SPEEDS + 1;
+    for (int i = 0; i < count && i < 8; i++)
+    {
+        if (!on || !(buttons & masks[i]))
+        {
+            turbo_frame[i] = 0;
+            continue;
+        }
+        if ((turbo_frame[i] * speed / 30) & 1)
+            buttons &= ~masks[i];
+        if (++turbo_frame[i] >= 60)   /* 60 frames: whole presses at every speed */
+            turbo_frame[i] = 0;
+    }
+    return buttons;
+}

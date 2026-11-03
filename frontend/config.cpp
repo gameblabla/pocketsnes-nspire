@@ -13,7 +13,9 @@
  * Version 2 added the second key slots, key combinations, save_on_exit and
  * load_on_start (which replace auto_resume) and per-game files. Version 3
  * numbers the CPU speeds differently (enum CpuSpeed) and adds
- * highest_tested_mhz. */
+ * highest_tested_mhz. turbo, turbo_speed and key_turbo came later in version
+ * 3: files without them get turbo off, 15 a second, and the Turbo key on =
+ * where the file's keys leave = free. */
 #define CONFIG_FILE "pocketsnes.cfg.tns"
 #define CONFIG_VERSION 3
 
@@ -33,7 +35,7 @@ const char *const action_names[NUM_ACTIONS] =
     "A", "B", "X", "Y", "L", "R", "Start", "Select",
     "Menu", "Quit", "Fast forward", "Save state", "Load state",
     "Load newest", "Next slot", "Previous slot", "FPS counter", "Restart game",
-    "Brightness up", "Brightness down"
+    "Brightness up", "Brightness down", "Turbo key"
 };
 
 /* Short names used in the config file. */
@@ -42,20 +44,21 @@ static const char *const action_ids[NUM_ACTIONS] =
     "up", "down", "left", "right", "a", "b", "x", "y", "l", "r", "start", "select",
     "menu", "quit", "fast_forward", "save_state", "load_state",
     "load_newest", "next_slot", "previous_slot", "show_fps", "restart",
-    "brighter", "dimmer"
+    "brighter", "dimmer", "turbo"
 };
 
 /* The default layout (README.md): the one played with while PocketSNES was
  * developed. The d-pad on 8 4 6 5, A B X Y on shift del ctrl var (the
  * SNES's diamond), L R on tab menu, Start Select on cat frac; brightness on
- * + and -, as in gpSP (and the OS, with ctrl). */
+ * + and -, as in gpSP (and the OS, with ctrl); the Turbo key on =, under
+ * ctrl (gpSP's too). */
 static const uint8_t default_keys[NUM_ACTIONS] =
 {
     KEY_8, KEY_5, KEY_4, KEY_6,
     KEY_SHIFT, KEY_DEL, KEY_CTRL, KEY_VAR, KEY_TAB, KEY_MENU, KEY_CAT, KEY_FRAC,
     KEY_ESC, KEY_Q, KEY_F, KEY_S, KEY_L,
     KEY_N, KEY_RPAREN, KEY_LPAREN, 0, KEY_R,
-    KEY_PLUS, KEY_MINUS
+    KEY_PLUS, KEY_MINUS, KEY_EQUALS
 };
 
 static void config_path(char *path, size_t size)
@@ -77,7 +80,11 @@ void config_default_keys(void)
 
 static void default_settings_into(struct Config *c)
 {
-    c->frameskip_type = FRAMESKIP_OFF;
+    /* A CX II draws every frame at full speed. Anything slower (an older
+     * CX at 132 MHz takes about twice a frame's time to run and draw one)
+     * starts with automatic frameskip, so games keep their speed and draw
+     * as many frames as they can (issue #13). */
+    c->frameskip_type = platform_cpu_step_mhz() == 12 ? FRAMESKIP_OFF : FRAMESKIP_AUTO;
     c->frameskip_value = 5;
     c->show_fps = 1;
     c->auto_increment = 1;
@@ -94,6 +101,8 @@ static void default_settings_into(struct Config *c)
     c->cpu_speed = CPU_SPEED_NORMAL;
     c->cpu_core = CPU_CORE_ARM;
     c->brightness = 0;
+    c->turbo = 0;
+    c->turbo_speed = TURBO_SPEED_DEFAULT;
 }
 
 void config_reset_all(void)
@@ -126,6 +135,8 @@ static void copy_settings(struct Config *to, const struct Config *from)
     to->cpu_speed = from->cpu_speed;
     to->cpu_core = from->cpu_core;
     to->brightness = from->brightness;
+    to->turbo = from->turbo;
+    to->turbo_speed = from->turbo_speed;
 }
 
 static uint32_t clamp(long value, uint32_t max)
@@ -313,6 +324,10 @@ static void read_text(const char *text, struct Config *c, struct FileInfo *info)
             c->cpu_core = clamp(number, NUM_CPU_CORES - 1);
         else if (strcmp(line, "brightness") == 0)
             c->brightness = clamp(number, BRIGHTNESS_LEVELS);
+        else if (strcmp(line, "turbo") == 0)
+            c->turbo = clamp(number, 1);
+        else if (strcmp(line, "turbo_speed") == 0)
+            c->turbo_speed = clamp(number, TURBO_SPEEDS - 1);
         else if (strcmp(line, "auto_slot") == 0)
             c->auto_slot = clamp(number, 1);
         else if (strcmp(line, "quit_new_save") == 0)
@@ -359,7 +374,7 @@ void config_load(void)
     snprintf(global.rom_dir, sizeof(global.rom_dir), "%s", platform_exe_dir());
 
     /* The settings in the program file (selfstore.h), or else the copy in
-     * zPocketSNES_saves: a new version copied over the program has none in
+     * zPocketSNES_files: a new version copied over the program has none in
      * it yet, and picks them up from there. */
     const char *program = platform_program_path();
     char *text = program ? selfstore_read(program) : NULL;
@@ -404,6 +419,8 @@ static void write_settings(FILE *f, const struct Config *c)
     fprintf(f, "cpu_speed=%u\n", (unsigned) c->cpu_speed);
     fprintf(f, "cpu_core=%u\n", (unsigned) c->cpu_core);
     fprintf(f, "brightness=%u\n", (unsigned) c->brightness);
+    fprintf(f, "turbo=%u\n", (unsigned) c->turbo);
+    fprintf(f, "turbo_speed=%u\n", (unsigned) c->turbo_speed);
     fprintf(f, "auto_slot=%u\n", (unsigned) c->auto_slot);
     fprintf(f, "quit_new_save=%u\n", (unsigned) c->quit_new_save);
 }
@@ -480,7 +497,7 @@ void config_save(void)
 
 void config_open_game(const char *rom_path)
 {
-    /* "zPocketSNES_saves/<ROM name without its last extension>.cfg.tns",
+    /* "zPocketSNES_files/<ROM name without its last extension>.cfg.tns",
      * next to the game's saves (states.cpp). */
     const char *slash = strrchr(rom_path, '/');
     const char *file = slash ? slash + 1 : rom_path;
@@ -562,12 +579,42 @@ void config_set_game_keys(int own)
         memcpy(cfg.keys, global.keys, sizeof(cfg.keys));
 }
 
+uint32_t config_raised_mhz(int index)
+{
+    /* The older CX: 6 MHz times the multiplier, its memory bus a whole
+     * fraction of that, at most 66 MHz (its own; faster has corrupted
+     * flash memory for others). 198 and 264 MHz keep it at 66 (CPU / 3 and
+     * CPU / 4); 210 to 234 MHz are where Nover finds most CXs' limit, with
+     * the bus at 52 to 58 MHz. */
+    static const uint16_t cx_speeds[CPU_RAISED_SPEEDS] = { 180, 192, 198, 210, 222, 234, 240, 252, 264 };
+    if (index < 0 || index >= CPU_RAISED_SPEEDS)
+        return 0;
+    switch (platform_cpu_step_mhz())
+    {
+    case 12:
+        return 408 + 12 * (uint32_t) index;
+    case 6:
+        return cx_speeds[index];
+    default:
+        return 0;
+    }
+}
+
 int config_cpu_multiplier(uint32_t cpu_speed)
 {
+    uint32_t step = (uint32_t) platform_cpu_step_mhz();
+    if (!step)
+        return 0;
     if (cpu_speed == CPU_SPEED_TESTED)
-        return (int) (tested_mhz / 12);
+    {
+        /* A CX II's result means nothing on a CX and the other way round:
+         * their speeds don't overlap. */
+        if (tested_mhz < config_raised_mhz(0) || tested_mhz > config_raised_mhz(CPU_RAISED_SPEEDS - 1))
+            return 0;
+        return (int) (tested_mhz / step);
+    }
     if (cpu_speed >= CPU_SPEED_408 && cpu_speed < NUM_CPU_SPEEDS)
-        return 34 + (int) (cpu_speed - CPU_SPEED_408);
+        return (int) (config_raised_mhz((int) (cpu_speed - CPU_SPEED_408)) / step);
     return 0;
 }
 

@@ -8,7 +8,8 @@
 enum EmuExit
 {
     EMU_BACK_TO_BROWSER,
-    EMU_QUIT
+    EMU_QUIT,
+    EMU_CANCELLED       /* Q while its start state loaded: emu_drop_game, then the list */
 };
 
 int  emu_init(void);
@@ -27,6 +28,11 @@ void emu_start_from_slot(int slot);
 /* Writes the in-game save and the settings, and goes back to the settings
  * for all games. */
 void emu_close_game(void);
+/* A start cancelled with Q: back to the settings for all games, writing
+ * nothing (no in-game save, no settings). */
+void emu_drop_game(void);
+/* The last emu_load_game returned 0 because Q cancelled it. */
+int emu_load_cancelled(void);
 
 /* At startup: if PocketSNES didn't close normally while a game ran at a
  * raised CPU speed, returns the multiplier (and the game's path in

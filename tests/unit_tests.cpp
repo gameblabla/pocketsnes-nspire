@@ -23,6 +23,7 @@
 #include "platform.h"
 #include "rotate.h"
 #include "scale.h"
+#include "tickrate.h"
 
 static int failures, checks;
 
@@ -104,6 +105,14 @@ int platform_os_backlight(void)
 
 void platform_set_backlight(int)
 {
+}
+
+/* The pretend calculator's clock step: a CX II's 12 MHz, or an older CX's 6. */
+static int unit_cpu_step = 12;
+
+int platform_cpu_step_mhz(void)
+{
+    return unit_cpu_step;
 }
 
 /* ---- Tile drawing ---- */
@@ -364,9 +373,9 @@ static int file_exists(const char *path)
 static void test_config(void)
 {
     char global_path[600], rom[600], game_path[700];
-    snprintf(global_path, sizeof(global_path), "%s/zPocketSNES_saves/pocketsnes.cfg.tns", documents_dir);
+    snprintf(global_path, sizeof(global_path), "%s/zPocketSNES_files/pocketsnes.cfg.tns", documents_dir);
     snprintf(rom, sizeof(rom), "%s/Game (USA).sfc.tns", exe_dir);
-    snprintf(game_path, sizeof(game_path), "%s/zPocketSNES_saves/Game (USA).sfc.cfg.tns", documents_dir);
+    snprintf(game_path, sizeof(game_path), "%s/zPocketSNES_files/Game (USA).sfc.cfg.tns", documents_dir);
     remove(global_path);
 
     /* Defaults with no file. */
@@ -381,6 +390,15 @@ static void test_config(void)
     CHECK(cfg.keys[ACTION_LOAD_NEWEST][0].key == KEY_N && cfg.keys[ACTION_SHOW_FPS][0].key == 0,
           "defaults: Load newest on N, the FPS counter hotkey has no key");
     CHECK(cfg.frameskip_type == FRAMESKIP_OFF && cfg.show_fps == 1, "defaults: frameskip off, FPS counter on");
+    unit_cpu_step = 6;
+    config_reset_all();
+    CHECK(cfg.frameskip_type == FRAMESKIP_AUTO && cfg.frameskip_value == 5,
+          "defaults on an older CX: automatic frameskip, at most 5 frames in a row");
+    unit_cpu_step = 0;
+    config_reset_all();
+    CHECK(cfg.frameskip_type == FRAMESKIP_AUTO, "defaults where the clock is unknown: automatic frameskip");
+    unit_cpu_step = 12;
+    config_reset_all();
     CHECK(cfg.state_pictures == 1, "defaults: save state pictures on");
     CHECK(cfg.auto_slot == 0 && cfg.quit_new_save == 1 && cfg.brightness == 0,
           "defaults: no auto slot, a new save on quit, the calculator's own brightness");
@@ -518,6 +536,22 @@ static void test_config(void)
           "CPU speed reset in the game's own settings");
     CHECK(config_cpu_multiplier(CPU_SPEED_NORMAL) == 0 && config_cpu_multiplier(CPU_SPEED_480) == 40 &&
           config_cpu_multiplier(CPU_SPEED_432) == 36, "CPU speeds are 12 MHz times 36, 38, 40");
+
+    /* An older CX: 6 MHz steps, 180 to 264 MHz in the same places, and a
+     * CX II's test result means nothing there (nor the other way round). */
+    uint32_t was_tested = config_tested_mhz();
+    config_set_tested_mhz(432);
+    CHECK(config_cpu_multiplier(CPU_SPEED_TESTED) == 36, "highest tested 432 MHz: x36 on a CX II");
+    unit_cpu_step = 6;
+    CHECK(config_raised_mhz(0) == 180 && config_raised_mhz(CPU_RAISED_SPEEDS - 1) == 264 &&
+          config_cpu_multiplier(CPU_SPEED_408) == 30 && config_cpu_multiplier(CPU_SPEED_432) == 33,
+          "older CX: 180 MHz (x30) and 198 MHz (x33) in the 408 and 432 places");
+    CHECK(config_cpu_multiplier(CPU_SPEED_TESTED) == 0, "a CX II's tested 432 MHz means nothing on a CX");
+    config_set_tested_mhz(234);
+    CHECK(config_cpu_multiplier(CPU_SPEED_TESTED) == 39, "tested 234 MHz: x39 on a CX");
+    unit_cpu_step = 12;
+    CHECK(config_cpu_multiplier(CPU_SPEED_TESTED) == 0, "a CX's tested 234 MHz means nothing on a CX II");
+    config_set_tested_mhz(was_tested);
 }
 
 /* ---- Brightness levels ---- */
@@ -542,7 +576,7 @@ static void test_selfstore(void)
     for (size_t i = 0; i < sizeof(program); i++)
         program[i] = (unsigned char) (i * 7 + 1);
     snprintf(program_file, sizeof(program_file), "%s/_PocketSNES.tns", exe_dir);
-    snprintf(backup, sizeof(backup), "%s/zPocketSNES_saves/pocketsnes.cfg.tns", documents_dir);
+    snprintf(backup, sizeof(backup), "%s/zPocketSNES_files/pocketsnes.cfg.tns", documents_dir);
     FILE *f = fopen(program_file, "wb");
     fwrite(program, 1, sizeof(program), f);
     fclose(f);
@@ -573,7 +607,7 @@ static void test_selfstore(void)
     fwrite(program, 1, sizeof(program), f);
     fclose(f);
     config_load();
-    CHECK(cfg.show_fps == 2 && cfg.brightness == 9, "a new program file picks up the copy in zPocketSNES_saves");
+    CHECK(cfg.show_fps == 2 && cfg.brightness == 9, "a new program file picks up the copy in zPocketSNES_files");
     config_save();
     char *text = selfstore_read(program_file);
     CHECK(text && strstr(text, "brightness=9\n"), "... and stores it in itself at the next save");
@@ -646,6 +680,24 @@ static void test_romtypes(void)
 
 /* ---- Whether the OS's file list needs reading again (paths.h) ---- */
 
+/* ---- An older CX's backlight register (brightness.h) ---- */
+
+static void test_cx_brightness(void)
+{
+    CHECK(brightness_cx_register(0) == 0x1CE && brightness_cx_register(225) == 0x11A,
+          "CX: the CX II's brightest and darkest are 0x1ce and 0x11a");
+    for (int level = 1; level <= BRIGHTNESS_LEVELS; level++)
+    {
+        int reg = brightness_cx_register(brightness_value(level));
+        CHECK(reg >= 0x11A && reg <= 0x1CE, "CX: level %d in range (%x)", level, reg);
+        CHECK(brightness_level(brightness_from_cx_register(reg)) == level, "CX: level %d round trip", level);
+        if (level > 1)
+            CHECK(reg > brightness_cx_register(brightness_value(level - 1)), "CX: level %d brighter", level);
+    }
+    int normal = brightness_level(brightness_from_cx_register(0x174));
+    CHECK(normal == 5 || normal == 6, "CX: the OS's normal 0x174 is mid-range (level %d)", normal);
+}
+
 static void test_file_list(void)
 {
     char state[800], other[800];
@@ -664,12 +716,17 @@ static void test_file_list(void)
     CHECK(!paths_file_list_changed(), "a state written over (same name): no refresh");
     f = fopen(other, "wb");
     fclose(f);
-    CHECK(paths_file_list_changed(), "a new state: refresh");
+    CHECK(!paths_file_list_changed(), "a new state (only added): no refresh");
     remove(other);
     CHECK(!paths_file_list_changed(), "... gone again: the same names as at start");
     rename(state, other);
-    CHECK(paths_file_list_changed(), "a state renamed: refresh");
+    CHECK(paths_file_list_changed(), "a state renamed (its old name gone): refresh");
     rename(other, state);
+    CHECK(!paths_file_list_changed(), "... back: no refresh");
+    remove(state);
+    CHECK(paths_file_list_changed(), "a state deleted: refresh");
+    f = fopen(state, "wb");
+    fclose(f);
     paths_file_list_touched();
     CHECK(paths_file_list_changed(), "a name changed outside the saves folder: refresh");
     remove(state);
@@ -701,6 +758,133 @@ static void test_brightness(void)
     CHECK(ok, "the level of each level's value is that level");
     CHECK(brightness_level(112) == 6 && brightness_level(255) == 1 && brightness_level(-5) == 10,
           "the nearest level of other values (the calculator's own)");
+}
+
+/* ---- The timer's speed against the real-time clock (tickrate.h) ---- */
+
+/* A pretend calculator: 'now' is real time in 32768ths of a second, its
+ * timer counts 'rate' times a second and its real-time clock reads
+ * now / 32768 + clock_offset. */
+static uint64_t tr_now;
+static uint32_t tr_rate, tr_offset, tr_last, tr_biggest_step;
+static int tr_backwards;
+
+static uint32_t tr_read(void)
+{
+    uint32_t ticks = tick_rate_ticks((uint32_t) (tr_now * tr_rate / 32768),
+                                     (uint32_t) (tr_now / 32768) + tr_offset);
+    if ((int32_t) (ticks - tr_last) < 0)
+        tr_backwards = 1;
+    else if (ticks - tr_last > tr_biggest_step)
+        tr_biggest_step = ticks - tr_last;
+    tr_last = ticks;
+    return ticks;
+}
+
+static void tr_start(uint32_t rate)
+{
+    tick_rate_start(32768);
+    tr_now = 5 * 32768 + 1234;   /* not on a second */
+    tr_rate = rate;
+    tr_offset = 1000;
+    tr_backwards = 0;
+    tr_last = (uint32_t) (tr_now * rate / 32768);
+    tr_biggest_step = 0;
+}
+
+/* Readings every 'step' 32768ths of a second for 'seconds' seconds. */
+static void tr_run(uint32_t step, uint32_t seconds)
+{
+    for (uint64_t end = tr_now + (uint64_t) seconds * 32768; tr_now < end; tr_now += step)
+        tr_read();
+}
+
+/* The ticks that go by in 'seconds' seconds of real time. */
+static uint32_t tr_ticks_in(uint32_t step, uint32_t seconds)
+{
+    uint32_t from = tr_read();
+    tr_run(step, seconds);
+    return tr_read() - from;
+}
+
+static int tr_near(uint32_t ticks, uint32_t expected, uint32_t per_mille)
+{
+    uint32_t diff = ticks > expected ? ticks - expected : expected - ticks;
+    return (uint64_t) diff * 1000 <= (uint64_t) expected * per_mille;
+}
+
+/* A report of a timer left alone, measured within 0.1% of 'hz'. */
+static int tr_report_near(const char *report, uint32_t hz)
+{
+    unsigned used, measured;
+    return sscanf(report, "timer: %u ticks/s (%u by the real-time clock)", &used, &measured) == 2 &&
+           used == hz && tr_near(measured, hz, 1);
+}
+
+static void test_tick_rate(void)
+{
+    char report[160];
+
+    /* The CX II: right already, left alone. */
+    tr_start(32768);
+    tr_run(300, 6);
+    tick_rate_report(report, sizeof(report));
+    CHECK(tick_rate_checked() && tr_report_near(report, 32768),
+          "a timer at 32768 a second is checked within 6 seconds and left alone (%s)", report);
+    CHECK(tr_read() == (uint32_t) (tr_now * 32768 / 32768), "its readings come back as they are");
+
+    /* The report in #13: a timer at a quarter of the speed. */
+    tr_start(8192);
+    tr_run(300, 6);
+    tick_rate_report(report, sizeof(report));
+    CHECK(tick_rate_checked() && strstr(report, "by the real-time clock, not 32768; corrected"),
+          "a timer at 8192 a second is found within 6 seconds (%s)", report);
+    uint32_t ticks = tr_ticks_in(300, 10);
+    CHECK(tr_near(ticks, 10 * 32768, 2), "after that, 10 seconds are 327680 ticks (%u)", (unsigned) ticks);
+    CHECK(!tr_backwards && tr_biggest_step <= 310, "the ticks never jumped or went back (biggest step %u)",
+          (unsigned) tr_biggest_step);
+
+    tr_start(40000);
+    tr_run(300, 6);
+    ticks = tr_ticks_in(300, 10);
+    CHECK(tick_rate_checked() && tr_near(ticks, 10 * 32768, 2) && !tr_backwards,
+          "a timer that runs fast (40000 a second) is corrected too (%u)", (unsigned) ticks);
+
+    tr_start(33000);
+    tr_run(300, 6);
+    tick_rate_report(report, sizeof(report));
+    CHECK(tick_rate_checked() && !strstr(report, "corrected"), "one 0.7%% off is left alone (%s)", report);
+
+    /* Readings with long gaps, as when a ROM or a state loads: the clock's
+     * changes during a gap don't time it well enough and aren't used. */
+    tr_start(8192);
+    for (int i = 0; i < 12; i++)
+    {
+        tr_run(300, 1);
+        tr_now += 32768 * 13 / 10;   /* 1.3 seconds without a reading */
+    }
+    ticks = tr_ticks_in(300, 10);
+    CHECK(tick_rate_checked() && tr_near(ticks, 10 * 32768, 2),
+          "readings with 1.3 second gaps in them still find the speed (%u)", (unsigned) ticks);
+
+    /* The real-time clock set while it is being timed. */
+    tr_start(32768);
+    tr_run(300, 3);
+    tr_offset += 3600;
+    tr_run(300, 1);
+    tr_offset -= 2;
+    tr_run(300, 8);
+    tick_rate_report(report, sizeof(report));
+    CHECK(tick_rate_checked() && tr_report_near(report, 32768),
+          "the clock set forward and back meanwhile doesn't throw it (%s)", report);
+
+    /* Readings too far apart to time anything: left as they are. */
+    tr_start(8192);
+    tr_run(32768 * 3 / 2, 30);
+    tick_rate_report(report, sizeof(report));
+    CHECK(!tick_rate_checked() && strstr(report, "not checked against the real-time clock yet"),
+          "readings 1.5 seconds apart don't time it (%s)", report);
+    CHECK(tr_read() == (uint32_t) (tr_now * 8192 / 32768), "... and its readings come back as they are");
 }
 
 /* ---- Key bindings ---- */
@@ -770,6 +954,96 @@ bool8 S9xReadSuperScopePosition (int &, int &, uint32 &) { return FALSE; }
 void S9xAutoSaveSRAM (void) {}
 }
 
+/* Turbo: the press pattern, a tap, every speed's presses per second,
+ * buttons on their own phases; the settings files keep turbo, its speed and
+ * the Turbo key; older files get it off, 15 a second, and = where free. */
+static int turbo_presses(uint32_t speed_index, int frames)
+{
+    static const uint32_t a[1] = { 0x80 };
+    int presses = 0;
+    uint32_t last = 0;
+    turbo_buttons(0, 1, speed_index, a, 1);
+    for (int f = 0; f < frames; f++)
+    {
+        uint32_t b = turbo_buttons(0x80, 1, speed_index, a, 1);
+        presses += (b & 0x80) && !(last & 0x80);
+        last = b;
+    }
+    return presses;
+}
+
+static void turbo_pattern(uint32_t speed_index, int frames, char *out)
+{
+    static const uint32_t a[1] = { 0x80 };
+    turbo_buttons(0, 1, speed_index, a, 1);
+    for (int f = 0; f < frames; f++)
+        out[f] = (turbo_buttons(0x80, 1, speed_index, a, 1) & 0x80) ? '1' : '0';
+    out[frames] = 0;
+}
+
+static void test_turbo(void)
+{
+    static const uint32_t ab[2] = { 0x80, 0x8000 };
+    char got[64];
+
+    turbo_pattern(29, 8, got);
+    CHECK(strcmp(got, "10101010") == 0, "turbo 30 a second: %s", got);
+    turbo_pattern(14, 8, got);
+    CHECK(strcmp(got, "11001100") == 0, "turbo 15 a second: %s", got);
+    turbo_pattern(9, 12, got);
+    CHECK(strcmp(got, "111000111000") == 0, "turbo 10 a second: %s", got);
+    int every = 1;
+    for (uint32_t speed = 0; speed < TURBO_SPEEDS; speed++)
+        if (turbo_presses(speed, 600) != (int) (speed + 1) * 10)
+        {
+            CHECK(0, "turbo speed %u: %d presses in 10 s", speed + 1, turbo_presses(speed, 600));
+            every = 0;
+        }
+    CHECK(every, "turbo: every speed 1-30 gives that many presses a second");
+    turbo_buttons(0, 1, 29, ab, 2);
+    CHECK(turbo_buttons(0x80, 1, 29, ab, 2) == 0x80 && turbo_buttons(0, 1, 29, ab, 2) == 0, "turbo: a tap is a press");
+    CHECK(turbo_buttons(0x8080, 0, 29, ab, 2) == 0x8080 && turbo_buttons(0x8080, 0, 29, ab, 2) == 0x8080,
+          "turbo off: held stays held");
+    turbo_buttons(0, 1, 29, ab, 2);
+    CHECK(turbo_buttons(0x0080, 1, 29, ab, 2) == 0x0080, "turbo: A down");
+    CHECK(turbo_buttons(0x8080, 1, 29, ab, 2) == 0x8000, "turbo: B starts down as A goes up");
+    CHECK(turbo_buttons(0x8080, 1, 29, ab, 2) == 0x0080, "turbo: each on its own phase");
+    CHECK(turbo_buttons(0x0F00, 1, 29, ab, 2) == 0x0F00 && turbo_buttons(0x0F00, 1, 29, ab, 2) == 0x0F00,
+          "turbo: buttons not in the list never repeat");
+    turbo_buttons(0, 0, 0, ab, 2);
+
+    char global_path[600];
+    snprintf(global_path, sizeof(global_path), "%s/zPocketSNES_files/pocketsnes.cfg.tns", documents_dir);
+    remove(global_path);
+    config_load();
+    CHECK(cfg.turbo == 0 && cfg.turbo_speed == TURBO_SPEED_DEFAULT && cfg.keys[ACTION_TURBO][0].key == KEY_EQUALS,
+          "turbo defaults: off, 15 a second, the Turbo key on =");
+    cfg.turbo = 1;
+    cfg.turbo_speed = 29;
+    cfg.keys[ACTION_TURBO][1].with = KEY_SHIFT;
+    cfg.keys[ACTION_TURBO][1].key = KEY_7;
+    config_save();
+    CHECK(file_has_line(global_path, "turbo=1") && file_has_line(global_path, "turbo_speed=29") &&
+          file_has_line(global_path, "key_turbo=72") && file_has_line(global_path, "key_turbo_2=121+56"),
+          "turbo written");
+    config_load();
+    CHECK(cfg.turbo == 1 && cfg.turbo_speed == 29 && cfg.keys[ACTION_TURBO][1].key == KEY_7 &&
+          cfg.keys[ACTION_TURBO][1].with == KEY_SHIFT, "turbo read back");
+    write_file(global_path, "config_version=3\nbrightness=2\n");
+    config_load();
+    CHECK(cfg.turbo == 0 && cfg.turbo_speed == TURBO_SPEED_DEFAULT && cfg.keys[ACTION_TURBO][0].key == KEY_EQUALS,
+          "a file from before turbo: off, 15, the Turbo key on =");
+    write_file(global_path, "config_version=3\nkey_l=72\nkey_l_2=0\n");
+    config_load();
+    CHECK(cfg.keys[ACTION_L][0].key == KEY_EQUALS && !cfg.keys[ACTION_TURBO][0].key && !cfg.keys[ACTION_TURBO][1].key,
+          "a file from before turbo with = on L: no Turbo key");
+    write_file(global_path, "config_version=3\nturbo=5\nturbo_speed=99\n");
+    config_load();
+    CHECK(cfg.turbo == 1 && cfg.turbo_speed == TURBO_SPEEDS - 1, "turbo values clamped");
+    remove(global_path);
+    config_load();
+}
+
 int main(void)
 {
     char dir_template[] = "/tmp/pocketsnes-unit-XXXXXX";
@@ -788,11 +1062,14 @@ int main(void)
     test_scaling();
     test_config();
     test_brightness();
+    test_tick_rate();
     test_selfstore();
     test_reset_all();
     test_romtypes();
     test_file_list();
+    test_cx_brightness();
     test_bindings();
+    test_turbo();
 
     char command[700];
     snprintf(command, sizeof(command), "rm -rf '%s'", dir);

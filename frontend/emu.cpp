@@ -506,12 +506,15 @@ bool8 S9xDeinitUpdate (int, int, bool8)
         clear_screens_later();
     }
 
-    /* Counts the time between drawn frames, starting from the first one. */
-    uint32_t elapsed = start - fps_start;
+    /* Counts the time between drawn frames, starting from the first one, in
+     * real time even if the timer doesn't run (platform.h): then games aren't
+     * held back, and the counter shows how fast they go. */
+    uint32_t real = platform_real_ticks();
+    uint32_t elapsed = real - fps_start;
     if (!fps_started)
     {
         fps_started = true;
-        fps_start = start;
+        fps_start = real;
         fps_frames = 0;
     }
     else
@@ -520,8 +523,14 @@ bool8 S9xDeinitUpdate (int, int, bool8)
         if (elapsed >= platform_tick_hz() / 2)
         {
             fps_shown = (uint32_t) (((uint64_t) fps_frames * platform_tick_hz() + elapsed / 2) / elapsed);
-            fps_start = start;
+            fps_start = real;
             fps_frames = 0;
+            if (cfg.show_fps)
+            {
+                char line[32];
+                snprintf(line, sizeof(line), "fps %u/%u", (unsigned) fps_shown, (unsigned) fps_expected());
+                platform_log(line);   /* for the PC tests */
+            }
         }
     }
 
@@ -706,7 +715,9 @@ static void read_joypad(void)
     if (held(ACTION_R)) buttons |= SNES_TR_MASK;
     if (held(ACTION_START)) buttons |= SNES_START_MASK;
     if (held(ACTION_SELECT)) buttons |= SNES_SELECT_MASK;
-    joypad = buttons;
+    static const uint32_t turbo_masks[6] =
+        { SNES_A_MASK, SNES_B_MASK, SNES_X_MASK, SNES_Y_MASK, SNES_TL_MASK, SNES_TR_MASK };
+    joypad = turbo_buttons(buttons, cfg.turbo || held(ACTION_TURBO), cfg.turbo_speed, turbo_masks, 6);
 }
 
 static void change_slot(int delta)
@@ -753,7 +764,7 @@ static void read_hotkeys(void)
         if (level)
             snprintf(text, sizeof(text), "Brightness %d/%d", level, BRIGHTNESS_LEVELS);
         else
-            snprintf(text, sizeof(text), "Brightness: CX II only");
+            snprintf(text, sizeof(text), "Brightness: not on this calculator");
         emu_show_message(text);
     }
 }
@@ -971,9 +982,30 @@ static bool looks_like_rom(const char *path)
     return false;
 }
 
+/* Q on the loading screen: a new press since the load started (a Q held
+ * from before doesn't count). Read every 128 KB of the ROM (romzip.h) and
+ * before and after the state a game starts from. */
+static int load_cancelled;
+
+static int poll_cancel(void)
+{
+    if (!load_cancelled)
+    {
+        platform_poll_keys();
+        load_cancelled = platform_key_pressed(KEY_Q);
+    }
+    return load_cancelled;
+}
+
+int emu_load_cancelled(void)
+{
+    return load_cancelled;
+}
+
 int emu_load_game(const char *path)
 {
     snprintf(rom_path, sizeof(rom_path), "%s", path);
+    load_cancelled = 0;
     if (!looks_like_rom(rom_path))
         return 0;
     load_error = "Is it a SNES ROM? It may also be too big for the memory free.";
@@ -984,10 +1016,26 @@ int emu_load_game(const char *path)
     draw_icon(ICON_CART, 44, 104, COLOR_SELECT_EDGE);
     draw_string(FONT_MEDIUM, "Loading", 64, 100, COLOR_TEXT);
     draw_string_fit(FONT_SMALL, S9xBasename(rom_path), 64, 120, 216, COLOR_TEXT_DIM);
+    {
+        /* [Q] Cancel, under the panel in the middle */
+        int w = ui_key_width("Q") + 4 + text_width(FONT_SMALL, "Cancel");
+        int x = 160 - w / 2;
+        x += ui_key("Q", x, 152, false) + 4;
+        draw_string(FONT_SMALL, "Cancel", x, 153, COLOR_TEXT_DIM);
+    }
     platform_present();
 
-    if (!Memory.LoadROM (rom_path))
+    platform_poll_keys();   /* Q counts from here */
+    rom_read_cancelled = 0;
+    rom_read_poll = poll_cancel;
+    bool8 loaded = Memory.LoadROM (rom_path);
+    rom_read_poll = NULL;
+    if (!loaded || poll_cancel())
+    {
+        if (load_cancelled)
+            load_error = "Cancelled.";
         return 0;
+    }
     S9xReset ();
 
     states_open_game(rom_path);
@@ -1009,6 +1057,12 @@ void emu_close_game(void)
     perf_log_flush();
     write_sram();
     config_save();
+    config_close_game();
+}
+
+void emu_drop_game(void)
+{
+    sram_dirty = false;
     config_close_game();
 }
 
@@ -1171,7 +1225,7 @@ void emu_speed_test(int close_after_seconds)
     /* At the speed the game runs at (the menu runs at normal speed). */
     game_speed();
     uint32_t mhz = platform_cpu_mhz();
-    char clock_report[400];
+    char clock_report[560];
     platform_clock_report(clock_report, sizeof(clock_report));
     {
         size_t len = strlen(clock_report);
@@ -1179,6 +1233,12 @@ void emu_speed_test(int close_after_seconds)
         {
             strcpy(clock_report + len, "\n");
             platform_code_report(clock_report + len + 1, sizeof(clock_report) - len - 1);
+        }
+        len = strlen(clock_report);
+        if (len + 2 < sizeof(clock_report))
+        {
+            strcpy(clock_report + len, "\n");
+            platform_timer_report(clock_report + len + 1, sizeof(clock_report) - len - 1);
         }
     }
 
@@ -1469,10 +1529,10 @@ void emu_game_check_end(void)
 
 static bool clock_marker_written;
 
-/* Within 2% of 12 MHz times the multiplier. */
+/* Within 2% of the multiplier times the clock step (12 or 6 MHz). */
 static bool clock_reached(uint32_t mhz, int multiplier)
 {
-    uint32_t want = (uint32_t) multiplier * 12;
+    uint32_t want = (uint32_t) multiplier * (uint32_t) platform_cpu_step_mhz();
     return mhz * 50 >= want * 49 && mhz * 50 <= want * 51;
 }
 
@@ -1637,18 +1697,26 @@ enum EmuExit emu_run(int may_load_state)
     {
         int slot = start_slot;
         start_slot = 0;
+        if (poll_cancel())
+            return EMU_CANCELLED;
         if (emu_load_state(slot) == 1)
             show_slot_message("Started from %s", slot);
         else
             show_slot_message("Couldn't load %s", slot);
+        if (poll_cancel())
+            return EMU_CANCELLED;
     }
     else if (may_load_state && cfg.load_on_start && states_newest())
     {
         int slot = states_newest();
+        if (poll_cancel())
+            return EMU_CANCELLED;
         if (emu_load_state(slot) == 1)
             show_slot_message("Resumed from %s", slot);
         else
             show_slot_message("Couldn't resume from %s", slot);
+        if (poll_cancel())
+            return EMU_CANCELLED;
     }
 
     gui_wait_release();

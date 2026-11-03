@@ -1,0 +1,19 @@
+# The game list, on the game: 1 starts it; Q while it loads (the load reads
+# the keys every 128 KB) goes back to the list, on that game; 1 again starts it, and Q
+# (the Quit hotkey) leaves it, saving a state. (The wait 6 puts Q past the list
+# waiting for 1 to go up and past the load's first poll, which counts what's
+# down then as held from before: Q comes at the 3rd of the 2 MB ROM's 16.)
+wait 10
+press down
+wait 5
+shot list.png
+press 1
+wait 6
+press Q 1
+wait 30
+shot cancelled.png
+press 1
+wait 100
+shot game.png
+press Q
+wait 10

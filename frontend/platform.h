@@ -110,6 +110,13 @@ void platform_shutdown(void);
 uint16_t *platform_screen(void);
 int platform_screen_index(void);
 void platform_present(void);
+/* After a menu frame (gui_present): waits until the LCD isn't reading the
+ * buffer the next frame is drawn into. Only an older CX needs it: its LCD
+ * reads the drawing buffers themselves, and a menu redraws its whole screen
+ * (background first, then text) each frame, so drawing into the one still
+ * shown made the menus flash. At most about a refresh; game frames don't
+ * wait (a tear at worst). */
+void platform_present_wait_shown(void);
 
 /* On the calculator the frame before may still be being copied out of the
  * buffer in the background. platform_screen() waits for that to finish; the
@@ -171,12 +178,16 @@ uint32_t platform_cpu_mhz(void);
 
 /* The CPU clock of the CX II is 12 MHz times a multiplier (33: 396 MHz, the
  * calculator's own on battery; 24: 288 MHz on USB). Raising it speeds up
- * memory too, and too high a value freezes the calculator.
+ * memory too, and too high a value freezes the calculator. An older CX's
+ * is 6 MHz times one (22: 132 MHz), with its memory bus kept at most at
+ * 66 MHz, its own. platform_cpu_step_mhz() says which (12 or 6), 0 where
+ * the clock can't be set.
  * platform_set_cpu_multiplier(0) puts back the calculator's own setting,
  * which platform_shutdown() also does. Returns the clock afterwards in MHz,
  * measured after a change (the PC build reports what was asked for), or 0
  * where it can't be set. */
 uint32_t platform_set_cpu_multiplier(int multiplier);
+int platform_cpu_step_mhz(void);
 /* The calculator's own clock in MHz (0 if not known), for the menu. */
 uint32_t platform_cpu_normal_mhz(void);
 /* The multiplier in the clock register now, or 0 if it can't be read. */
@@ -197,10 +208,11 @@ int platform_test_glitch(void);
  * --program FILE). */
 const char *platform_program_path(void);
 
-/* The screen's backlight on a CX II, in the value the OS writes to its
- * register: 0 (brightest) to 225 (darkest). platform_os_backlight() is the
+/* The screen's backlight, in the value the CX II's OS writes to its
+ * register: 0 (brightest) to 225 (darkest); an older CX's register is
+ * converted to and from that (brightness.h). platform_os_backlight() is the
  * value at startup (the calculator's own brightness), or -1 where it can't
- * be changed (not a CX II). platform_set_backlight(-1) puts the calculator's
+ * be changed (a register reading out of its range). platform_set_backlight(-1) puts the calculator's
  * own back, as platform_shutdown() does. */
 int platform_os_backlight(void);
 void platform_set_backlight(int value);
@@ -227,10 +239,18 @@ int  platform_key_pressed(int key);   /* went down at the last poll */
 int  platform_any_key_down(void);
 int  platform_first_key_down(void);   /* lowest held key number, or 0 */
 
-/* Free-running tick counter; platform_tick_hz() ticks per second. */
+/* Free-running tick counter; platform_tick_hz() ticks per second. Its timer
+ * is checked against the real-time clock and corrected if it runs at another
+ * speed (tickrate.h). If it doesn't run at all, the ticks only move when
+ * waiting, so games aren't held back (and run as fast as they can). */
 uint32_t platform_ticks(void);
 uint32_t platform_tick_hz(void);
 void platform_wait_until(uint32_t tick);
+/* Like platform_ticks(), but always moving with real time: with a timer that
+ * doesn't run, the real-time clock's whole seconds. For the FPS counter. */
+uint32_t platform_real_ticks(void);
+/* A line about the timer for the speed test results. */
+void platform_timer_report(char *text, size_t size);
 
 /* Directory holding the program, for the config file. No trailing slash. */
 const char *platform_exe_dir(void);

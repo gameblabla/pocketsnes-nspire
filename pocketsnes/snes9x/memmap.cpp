@@ -926,8 +926,11 @@ uint32 CMemory::FileLoader (uint8* buffer, const char* filename, int32 maxsize)
 			}
 			else
 			{
-				FileSize = fread (ptr, 1, maxsize + 0x200 - (ptr - ROM), ROMFile);
+				/* in pieces: the loading screen's Q can stop it (romzip.h) */
+				FileSize = rom_read_pieces (ptr, maxsize + 0x200 - (ptr - ROM), ROMFile);
 				fclose (ROMFile);
+				if (rom_read_cancelled)
+					return (0);
 			}
 			
 			int calc_size = FileSize & ~0x1FFF; // round to the lower 0x2000

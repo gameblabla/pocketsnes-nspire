@@ -1,4 +1,4 @@
-/* Screen brightness on the CX II: Graphics & speed > Brightness, and the
+/* Screen brightness on the CX II and the older CX: Graphics & speed > Brightness, and the
  * Brightness up/down hotkeys, as lr-gpsp-nspire has them. cfg.brightness is
  * 0 for the calculator's own brightness (PocketSNES leaves the backlight
  * alone), or a level from 1 (dimmest) to BRIGHTNESS_LEVELS (brightest). The
@@ -20,5 +20,10 @@ int brightness_step(int delta);
 /* The backlight register value for a level, and the level nearest a value. */
 int brightness_value(int level);
 int brightness_level(int value);
+
+/* An older CX's register (0x900F0020: 0x11A dimmest to 0x1CE brightest) for
+ * a value in the CX II's units above (0 brightest, 225 darkest), and back. */
+int brightness_cx_register(int value);
+int brightness_from_cx_register(int reg);
 
 #endif

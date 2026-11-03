@@ -31,6 +31,7 @@ enum Action
     ACTION_RESTART,
     ACTION_BRIGHTER,
     ACTION_DIMMER,
+    ACTION_TURBO,       /* held with a button: that button repeats (turbo) */
     NUM_ACTIONS
 };
 
@@ -59,7 +60,9 @@ enum FrameskipType
 #define MAX_FRAMESKIP_VALUE 9
 
 /* CPU speeds (cfg.cpu_speed): the calculator's own, the highest one the
- * overclock test passed, then raised ones in steps of 12 MHz. */
+ * overclock test passed, then CPU_RAISED_SPEEDS raised ones. The names are
+ * the CX II's (408 to 504 MHz in steps of 12); an older CX has its own
+ * speeds in the same places (config_raised_mhz). */
 enum CpuSpeed
 {
     CPU_SPEED_NORMAL,
@@ -98,9 +101,28 @@ enum ScreenSize
     NUM_SCREEN_SIZES
 };
 
-/* The multiplier of 12 MHz for a raised speed, 0 for the normal one (and for
- * "highest tested" before the overclock test has passed a speed). */
+/* The clock multiplier for a raised speed (MHz / platform_cpu_step_mhz()),
+ * 0 for the normal one, for "highest tested" before the overclock test has
+ * passed a speed (or when its result is another model's) and where the
+ * clock can't be set. */
 int config_cpu_multiplier(uint32_t cpu_speed);
+
+/* Turbo: with 'on' (cfg.turbo, or the Turbo key held), each held button in
+ * masks[0..count-1] (at most 8) is pressed and released over and over,
+ * speed_index + 1 (1-30) times a second of the game: frame n of the hold (the
+ * game's frames, so fast forward doesn't change what the game sees) is down
+ * while n * speed / 30 is even. The first frame is down, so a tap is an
+ * ordinary press; 30 a second is a frame down, a frame up. (keys.cpp) */
+#define TURBO_SPEEDS 30
+#define TURBO_SPEED_DEFAULT 14   /* 15 a second */
+uint32_t turbo_buttons(uint32_t buttons, int on, uint32_t speed_index, const uint32_t *masks, int count);
+
+#define CPU_RAISED_SPEEDS (NUM_CPU_SPEEDS - CPU_SPEED_408)
+/* The index'th raised speed in MHz (0 .. CPU_RAISED_SPEEDS - 1) on this
+ * calculator: 408 to 504 MHz on a CX II, 180 to 264 MHz on an older CX
+ * (none of them runs its memory faster than its own 66 MHz), 0 where the
+ * clock can't be set. */
+uint32_t config_raised_mhz(int index);
 
 /* The highest speed in MHz the overclock test passed on this calculator, 0
  * if none. Kept in the settings for all games; set it with
@@ -128,6 +150,8 @@ struct Config
     uint32_t cpu_speed;         /* enum CpuSpeed */
     uint32_t cpu_core;          /* enum CpuCore */
     uint32_t brightness;        /* 0 the calculator's own, 1-10 (brightness.h) */
+    uint32_t turbo;             /* held A B X Y L R repeat (turbo_buttons) */
+    uint32_t turbo_speed;       /* presses a second - 1 (0-29) */
     /* Keys: for all games, or a game's own (config_set_game_keys). */
     struct Binding keys[NUM_ACTIONS][KEY_SLOTS];
     /* For all games only. */
@@ -146,14 +170,14 @@ void config_default_keys(void);
 void config_reset_all(void);
 
 /* Loads the settings for all games from the program file, or else
- * pocketsnes.cfg.tns in zPocketSNES_saves (missing settings get their
+ * pocketsnes.cfg.tns in zPocketSNES_files (missing settings get their
  * defaults). */
 void config_load(void);
 /* There was no settings file to load: PocketSNES runs for the first time. */
 int  config_first_start(void);
 /* Writes the settings for all games to pocketsnes.cfg.tns, and the open
  * game's own settings and keys to its own file, "<ROM name>.cfg.tns" in
- * zPocketSNES_saves (removed when it has neither). */
+ * zPocketSNES_files (removed when it has neither). */
 void config_save(void);
 
 /* Uses a game's own settings and keys where it has them (the menu and the

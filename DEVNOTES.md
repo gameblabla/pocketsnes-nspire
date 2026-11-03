@@ -84,8 +84,8 @@ README.md → Building has the full list.
 
 ### Test (before every calculator build)
 
-    tests/run.sh          # 103 checks: scripted runs of the PC build, screenshots in tests/out/
-    make unit-tests       # 102 checks: tile drawing, frame turning, settings, program-file settings, ndless.cfg.tns, file list
+    tests/run.sh          # 112 checks: scripted runs of the PC build, screenshots in tests/out/
+    make unit-tests       # 113 checks: tile drawing, frame turning, settings, program-file settings, ndless.cfg.tns, file list, timer speed
     tests/asm/run.sh      # ARM core vs C core under qemu-arm: every opcode, 12 games x 3600 frames, replays
     tests/render_compare.sh   # pixel compare against ./pocketsnes-host-ref (old renderer)
 
@@ -166,7 +166,7 @@ Since 2026-10-11 (3eb26f2; the z since 19a516b):
         _PocketSNES.tns            the program, first in the folder; settings for all games inside it
         Super Mario World (USA).sfc.tns
         Game.zip.tns               zipped ROMs work too
-      zPocketSNES_saves/           every game's saves, wherever its ROM is; last in My Documents
+      zPocketSNES_files/           every game's saves, wherever its ROM is; last in My Documents
         <rom>.sv001.tns … .sv999.tns, <rom>.svauto.tns    save states
         <rom>.srm.gz.tns / <rom>.srm.tns                  in-game saves
         <rom>.cfg.tns                                     a game's own settings and keys
@@ -207,8 +207,10 @@ Screen and speed:
   ruled out because it tears. Earlier, tearing was accepted for speed; that
   was reversed on 2026-10-05.
 * **Fast flip is the only CPU output**; the compatible and mirrored modes
-  were removed. `lcd_blit` stays as the automatic fallback on calculators
-  that aren't a CX II, and in the speed test's comparison.
+  were removed. On a CX II or HW-W CX (portrait LCD) frames are turned into
+  portrait buffers; an older CX (320x240 landscape LCD) shows the game
+  buffers themselves, no copy (e31da90). `lcd_blit` is the fallback on any
+  other screen, and in the speed test's comparison.
 * **The FPS counter shows just "drawn/expected"** (e.g. 49/60).
 * **The ARM CPU core is the default** (about 28% faster CPU emulation on
   the calculator); SA-1 games always use the C core.
@@ -264,7 +266,9 @@ Files and launching:
   PocketSNES. (First the saves moved from the hidden `.pocketsnes` to a
   visible `PocketSNES_saves` in the ROM folder; that put a folder above the
   program, so it moved to My Documents.)
-* **The saves folder is `zPocketSNES_saves`** so it's the last folder in
+* **The saves folder is `zPocketSNES_files`** (`zPocketSNES_saves` until
+  2026-11-02, the same name as gpSP's `zgpSP_files`; the old folder moves
+  in whole at start and goes) so it's the last folder in
   My Documents, below the game folders. As `PocketSNES_saves` the owner
   saw it above `snes`: the browser lists folders A to Z ignoring case
   (gbc, ndless, PocketSNES_saves, snes on the calculator), folders above
@@ -479,6 +483,14 @@ Gotchas
   crashes in Chrono Trigger's intro: a 64-bit-only `DepthDelta` bug.
 * Writing 0x90140030 alone never changes the clock on OS 6.4; the switch
   has to follow the OS's own sequence from SRAM (FINDINGS.md).
+* **The timer may not count 32768 a second on an older CX.** Issue #13
+  (a CX with Nover 3): games at a quarter of their speed, FPS counter at
+  60/60, which a timer at about 8192 a second does. `tickrate.cpp` times it
+  against the real-time clock (two stretches of 2+ seconds that agree) and
+  scales its count if it is more than 5% off; the CX II measures 32768.
+  The PC build acts out other timers with `--timer-rate N` and
+  `--dead-timer` (tests: "Game speed when the timer runs at another
+  speed").
 
 
 Status on hardware
@@ -593,6 +605,13 @@ History
 | 2026-10-21 | 18c1bde | The menu's Save state picks its own slot (any slot, auto-increment on too) |
 | 2026-10-21 | 1996c06 | Save state's card says "Empty slot" for an empty or new slot |
 | 2026-10-21 | | Save state steps from the new slot's number; game list's Play from a state |
+| 2026-10-22 | | PR #12 merged upstream |
+| 2026-10-24 | | Issue #13: the timer checked against the real-time clock and corrected; FPS counter in real time (branch fix-cx-timer) |
+| 2026-10-30 | e31da90 | Older CXs: the LCD reads the game buffers, no copy; portrait flip on HW-W CX too; LCD given physical addresses |
+| 2026-10-30 | e487fb2 | CPU speed on the older CX: 180-264 MHz through 0x900B0000 (bus kept at 66 MHz); menu speeds, overclock test and "highest tested" per model; PC `--cx` |
+| 2026-10-30 | | `tools/perf`: bench, profile and test scripts (bench.sh, profile.sh, ptest.sh) |
+| 2026-11-02 | | Brightness on the older CX: its LCD contrast at 0x900F0020 (0x11A-0x1CE, higher brighter), converted to and from the CX II's units (brightness.h); not yet run on a CX |
+| 2026-11-02 | | Saves folder `zPocketSNES_files` (zPocketSNES_saves moves in); the OS's file list read again at exit only when a saves-folder name is gone or something else moved (a new state no longer makes quitting slow) |
 
 `git log` has the details; every commit message says what changed and why.
 
@@ -601,6 +620,11 @@ Open items and ideas
 --------------------
 
 Waiting on the owner:
+
+* Issue #13 (older CX, quarter speed): the fix-cx-timer build is untested
+  on a CX. The reporter's speed test results say what the timer did (the
+  "timer:" line). On the owner's CX II it should say "timer: 32768 ticks/s
+  (32768 by the real-time clock)" and play as before.
 
 * A speed test of Yoshi's Island on the calculator with 4031b0b (uploaded
   2026-10-20), from the owner's busiest save (state 14, in
@@ -706,3 +730,31 @@ CPU that libretro never turns on; it lacks OBC1 and DSP-4. Porting its
 DrawTile16 into `tile.cpp` (same signature, same GFX fields) is the
 suggested next speed step; the gain is a guess (20-40% of drawing time).
 The CPU side was done instead with psnes's core (2026-10-08).
+
+## Cancel loading, turbo (2026-11-02)
+
+- **Q cancels loading.** The ROM is read 128 KB at a time
+  (`rom_read_pieces`, romzip.cpp; memmap.cpp's FileLoader uses it for plain
+  files, romzip_read for stored zips and every 8 inflate chunks), calling
+  `rom_read_poll` between pieces; emu.cpp's `poll_cancel` reads the keys
+  and stops at a new Q press (the poll before the read is the baseline, so
+  a Q held from before doesn't count). Cancelled: `emu_load_game` returns 0
+  with `emu_load_cancelled()` set and main goes back to the list (on that
+  game) without a message; nothing is opened or written. `emu_run` checks
+  again before and after the state a game starts from: `EMU_CANCELLED` ->
+  `emu_drop_game` (back to the settings for all games, no in-game save, no
+  settings written). "[Q] Cancel" is drawn under the Loading panel.
+  On the PC host every poll takes a script line, so loading now uses a few
+  (one per 128 KB + 2): sdd1_wait.txt waits 60, timer_speed.txt 604.
+- **Turbo.** SNES buttons menu: Turbo (on: held A B X Y L R repeat), Turbo
+  speed 1-30 a second (`turbo_speed` = speed - 1), Turbo key (action
+  ACTION_TURBO, "key_turbo", default = like gpSP): held with a button, that
+  button repeats with Turbo off. `turbo_buttons` (keys.cpp) counts the
+  game's frames since each button went down: down while n * speed / 30 is
+  even (first frame down, so a tap is a press; 30 a second = a frame down, a
+  frame up). Applied in read_joypad (once per emulated frame). Older
+  settings files: off, 15, the Turbo key on = where the file leaves = free
+  (drop_clashing_defaults). The bench is unchanged (same instructions per
+  frame in every scene).
+- Tests: unit_tests `test_turbo`; run.sh "Q cancels loading a game; turbo"
+  (plain, deflate and stored zip cancel, Q held, the menu).

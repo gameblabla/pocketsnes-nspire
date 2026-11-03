@@ -41,7 +41,7 @@ CORE_FLAGS     = $(OPT) $(DEFINES) $(INCLUDE) -w
 FRONTEND_FLAGS = $(OPT) $(DEFINES) $(FRONTEND_INCLUDE) $(SDL_FLAGS) -Wall -Wextra -Wno-unused-parameter
 
 CORE_SRC     = $(wildcard pocketsnes/snes9x/*.cpp)
-FRONTEND_SRC = frontend/savemanager.cpp frontend/romzip.cpp frontend/romtypes.cpp frontend/paths.cpp frontend/selfstore.cpp frontend/brightness.cpp frontend/keys.cpp frontend/draw.cpp frontend/ui.cpp frontend/config.cpp frontend/states.cpp \
+FRONTEND_SRC = frontend/savemanager.cpp frontend/romzip.cpp frontend/romtypes.cpp frontend/paths.cpp frontend/selfstore.cpp frontend/tickrate.cpp frontend/brightness.cpp frontend/keys.cpp frontend/draw.cpp frontend/ui.cpp frontend/config.cpp frontend/states.cpp \
                frontend/gui.cpp frontend/browser.cpp frontend/menu.cpp frontend/overclock.cpp frontend/emu.cpp \
                frontend/main.cpp frontend/rotate.cpp frontend/scale.cpp frontend/platform_host.cpp
 
@@ -66,7 +66,7 @@ $(TARGET): $(CORE_OBJ) $(FRONTEND_OBJ)
 UNIT_TESTS = tests/unit_tests
 UNIT_OBJ   = $(BUILD)/tests/unit_tests.o $(BUILD)/frontend/config.o $(BUILD)/frontend/keys.o \
              $(BUILD)/frontend/rotate.o $(BUILD)/frontend/scale.o $(BUILD)/frontend/brightness.o $(BUILD)/frontend/paths.o $(BUILD)/frontend/selfstore.o $(BUILD)/frontend/romzip.o \
-             $(BUILD)/frontend/romtypes.o
+             $(BUILD)/frontend/romtypes.o $(BUILD)/frontend/tickrate.o
 
 $(BUILD)/libcore.a: $(CORE_OBJ)
 	rm -f $@

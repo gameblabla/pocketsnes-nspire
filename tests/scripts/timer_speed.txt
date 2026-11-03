@@ -1,0 +1,8 @@
+# Game speed by the pretend calculator's real time (tests/run.sh: the timer checks).
+# The first wait is 4 polls longer: loading the 512 KB ROM reads the keys 4
+# times (Q cancels), which take those polls.
+wait 604
+time
+wait 600
+time
+quit

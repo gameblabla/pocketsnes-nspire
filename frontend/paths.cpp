@@ -24,11 +24,15 @@ void paths_save_file(char *path, size_t size, const char *name)
              name[0] ? "/" : "", name);
 }
 
+static int file_list_touched;
+
 void paths_save_dir_make(void)
 {
     char path[600];
+    struct stat st;
     paths_save_file(path, sizeof(path), "");
-    mkdir(path, 0755);
+    if (stat(path, &st) != 0 && mkdir(path, 0755) == 0)
+        file_list_touched = 1;   /* a new folder in My Documents */
 }
 
 void paths_data_file(char *path, size_t size, const char *name)
@@ -72,8 +76,6 @@ static int file_exists(const char *path)
     struct stat st;
     return stat(path, &st) == 0;
 }
-
-static int file_list_touched;
 
 /* Moves from to to unless to is there already. */
 static void move_file(const char *from, const char *to)
@@ -142,9 +144,12 @@ void paths_move_old_files(const char *dir, int with_program_files)
 
     if (with_program_files)
     {
-        /* The saves folder before it had the z (its game orders are already
-         * named after their folders). */
+        /* The saves folder's names before (its game orders are already
+         * named after their folders): zPocketSNES_saves, and before it had
+         * the z, PocketSNES_saves. */
         const char *documents = platform_documents_dir();
+        snprintf(old_dir, sizeof(old_dir), "%s/%s", folder_prefix(documents), OLD_Z_SAVE_FOLDER);
+        move_folder(old_dir, documents);
         snprintf(old_dir, sizeof(old_dir), "%s/%s", folder_prefix(documents), OLD_SAVE_FOLDER);
         move_folder(old_dir, documents);
 
@@ -167,38 +172,64 @@ void paths_move_old_files(const char *dir, int with_program_files)
 
 int paths_is_pocketsnes_name(const char *name)
 {
-    return strcasecmp(name, SAVE_FOLDER) == 0 || strncasecmp(name, "pocketsnes", 10) == 0 ||
+    return strcasecmp(name, SAVE_FOLDER) == 0 || strcasecmp(name, OLD_Z_SAVE_FOLDER) == 0 ||
+           strncasecmp(name, "pocketsnes", 10) == 0 ||
            strncasecmp(name, "_pocketsnes", 11) == 0;
 }
 
-/* The names in the saves folder, in any order, as one number; 0 if the
- * folder isn't there. */
-static uint32_t save_folder_names(void)
+/* The names in the saves folder as sorted hashes (FNV-1a, ignoring case
+ * like the OS), malloc'd; NULL with count 0 if there are none. */
+static int compare_u32(const void *a, const void *b)
+{
+    uint32_t x = *(const uint32_t *) a, y = *(const uint32_t *) b;
+    return x < y ? -1 : x > y;
+}
+
+static uint32_t *save_folder_hashes(size_t *count)
 {
     char path[600];
     paths_save_file(path, sizeof(path), "");
+    *count = 0;
     DIR *dir = opendir(path);
     if (!dir)
-        return 0;
-    uint32_t sum = 0, count = 0;
+        return NULL;
+    uint32_t *hashes = NULL;
+    size_t capacity = 0;
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL)
     {
-        uint32_t hash = 2166136261u;   /* FNV-1a */
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+        if (*count == capacity)
+        {
+            size_t grown_capacity = capacity ? capacity * 2 : 256;
+            uint32_t *grown = (uint32_t *) realloc(hashes, grown_capacity * sizeof(*hashes));
+            if (!grown)
+                break;
+            hashes = grown;
+            capacity = grown_capacity;
+        }
+        uint32_t hash = 2166136261u;
         for (const unsigned char *c = (const unsigned char *) entry->d_name; *c; c++)
-            hash = (hash ^ *c) * 16777619u;
-        sum += hash;
-        count++;
+        {
+            unsigned char lower = *c >= 'A' && *c <= 'Z' ? *c + 32 : *c;
+            hash = (hash ^ lower) * 16777619u;
+        }
+        hashes[(*count)++] = hash;
     }
     closedir(dir);
-    return (sum * 31 + count) | 1;
+    if (*count)
+        qsort(hashes, *count, sizeof(*hashes), compare_u32);
+    return hashes;
 }
 
-static uint32_t start_names;
+static uint32_t *start_names;
+static size_t start_count;
 
 void paths_file_list_start(void)
 {
-    start_names = save_folder_names();
+    free(start_names);
+    start_names = save_folder_hashes(&start_count);
     file_list_touched = 0;
 }
 
@@ -209,5 +240,13 @@ void paths_file_list_touched(void)
 
 int paths_file_list_changed(void)
 {
-    return file_list_touched || save_folder_names() != start_names;
+    if (file_list_touched)
+        return 1;
+    size_t now_count;
+    uint32_t *now = save_folder_hashes(&now_count);
+    int gone = 0;
+    for (size_t i = 0; i < start_count && !gone; i++)
+        gone = !now || !bsearch(&start_names[i], now, now_count, sizeof(*now), compare_u32);
+    free(now);
+    return gone;
 }

@@ -96,6 +96,15 @@ START_EXTERN_C
 
 void SDD1_decompress(uint8 *out, uint8 *in, int output_length);
 
+/* SDD1_decompress through a cache keyed on the source address: games
+ * decompress the same few ROM blocks over and over, and the output for a
+ * source is the same every time (a longer request only adds bytes at the
+ * end). Sources outside rom..rom+rom_size are never cached. Returns where
+ * the output_length bytes are: in the cache, or in out. */
+uint8 *SDD1_decompress_cached(uint8 *out, uint8 *in, int output_length,
+                              const uint8 *rom, uint32 rom_size);
+void SDD1_cache_reset(void);
+
 END_EXTERN_C
 
 #endif
